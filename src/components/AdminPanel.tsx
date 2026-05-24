@@ -545,7 +545,10 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
         descripcion: `Ticket físico ${quiniela.nombre_jornada}` 
       }])
       
-      if (actualizarSaldoGlobal) actualizarSaldoGlobal(uid, nuevoSaldo)
+      if (actualizarSaldoGlobal && uid) {
+      // Convertimos todo a string para asegurar que TypeScript no se queje
+      actualizarSaldoGlobal(String(uid), String(nuevoSaldo));
+      }
 
       const msg = `🎫 *QUINIELA CIBERTEQUE*\nHola ${capNombre}, tu jugada para *${quiniela.nombre_jornada}* se guardó correctamente. ¡Mucha suerte!`
       setLinkWaReciente(`https://wa.me/52${capTelefono}?text=${encodeURIComponent(msg)}`)
