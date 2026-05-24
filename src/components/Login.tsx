@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 
 export default function Login({ onLogin }: { onLogin: (usuario: any) => void }) {
   const [telefono, setTelefono] = useState('')
+  const [nip, setNip] = useState('') // Nuevo estado para el NIP
   const [cargando, setCargando] = useState(false)
   const [error, setError] = useState('')
 
@@ -17,15 +18,17 @@ export default function Login({ onLogin }: { onLogin: (usuario: any) => void }) 
         .from('usuarios')
         .select('*')
         .eq('telefono', telefono)
+        .eq('nip', nip) // Ahora exigimos que el NIP también coincida
         .single()
 
       if (supaError || !data) {
-        setError('No encontramos este número. Verifica tu WhatsApp o regístrate.')
+        // Por seguridad, damos un error genérico (no decimos si falló el número o el NIP)
+        setError('Teléfono o NIP incorrectos. Verifica tus datos.')
         setCargando(false)
         return
       }
 
-      // Si el usuario existe, lo mandamos al componente principal para que le abra la cartelera
+      // Si el usuario existe y el NIP es correcto, lo dejamos pasar
       onLogin(data)
 
     } catch (err) {
@@ -54,6 +57,23 @@ export default function Login({ onLogin }: { onLogin: (usuario: any) => void }) 
           />
         </div>
 
+        {/* Nueva cajita para pedir el NIP */}
+        <div>
+          <label className="block text-sm font-medium text-slate-400 mb-1">
+            NIP (4 dígitos)
+          </label>
+          <input
+            type="password"
+            inputMode="numeric"
+            maxLength={4}
+            required
+            value={nip}
+            onChange={(e) => setNip(e.target.value)}
+            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 tracking-widest text-center text-lg font-bold"
+            placeholder="****"
+          />
+        </div>
+
         {error && <p className="text-red-400 text-sm text-center">{error}</p>}
 
         <button
@@ -65,7 +85,7 @@ export default function Login({ onLogin }: { onLogin: (usuario: any) => void }) 
               : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/50'
           }`}
         >
-          {cargando ? 'Buscando...' : 'Entrar a jugar'}
+          {cargando ? 'Verificando...' : 'Entrar a jugar'}
         </button>
       </form>
     </div>

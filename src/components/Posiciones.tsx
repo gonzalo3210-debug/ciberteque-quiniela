@@ -3,23 +3,23 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export default function Posiciones() {
-  const [quinielasAbiertas, setQuinielasAbiertas] = useState<any[]>([]) // NUEVO: Para guardar todas las activas
+  const [quinielasAbiertas, setQuinielasAbiertas] = useState<any[]>([]) 
   const [quinielaActiva, setQuinielaActiva] = useState<any>(null)
   const [historial, setHistorial] = useState<any[]>([])
   const [cargando, setCargando] = useState(true)
 
   // ⚙️ CONFIGURACIÓN MONETARIA DE LA BOLSA
-  const VALOR_CREDITO = 30 // Cada crédito vale $30 MXN
-  const PORCENTAJE_PREMIO = 0.80 // 80% a repartir entre los ganadores
+  const VALOR_CREDITO = 30 
+  const PORCENTAJE_PREMIO = 0.80 
 
   useEffect(() => {
     async function cargarDatos() {
-      // 1. Traemos las últimas 5 quinielas
+      // 1. CORRECCIÓN: Ordenar por fecha_cierre y aumentar límite a 10
       const { data: qData } = await supabase
         .from('quinielas')
         .select('*')
-        .order('id', { ascending: false })
-        .limit(5)
+        .order('fecha_cierre', { ascending: false }) 
+        .limit(10)
 
       if (!qData || qData.length === 0) {
         setCargando(false)
@@ -28,7 +28,6 @@ export default function Posiciones() {
 
       const quinielaIds = qData.map(q => q.id)
 
-      // 2. Traemos partidos, tickets y usuarios
       const { data: pData } = await supabase.from('partidos').select('*').in('quiniela_id', quinielaIds).order('id', { ascending: true })
       const { data: tData } = await supabase.from('tickets').select('id, usuario_id, quiniela_id, prediccion_goles_total, pronosticos(partido_id, eleccion_usuario)').in('quiniela_id', quinielaIds)
       const { data: uData } = await supabase.from('usuarios').select('id, nombre')
@@ -36,7 +35,6 @@ export default function Posiciones() {
       const mapaUsuarios: Record<string, string> = {}
       if (uData) uData.forEach(u => mapaUsuarios[u.id] = u.nombre)
 
-      // 3. Procesamos los rankings separando por jornada (Blindado contra errores)
       const quinielasProcesadas = qData.map(q => {
         const partidosQ = pData?.filter(p => p.quiniela_id === q.id) || []
         const ticketsQ = tData?.filter(t => t.quiniela_id === q.id) || []
@@ -44,7 +42,7 @@ export default function Posiciones() {
         const ranking = ticketsQ.map(ticket => {
           let puntos = 0
           const aciertos: Record<string, string> = {}
-          const pronosticosTicket = ticket.pronosticos || [] // <-- SEGURO ANTI-ERRORES
+          const pronosticosTicket = ticket.pronosticos || [] 
 
           pronosticosTicket.forEach((pron: any) => {
             const partido = partidosQ.find(p => p.id === pron.partido_id)
@@ -76,13 +74,11 @@ export default function Posiciones() {
           }
         })
 
-        // Ordenamos el ranking
         ranking.sort((a, b) => {
           if (b.puntos !== a.puntos) return b.puntos - a.puntos
           return a.golesDiff - b.golesDiff
         })
 
-        // CALCULADORA FINANCIERA EN PESOS MXN
         const precioTicketCrds = q.precio_ticket || 1
         const totalBoletos = ranking.length
         const recaudadoPesos = totalBoletos * precioTicketCrds * VALOR_CREDITO
@@ -91,15 +87,19 @@ export default function Posiciones() {
         return { ...q, ranking, partidos: partidosQ, recaudadoPesos, premioPesos }
       })
 
-      // 4. Separamos la Activa y el Historial
-      const abiertas = quinielasProcesadas.filter(q => q.estado === 'abierta')
-      const pasadas = quinielasProcesadas.filter(q => q.estado === 'cerrada')
-
-      // Guardamos la lista de todas las abiertas para el menú de botones
-      setQuinielasAbiertas(abiertas)
+      // 4. LÓGICA CORREGIDA PARA BOTONES Y SALÓN DE LA FAMA
+      // Se considera "Activa" si está abierta, o si está cerrada pero aún NO tiene goles reales.
+      const activas = quinielasProcesadas.filter(q => 
+        q.estado === 'abierta' || (q.estado === 'cerrada' && q.goles_totales_real === null)
+      )
       
-      // Por defecto mostramos la primera abierta (o la última procesada si no hay abiertas)
-      setQuinielaActiva(abiertas.length > 0 ? abiertas[0] : quinielasProcesadas[0])
+      // Se va al historial SOLO cuando está cerrada Y ya se registraron los goles totales.
+      const pasadas = quinielasProcesadas.filter(q => 
+        q.estado === 'cerrada' && q.goles_totales_real !== null
+      )
+
+      setQuinielasAbiertas(activas)
+      setQuinielaActiva(activas.length > 0 ? activas[0] : quinielasProcesadas[0])
       setHistorial(pasadas)
       setCargando(false)
     }
@@ -110,19 +110,14 @@ export default function Posiciones() {
   if (cargando) return <div className="text-amber-500 animate-pulse text-center mt-10 font-bold uppercase tracking-widest">Calculando Bolsa y Posiciones...</div>
   if (!quinielaActiva) return <div className="text-slate-500 italic text-center mt-10">No hay datos de quinielas disponibles.</div>
 
-  // Matemáticas de la Quiniela Activa
   const totalJugadores = quinielaActiva.ranking.length
   const partidosTerminados = quinielaActiva.partidos.filter((p: any) => p.resultado_real).length
 
   return (
     <div className="w-full max-w-4xl mt-6 animate-in fade-in duration-500 mb-20 space-y-12">
       
-      {/* =========================================
-          SECCIÓN 1: JORNADA ACTIVA (EN VIVO)
-          ========================================= */}
       <section>
-
-        {/* NUEVO: SELECTOR DE JORNADAS ACTIVAS PARA EL CLIENTE */}
+        {/* SELECTOR DE JORNADAS */}
         {quinielasAbiertas.length > 1 && (
           <div className="flex flex-wrap gap-2 mb-6 bg-slate-900/50 p-3 rounded-xl border border-slate-800 shadow-inner">
             <span className="text-[10px] text-slate-500 font-bold uppercase w-full mb-1">Elige la jornada en vivo:</span>
@@ -136,18 +131,18 @@ export default function Posiciones() {
                     : 'bg-slate-950 border border-slate-700 text-slate-500 hover:text-slate-300'
                 }`}
               >
-                {qa.nombre_jornada}
+                {qa.nombre_jornada} {qa.estado === 'cerrada' ? '(En Juego)' : ''}
               </button>
             ))}
           </div>
         )}
 
-        {/* TARJETA DE ESTADÍSTICAS Y DINERO PREMIUM */}
+        {/* TARJETA DE ESTADÍSTICAS */}
         <div className="bg-gradient-to-br from-amber-950/40 to-slate-900 border border-amber-500/30 p-6 rounded-3xl shadow-[0_0_30px_rgba(245,158,11,0.1)] relative overflow-hidden mb-6">
           <div className="absolute -right-6 -top-6 p-4 opacity-5 text-9xl select-none">💰</div>
           
           <h2 className="text-center text-2xl md:text-3xl font-black text-white uppercase italic tracking-tight mb-2 relative z-10">
-            {quinielaActiva.estado === 'abierta' ? 'RANKING EN VIVO' : 'RESULTADO FINAL'}
+            {quinielaActiva.estado === 'abierta' ? 'RANKING EN VIVO' : 'RESULTADOS EN JUEGO'}
           </h2>
           <p className="text-center text-amber-500 text-xs font-black uppercase tracking-widest mb-6">{quinielaActiva.nombre_jornada}</p>
           
@@ -168,7 +163,7 @@ export default function Posiciones() {
 
           <div className="mt-5 bg-amber-500/10 p-5 rounded-2xl border border-amber-500/20 text-center shadow-[0_0_20px_rgba(245,158,11,0.15)] relative z-10">
             <span className="block text-[10px] md:text-xs text-amber-500 font-black uppercase tracking-widest mb-1">
-              {quinielaActiva.estado === 'abierta' ? '👑 Bolsa Garantizada Para El Ganador 👑' : '🏆 PREMIO REPARTIDO 🏆'}
+              {quinielaActiva.estado === 'abierta' ? '👑 Bolsa Garantizada Para El Ganador 👑' : '🏆 PREMIO A REPARTIR 🏆'}
             </span>
             <span className="text-4xl md:text-5xl font-black text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.3)] block">
               ${quinielaActiva.premioPesos.toFixed(0)} <span className="text-sm md:text-lg text-amber-600 uppercase font-bold">MXN</span>
@@ -177,7 +172,7 @@ export default function Posiciones() {
           </div>
         </div>
 
-        {/* TABLA DE POSICIONES ACTIVA */}
+        {/* TABLA DE POSICIONES */}
         <div className="bg-slate-900/80 rounded-2xl border border-slate-800 shadow-2xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -227,7 +222,7 @@ export default function Posiciones() {
                             let bgClass = "bg-slate-950 border-slate-800 text-slate-600"
                             if (estado === 'acierto') bgClass = "bg-green-600 border-green-500 text-white"
                             if (estado === 'fallo') bgClass = "bg-red-950/40 border-red-900 text-red-500"
-                            if (estado === 'pendiente' && pronostico) bgClass = "bg-slate-800 border-slate-600 text-slate-300" // Se ve en gris claro si ya pronosticó pero no hay resultado
+                            if (estado === 'pendiente' && pronostico) bgClass = "bg-slate-800 border-slate-600 text-slate-300"
                             
                             return (
                               <div key={p.id} className={`w-5 h-5 md:w-6 md:h-6 flex items-center justify-center rounded text-[9px] md:text-[10px] font-black border ${bgClass}`} title={`Partido ${i+1}`}>
@@ -249,13 +244,11 @@ export default function Posiciones() {
         </div>
       </section>
 
-      {/* =========================================
-          SECCIÓN 2: SALÓN DE LA FAMA (HISTORIAL)
-          ========================================= */}
+      {/* SALÓN DE LA FAMA */}
       {historial.length > 0 && (
         <section className="pt-8 border-t border-slate-800">
           <h3 className="text-xl font-black text-slate-400 mb-6 uppercase tracking-widest flex items-center gap-2">
-            <span>📜</span> Salón de la Fama <span className="text-[10px] font-normal tracking-normal ml-2 opacity-60">(Jornadas Anteriores)</span>
+            <span>📜</span> Salón de la Fama <span className="text-[10px] font-normal tracking-normal ml-2 opacity-60">(Jornadas Terminadas)</span>
           </h3>
           
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
