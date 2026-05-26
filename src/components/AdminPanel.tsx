@@ -22,7 +22,7 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
   const [quiniela, setQuiniela] = useState<any>(null)
   const [partidos, setPartidos] = useState<any[]>([])
   const [resultadosReales, setResultadosReales] = useState<Record<string, string>>({})
-  const [marcadoresReales, setMarcadoresReales] = useState<Record<string, { l: string, v: string }>>({}) // NUEVO: Para guardar el # de goles exacto
+  const [marcadoresReales, setMarcadoresReales] = useState<Record<string, { l: string, v: string }>>({}) 
   const [golesReales, setGolesReales] = useState<string>('')
   const [calificando, setCalificando] = useState(false)
   const [rankingAdmin, setRankingAdmin] = useState<any[]>([]) 
@@ -40,13 +40,20 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
   const [ligaFiltroJornada, setLigaFiltroJornada] = useState('Todas')
   const [cargadoBorrador, setCargadoBorrador] = useState(false) 
 
-  // Estados para Edición
+  // Estados para Edición de Jornada
   const [editandoQuinielaId, setEditandoQuinielaId] = useState<string | null>(null)
   const [editNombreJornada, setEditNombreJornada] = useState('')
   const [editFechaCierre, setEditFechaCierre] = useState('')
   const [editTipoPremiacion, setEditTipoPremiacion] = useState<'unico' | 'top2' | 'top3'>('unico')
   const [editPartidos, setEditPartidos] = useState<any[]>([])
   const [guardandoEdicion, setGuardandoEdicion] = useState(false)
+
+  // Estados: Para Edición de Ticket (Jugada)
+  const [editandoTicketId, setEditandoTicketId] = useState<string | null>(null)
+  const [editTicketNombre, setEditTicketNombre] = useState('')
+  const [editTicketGoles, setEditTicketGoles] = useState('')
+  const [editTicketSelecciones, setEditTicketSelecciones] = useState<Record<string, string>>({})
+  const [guardandoEdicionTicket, setGuardandoEdicionTicket] = useState(false)
 
   // Estados para Equipos
   const [formEquipoNombre, setFormEquipoNombre] = useState('')
@@ -144,9 +151,10 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
   const cargarPartidosJornada = async () => {
     const { data: abiertas } = await supabase
       .from('quinielas')
-      .select('id, nombre_jornada, precio_ticket, goles_totales_real, fecha_cierre, estado, tipo_premiacion, partidos (id, equipo_local, equipo_visitante, resultado_real, fecha_hora)')
+      .select('id, nombre_jornada, precio_ticket, goles_totales_real, fecha_cierre, estado, tipo_premiacion, partidos (id, equipo_local, equipo_visitante, resultado_real, fecha_hora, goles_local, goles_visitante)')
       .eq('estado', 'abierta')
       .order('fecha_cierre', { ascending: true })
+      
     if (abiertas && abiertas.length > 0) {
       setQuinielasAbiertas(abiertas)
       if (!quiniela || !abiertas.find(q => q.id === quiniela.id)) cargarDetallesQuiniela(abiertas[0])
@@ -157,17 +165,41 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
   const cargarDetallesQuiniela = async (qData: any) => {
     setQuiniela(qData)
     setPartidos(qData.partidos || [])
-    setGolesReales(qData.goles_totales_real !== null ? qData.goles_totales_real.toString() : '')
     
     const res: Record<string, string> = {}
-    qData.partidos.forEach((p: any) => { if (p.resultado_real) res[p.id] = p.resultado_real })
+    const marcs: Record<string, { l: string, v: string }> = {}
+    
+    let sumaGolesCalculada = 0;
+    let hayGoles = false;
+    
+    qData.partidos.forEach((p: any) => { 
+      if (p.resultado_real) res[p.id] = p.resultado_real;
+      
+      if (p.goles_local !== null && p.goles_local !== undefined && p.goles_visitante !== null && p.goles_visitante !== undefined) {
+        marcs[p.id] = { l: p.goles_local.toString(), v: p.goles_visitante.toString() };
+        
+        // Sumamos al vuelo para corregir errores viejos de base de datos
+        sumaGolesCalculada += p.goles_local + p.goles_visitante;
+        hayGoles = true;
+      }
+    })
+    
     setResultadosReales(res)
-    setMarcadoresReales({}) // Limpiamos marcadores exactos visuales al cambiar jornada
+    setMarcadoresReales(marcs) 
+    
+    // Si hay goles reales ya anotados, obligamos a que el recuadro muestre la suma real
+    // Si no hay nada, respeta lo que diga la base de datos
+    if (hayGoles) {
+      setGolesReales(sumaGolesCalculada.toString());
+    } else {
+      setGolesReales(qData.goles_totales_real !== null ? qData.goles_totales_real.toString() : '');
+    }
 
     const { data: tData } = await supabase.from('tickets').select('id, usuario_id, prediccion_goles_total, pronosticos(partido_id, eleccion_usuario)').eq('quiniela_id', qData.id)
-    const { data: uData } = await supabase.from('usuarios').select('id, nombre')
-    const mapaU: Record<string, string> = {}
-    if (uData) uData.forEach(u => mapaU[u.id] = u.nombre)
+    const { data: uData } = await supabase.from('usuarios').select('id, nombre, telefono')
+    const mapaU: Record<string, any> = {}
+    if (uData) uData.forEach(u => mapaU[u.id] = { nombre: u.nombre, telefono: u.telefono })
+    
     if (tData) {
       const rCalc = tData.map(ticket => {
         let pts = 0
@@ -177,54 +209,88 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
           const p = qData.partidos.find((par: any) => par.id === pr.partido_id)
           if (p && p.resultado_real === pr.eleccion_usuario) pts++
         })
-        return { nombre: mapaU[ticket.usuario_id] || 'Mostrador', puntos: pts, prediccionGoles: ticket.prediccion_goles_total, pronosticosDiccionario: prons }
-      }).sort((a, b) => b.puntos - a.puntos)
+        
+        // Compara contra la suma real calculada, no contra el error de la DB
+        const golesRealesAct = hayGoles ? sumaGolesCalculada : (qData.goles_totales_real !== null ? qData.goles_totales_real : -1);
+        const golesDiff = golesRealesAct !== -1 ? Math.abs((ticket.prediccion_goles_total || 0) - golesRealesAct) : 999;
+
+        return { 
+          id: ticket.id, 
+          nombre: mapaU[ticket.usuario_id]?.nombre || 'Mostrador', 
+          telefono: mapaU[ticket.usuario_id]?.telefono || '', 
+          puntos: pts, 
+          prediccionGoles: ticket.prediccion_goles_total, 
+          golesDiff: golesDiff, 
+          pronosticosDiccionario: prons 
+        }
+      }).sort((a, b) => {
+        if (b.puntos !== a.puntos) return b.puntos - a.puntos;
+        return a.golesDiff - b.golesDiff;
+      })
       setRankingAdmin(rCalc)
     }
   }
 
-  // 🔥 NUEVA LÓGICA: Calcula L,E,V y Total Goles automáticamente
+  // 🔥 NUEVA LÓGICA DE SUMA AUTOMÁTICA INFALIBLE
   const handleMarcadorExacto = (partidoId: string, tipo: 'l' | 'v', valor: string) => {
-    const numValor = valor.replace(/[^0-9]/g, ''); // Solo permitir números
+    const numValor = valor.replace(/[^0-9]/g, ''); 
     
-    setMarcadoresReales(prev => {
-      const nuevo = { ...prev, [partidoId]: { ...prev[partidoId], [tipo]: numValor } };
-      
-      let totalGolesSuma = 0;
-      const nuevosResultados = { ...resultadosReales };
-      
-      Object.keys(nuevo).forEach(pId => {
-        const ml = parseInt(nuevo[pId].l);
-        const mv = parseInt(nuevo[pId].v);
-        
-        // Sumamos para el total general
-        if (!isNaN(ml)) totalGolesSuma += ml;
-        if (!isNaN(mv)) totalGolesSuma += mv;
+    // Primero, preparamos cómo van a quedar los marcadores
+    const nuevosMarcadores = {
+      ...marcadoresReales,
+      [partidoId]: {
+        ...(marcadoresReales[partidoId] || { l: '', v: '' }),
+        [tipo]: numValor
+      }
+    };
 
-        // Determinamos el L, E, V
-        if (!isNaN(ml) && !isNaN(mv)) {
-          if (ml > mv) nuevosResultados[pId] = 'L';
-          else if (ml === mv) nuevosResultados[pId] = 'E';
-          else nuevosResultados[pId] = 'V';
-        }
-      });
+    const nuevosResultados = { ...resultadosReales };
+    let sumaTotal = 0;
+    let hayGoles = false;
+
+    // Repasamos todos los partidos para sumar TODO lo que haya
+    partidos.forEach(p => {
+      const marcadorP = nuevosMarcadores[p.id] || { l: '', v: '' };
+      const ml = parseInt(marcadorP.l);
+      const mv = parseInt(marcadorP.v);
       
-      setGolesReales(totalGolesSuma > 0 ? totalGolesSuma.toString() : '');
-      setResultadosReales(nuevosResultados);
-      
-      return nuevo;
+      // Checar si hay que pintar la L, E o V
+      if (marcadorP.l !== '' && marcadorP.v !== '' && !isNaN(ml) && !isNaN(mv)) {
+        if (ml > mv) nuevosResultados[p.id] = 'L';
+        else if (ml === mv) nuevosResultados[p.id] = 'E';
+        else nuevosResultados[p.id] = 'V';
+      }
+
+      // Sumar los goles
+      if (!isNaN(ml)) { sumaTotal += ml; hayGoles = true; }
+      if (!isNaN(mv)) { sumaTotal += mv; hayGoles = true; }
     });
+    
+    // Actualizamos toda la pantalla de un solo golpe
+    setMarcadoresReales(nuevosMarcadores);
+    setResultadosReales(nuevosResultados);
+    setGolesReales(hayGoles ? sumaTotal.toString() : '');
   }
 
   const guardarYCalificar = async () => {
     setCalificando(true)
     try {
       for (const pId of Object.keys(resultadosReales || {})) {
-        await supabase.from('partidos').update({ resultado_real: resultadosReales[pId] }).eq('id', pId)
+        const l_val = marcadoresReales[pId]?.l;
+        const v_val = marcadoresReales[pId]?.v;
+        
+        await supabase.from('partidos').update({ 
+          resultado_real: resultadosReales[pId],
+          goles_local: (l_val !== undefined && l_val !== '') ? parseInt(l_val) : null,
+          goles_visitante: (v_val !== undefined && v_val !== '') ? parseInt(v_val) : null
+        }).eq('id', pId)
       }
+      
       if (golesReales !== '') {
+        // Al guardar, reescribimos goles_totales_real con la suma correcta
         await supabase.from('quinielas').update({ goles_totales_real: parseInt(golesReales) }).eq('id', quiniela.id)
       }
+
       const { data: tickets } = await supabase.from('tickets').select('id, pronosticos (partido_id, eleccion_usuario)').eq('quiniela_id', quiniela.id)
       if (tickets) {
         for (const ticket of tickets) {
@@ -270,7 +336,6 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
       });
     }
 
-    // 🔥 ENLACE DIRECTO INCLUIDO EN EL MENSAJE
     texto += `\n💻 *Revisa la tabla COMPLETA en vivo aquí:*\n`;
     texto += `👉 ${ENLACE_PUBLICO_RANKING}\n\n`;
     texto += `_¡Suerte a todos!_`;
@@ -280,6 +345,16 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
     }).catch(() => {
       window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
     });
+  }
+
+  const enviarWhatsAppBoleto = (jugador: any) => {
+    const tel = jugador.telefono;
+    if (!tel || tel.trim() === '') {
+      alert(`No hay un número de WhatsApp registrado válido para ${jugador.nombre}.`);
+      return;
+    }
+    const msg = `🎫 *QUINIELA CIBERTEQUE*\nHola ${jugador.nombre}, tu jugada para *${quiniela.nombre_jornada}* está registrada correctamente. ¡Mucha suerte!\n\nPuedes seguir los resultados en vivo aquí:\n${ENLACE_PUBLICO_RANKING}`;
+    window.open(`https://wa.me/52${tel}?text=${encodeURIComponent(msg)}`, '_blank');
   }
 
   const cerrarJornadaDefinitivo = async () => {
@@ -312,7 +387,14 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
     setCalificando(true)
     try {
       for (const pId of Object.keys(resultadosReales || {})) {
-        await supabase.from('partidos').update({ resultado_real: resultadosReales[pId] }).eq('id', pId)
+        const l_val = marcadoresReales[pId]?.l;
+        const v_val = marcadoresReales[pId]?.v;
+        
+        await supabase.from('partidos').update({ 
+          resultado_real: resultadosReales[pId],
+          goles_local: (l_val !== undefined && l_val !== '') ? parseInt(l_val) : null,
+          goles_visitante: (v_val !== undefined && v_val !== '') ? parseInt(v_val) : null
+        }).eq('id', pId)
       }
       await supabase.from('quinielas').update({ goles_totales_real: parseInt(golesReales), estado: 'cerrada' }).eq('id', quiniela.id)
       alert(`🎉 ¡Jornada Cerrada Exitosamente!\n\nRealiza los pagos correspondientes en mostrador.`)
@@ -427,6 +509,42 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
       alert("Error: " + error.message)
     } finally {
       setGuardandoEdicion(false)
+    }
+  }
+
+  const abrirEdicionTicket = (jugador: any) => {
+    setEditandoTicketId(jugador.id)
+    setEditTicketNombre(jugador.nombre)
+    setEditTicketGoles(jugador.prediccionGoles.toString())
+    setEditTicketSelecciones({ ...jugador.pronosticosDiccionario })
+  }
+
+  const seleccionarOpcionEditTicket = (partidoId: string, opcion: string) => {
+    setEditTicketSelecciones({ ...editTicketSelecciones, [partidoId]: opcion })
+  }
+
+  const guardarEdicionTicket = async () => {
+    if(!editandoTicketId || !editTicketGoles) return alert('El desempate de goles es obligatorio.')
+    setGuardandoEdicionTicket(true)
+    try {
+      await supabase.from('tickets').update({ prediccion_goles_total: parseInt(editTicketGoles) }).eq('id', editandoTicketId)
+      await supabase.from('pronosticos').delete().eq('ticket_id', editandoTicketId)
+      
+      const pronsData = Object.keys(editTicketSelecciones).map(pId => ({
+        ticket_id: editandoTicketId,
+        partido_id: pId,
+        eleccion_usuario: editTicketSelecciones[pId]
+      }))
+      
+      await supabase.from('pronosticos').insert(pronsData)
+
+      alert('✅ ¡Jugada actualizada correctamente!')
+      setEditandoTicketId(null)
+      await cargarPartidosJornada() 
+    } catch(e:any) {
+      alert('Error al actualizar jugada: ' + e.message)
+    } finally {
+      setGuardandoEdicionTicket(false)
     }
   }
 
@@ -943,7 +1061,21 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
                                   <span className={`inline-block w-5 h-5 text-center leading-5 rounded-full text-[10px] mr-2 font-black ${i===0?'bg-amber-500 text-slate-950':i===1?'bg-slate-400 text-slate-950':i===2?'bg-amber-700 text-white':'bg-slate-800 text-slate-400'}`}>{i+1}</span>
                                   {r.nombre}
                                 </div>
-                                <button onClick={() => { setTicketAImprimir({ nombre: r.nombre, telefono: 'Registrado en sistema', selecciones: r.pronosticosDiccionario, goles: r.prediccionGoles }); activarImpresion('recibo'); }} className="text-[14px] text-slate-500 hover:text-white p-1.5 bg-slate-800 hover:bg-slate-700 rounded transition-all shadow-sm" title="Imprimir Recibo de este jugador">🖨️</button>
+                                <div className="flex">
+                                  {/* 🔥 BOTÓN PARA COMPARTIR POR WHATSAPP */}
+                                  <button onClick={() => enviarWhatsAppBoleto(r)} className="text-[14px] text-green-400 hover:text-green-300 p-1.5 bg-slate-800 hover:bg-slate-700 rounded transition-all shadow-sm mr-1" title="Enviar confirmación por WhatsApp">📲</button>
+                                  {/* 🔥 BOTÓN DE EDITAR JUGADA */}
+                                  <button onClick={() => abrirEdicionTicket(r)} className="text-[14px] text-blue-400 hover:text-blue-300 p-1.5 bg-slate-800 hover:bg-slate-700 rounded transition-all shadow-sm mr-1" title="Editar Pronósticos / Goles de este jugador">✏️</button>
+                                  <button onClick={() => { 
+                                    setTicketAImprimir({ 
+                                      nombre: r.nombre, 
+                                      telefono: r.telefono || 'Registrado en sistema', 
+                                      selecciones: r.pronosticosDiccionario, 
+                                      goles: r.prediccionGoles 
+                                    }); 
+                                    activarImpresion('recibo'); 
+                                  }} className="text-[14px] text-slate-500 hover:text-white p-1.5 bg-slate-800 hover:bg-slate-700 rounded transition-all shadow-sm" title="Imprimir Recibo de este jugador">🖨️</button>
+                                </div>
                               </td>
                               <td className="p-3 text-center text-slate-500 font-mono">{r.prediccionGoles}</td>
                               <td className="p-3 text-center font-black text-green-400">{r.puntos}</td>
@@ -976,7 +1108,7 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
                   </button>
                 </div>
 
-                {/* 🔥 NUEVA SECCIÓN DE CAPTURA DE MARCADORES EXACTOS */}
+                {/* 🔥 SECCIÓN DE CAPTURA DE MARCADORES EXACTOS */}
                 <div className="space-y-3">
                   {(partidos || []).map((partido) => {
                     const seleccionado = resultadosReales[partido.id];
@@ -989,11 +1121,11 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
                         </div>
                         
                         <div className="flex w-full md:w-auto items-center justify-center gap-3">
-                          {/* Inputs de marcador exacto */}
+                          {/* Inputs de marcador exacto (ahora con placeholder vacío para no confundir) */}
                           <div className="flex items-center gap-2 bg-slate-900 p-1.5 rounded-lg border border-slate-700">
                             <input 
                               type="number" 
-                              placeholder="0" 
+                              placeholder="-" 
                               value={marcadoresReales[partido.id]?.l || ''} 
                               onChange={(e) => handleMarcadorExacto(partido.id, 'l', e.target.value)} 
                               className="w-10 h-10 bg-slate-950 rounded text-center font-black text-lg text-white outline-none focus:border-red-500 border border-transparent transition-all"
@@ -1001,7 +1133,7 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
                             <span className="text-slate-500 font-black">-</span>
                             <input 
                               type="number" 
-                              placeholder="0" 
+                              placeholder="-" 
                               value={marcadoresReales[partido.id]?.v || ''} 
                               onChange={(e) => handleMarcadorExacto(partido.id, 'v', e.target.value)} 
                               className="w-10 h-10 bg-slate-950 rounded text-center font-black text-lg text-white outline-none focus:border-red-500 border border-transparent transition-all"
@@ -1022,11 +1154,11 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
                   })}
                 </div>
 
-                {/* CAMPO DE GOLES AUTO-ACTUALIZABLE */}
+                {/* CAMPO DE GOLES ACTUALIZADO: AHORA ES TOTALMENTE MANUAL */}
                 <div className="mt-6 p-5 bg-red-950/10 border border-red-900/40 rounded-xl max-w-xs mx-auto text-center relative overflow-hidden">
                   <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-600 to-amber-500"></div>
                   <label className="block text-red-500 font-black uppercase text-[10px] tracking-wider mb-1">Resultado Oficial (Suma)</label>
-                  <p className="text-slate-500 text-[9px] uppercase mb-3 font-bold">La suma se calcula automáticamente</p>
+                  <p className="text-slate-500 text-[9px] uppercase mb-3 font-bold">Ingresa el total acumulado manualmente</p>
                   <input type="number" placeholder="Ej. 14" value={golesReales} onChange={(e) => setGolesReales(e.target.value)} className="w-full bg-slate-950 border border-red-900/30 rounded-lg px-3 py-2 text-center text-2xl font-black text-white focus:border-red-500 outline-none transition-all" />
                 </div>
 
@@ -1044,7 +1176,7 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
         )}
       </div>
 
-      {/* 📜 VENTANA MODAL FLOTANTE: EDICIÓN EN CALIENTE */}
+      {/* 📜 VENTANA MODAL FLOTANTE: EDICIÓN EN CALIENTE DE JORNADA */}
       {editandoQuinielaId && (
         <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-slate-900 border border-slate-700 max-w-2xl w-full p-6 rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200 my-8">
@@ -1106,7 +1238,62 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
         </div>
       )}
 
+      {/* 🔥 VENTANA MODAL FLOTANTE: EDITAR JUGADA ESPECÍFICA (TICKET) */}
+      {editandoTicketId && (
+        <div className="fixed inset-0 z-[110] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-blue-900/50 max-w-lg w-full p-6 rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
+              <div>
+                <h3 className="text-lg font-black text-white uppercase tracking-tight">✏️ Editar Jugada</h3>
+                <p className="text-xs text-slate-400 font-bold uppercase">{editTicketNombre}</p>
+              </div>
+              <button onClick={() => setEditandoTicketId(null)} className="text-slate-500 hover:text-slate-300 font-mono text-xl">✕</button>
+            </div>
+
+            <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2 mb-4">
+              {partidos.map((p, idx) => (
+                <div key={p.id} className="bg-slate-950/40 border border-slate-800 p-3 rounded-xl flex justify-between items-center">
+                  <div className="flex-1 text-right text-[10px] font-bold text-slate-300 uppercase pr-2 truncate">{p.equipo_local}</div>
+                  <div className="flex gap-1 w-[110px]">
+                    {['L', 'E', 'V'].map(opc => (
+                      <button 
+                        key={opc} 
+                        onClick={() => seleccionarOpcionEditTicket(p.id, opc)} 
+                        className={`flex-1 py-1 rounded text-xs font-black border transition-all ${editTicketSelecciones[p.id] === opc ? 'bg-blue-500 border-blue-400 text-white' : 'bg-slate-900 border-slate-700 text-slate-500 hover:bg-slate-800'}`}
+                      >
+                        {opc}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex-1 text-left text-[10px] font-bold text-slate-300 uppercase pl-2 truncate">{p.equipo_visitante}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 mb-6">
+              <label className="text-[10px] text-slate-400 font-bold uppercase mb-2 block text-center">Goles de Desempate de este jugador</label>
+              <input 
+                type="number" 
+                value={editTicketGoles} 
+                onChange={(e) => setEditTicketGoles(e.target.value)} 
+                className="w-full max-w-[120px] mx-auto block bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-center text-xl font-black text-white focus:border-blue-500 outline-none transition-all" 
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <button onClick={() => setEditandoTicketId(null)} className="w-1/3 bg-slate-800 hover:bg-slate-700 text-white font-black py-3 rounded-xl uppercase text-xs tracking-wider transition-all">
+                Cancelar
+              </button>
+              <button onClick={guardarEdicionTicket} disabled={guardandoEdicionTicket} className="w-2/3 bg-blue-600 hover:bg-blue-500 text-white font-black py-3 rounded-xl uppercase text-xs tracking-wider transition-all shadow-lg shadow-blue-900/40">
+                {guardandoEdicionTicket ? 'Guardando...' : '💾 Guardar Corrección'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* --- SECCIÓN DE IMPRESIÓN --- */}
+      {/* 1. Imprime 2 boletos en blanco por hoja */}
       {quiniela && adminVista === 'resultados' && tipoImpresion === 'tickets' && (
         <div className="hidden print:flex print:flex-row print:justify-between print:w-full print:bg-white print:text-black print:fixed print:inset-0 print:p-8 print:m-0 z-50">
           {[1, 2].map((num) => (
@@ -1142,52 +1329,51 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
                 <p className="text-center text-[8px] font-bold uppercase mt-4 text-blue-900">Costo del Boleto: {quiniela.precio_ticket} {quiniela.precio_ticket === 1 ? 'Crédito' : 'Créditos'}</p>
               </div>
               <div className="mt-4 pt-4 border-t border-black border-dashed">
-                <p className="text-[6px] text-justify leading-tight font-semibold uppercase"><b>REGLAMENTO:</b> 1. PAGO ANTICIPADO: Su boleto debe estar pagado antes del inicio del primer partido. 2. ERROR DE CAPTURA: Revise su boleto. Su jugada participa tal cual está impresa. No hay correcciones una vez iniciada la jornada. 3. PARTIDOS SUSPENDIDOS: Se aplicará el criterio de administración de CiberTeque. 4. RESULTADO: Válido al término de los 90 min. reglamentarios (sin tiempos extra).</p>
+                <p className="text-[6px] text-justify leading-tight font-semibold uppercase"><b>REGLAMENTO:</b> 1. PAGO ANTICIPADO: Boleto pagado antes del 1er partido. 2. CORRECCIONES: Revise su jugada, cambios SOLO ANTES de la hora de cierre. Iniciada la jornada participa tal cual. 3. SUSPENDIDOS/APLAZADOS: Si ya inició vale el marcador en ese momento; si no inició, se declara Empate a 0. 4. RESULTADOS: Válidos a los 90 min (sin extras).</p>
               </div>
             </div>
           ))}
         </div>
       )}
 
+      {/* 2. Imprime SOLO 1 recibo relleno en la hoja para un cliente */}
       {quiniela && (tipoImpresion === 'recibo') && ticketAImprimir && (
-        <div className="hidden print:flex print:flex-row print:justify-between print:w-full print:bg-white print:text-black print:fixed print:inset-0 print:p-8 print:m-0 z-50">
-          {[1, 2].map((num) => (
-            <div className="w-[48%] border-2 border-black rounded-2xl p-4 bg-white flex flex-col justify-between" key={num}>
-              <div>
-                <div className="text-center mb-4">
-                  <h1 className="font-black text-3xl uppercase tracking-widest text-blue-900">CIBERTEQUE</h1>
-                  <p className="text-xs font-bold uppercase tracking-widest border-b-2 border-blue-900 inline-block pb-1 mt-1 text-blue-900">RECIBO DE JUGADA</p>
-                  <div className="mt-2 text-[10px] font-black uppercase bg-blue-900 text-white py-1 px-2 rounded">Cierre: {formatearFechaLocal(quiniela.fecha_cierre)}</div>
-                </div>
-                <h2 className="text-center font-black text-lg uppercase mb-4 bg-amber-400 py-1 border-y-2 border-black text-black">{quiniela.nombre_jornada}</h2>
-                <div className="mb-4 space-y-3">
-                  <div className="flex justify-between items-end border-b border-black border-dashed pb-1"><span className="font-bold text-sm uppercase">Nombre:</span><span className="font-black text-sm uppercase">{ticketAImprimir.nombre}</span></div>
-                  <div className="flex justify-between items-end border-b border-black border-dashed pb-1"><span className="font-bold text-sm uppercase">WhatsApp:</span><span className="font-black text-sm uppercase">{ticketAImprimir.telefono}</span></div>
-                </div>
-                <table className="w-full text-sm mb-4 border-collapse table-fixed">
-                  <thead><tr className="bg-blue-900 text-white text-[8px] uppercase"><th className="border-2 border-black p-1 text-right w-[40%]">Local</th><th className="border-2 border-black p-1 text-center w-[6%]">L</th><th className="border-2 border-black p-1 text-center w-[6%]">E</th><th className="border-2 border-black p-1 text-center w-[6%]">V</th><th className="border-2 border-black p-1 text-left w-[40%]">Visita</th></tr></thead>
-                  <tbody>
-                    {(partidos || []).map((p) => {
-                      const logoL = obtenerLogo(p.equipo_local)
-                      const logoV = obtenerLogo(p.equipo_visitante)
-                      return (
-                        <tr key={p.id}>
-                          <td className="border border-black p-1 text-right overflow-hidden bg-gray-50"><div className="flex items-center justify-end gap-1"><span className="font-bold uppercase text-[7px] truncate max-w-[80%]">{p.equipo_local}</span>{logoL ? <img src={logoL} alt="" className="w-4 h-4 object-contain" /> : <div className="w-3 h-3 rounded-full border border-black flex items-center justify-center text-[5px]">?</div>}</div></td>
-                          <td className="border border-black p-0.5 text-center font-black text-xs text-blue-800">{ticketAImprimir.selecciones[p.id] === 'L' ? 'X' : ''}</td><td className="border border-black p-0.5 text-center font-black text-xs text-blue-800">{ticketAImprimir.selecciones[p.id] === 'E' ? 'X' : ''}</td><td className="border border-black p-0.5 text-center font-black text-xs text-blue-800">{ticketAImprimir.selecciones[p.id] === 'V' ? 'X' : ''}</td>
-                          <td className="border border-black p-1 text-left overflow-hidden bg-gray-50"><div className="flex items-center justify-start gap-1">{logoV ? <img src={logoV} alt="" className="w-4 h-4 object-contain" /> : <div className="w-3 h-3 rounded-full border border-black flex items-center justify-center text-[5px]">?</div>}<span className="font-bold uppercase text-[7px] truncate max-w-[80%]">{p.equipo_visitante}</span></div></td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-                <div className="border-2 border-black p-2 text-center rounded-xl bg-gray-100 mt-6 flex justify-between items-center px-4"><span className="font-bold uppercase text-[9px]">Desempate (Goles):</span><span className="font-black text-xl">{ticketAImprimir.goles}</span></div>
-                <p className="text-center text-[8px] font-bold uppercase mt-4 text-blue-900">Costo del Boleto: {quiniela.precio_ticket} {quiniela.precio_ticket === 1 ? 'Crédito' : 'Créditos'}</p>
+        <div className="hidden print:flex print:flex-col print:items-start print:w-full print:bg-white print:text-black print:fixed print:inset-0 print:p-8 print:m-0 z-50">
+          <div className="w-full max-w-sm border-2 border-black rounded-2xl p-4 bg-white flex flex-col justify-between">
+            <div>
+              <div className="text-center mb-4">
+                <h1 className="font-black text-3xl uppercase tracking-widest text-blue-900">CIBERTEQUE</h1>
+                <p className="text-xs font-bold uppercase tracking-widest border-b-2 border-blue-900 inline-block pb-1 mt-1 text-blue-900">RECIBO DE JUGADA</p>
+                <div className="mt-2 text-[10px] font-black uppercase bg-blue-900 text-white py-1 px-2 rounded">Cierre: {formatearFechaLocal(quiniela.fecha_cierre)}</div>
               </div>
-              <div className="mt-4 pt-4 border-t border-black border-dashed">
-                <p className="text-[6px] text-justify leading-tight font-semibold uppercase"><b>REGLAMENTO:</b> 1. PAGO ANTICIPADO: Su boleto debe estar pagado antes del inicio del primer partido. 2. ERROR DE CAPTURA: Revise su boleto. Su jugada participa tal cual está impresa. No hay correcciones una vez iniciada la jornada. 3. PARTIDOS SUSPENDIDOS: Se aplicará el criterio de administración de CiberTeque. 4. RESULTADO: Válido al término de los 90 min. reglamentarios (sin tiempos extra).</p>
+              <h2 className="text-center font-black text-lg uppercase mb-4 bg-amber-400 py-1 border-y-2 border-black text-black">{quiniela.nombre_jornada}</h2>
+              <div className="mb-4 space-y-3">
+                <div className="flex justify-between items-end border-b border-black border-dashed pb-1"><span className="font-bold text-sm uppercase">Nombre:</span><span className="font-black text-sm uppercase">{ticketAImprimir.nombre}</span></div>
+                <div className="flex justify-between items-end border-b border-black border-dashed pb-1"><span className="font-bold text-sm uppercase">WhatsApp:</span><span className="font-black text-sm uppercase">{ticketAImprimir.telefono}</span></div>
               </div>
+              <table className="w-full text-sm mb-4 border-collapse table-fixed">
+                <thead><tr className="bg-blue-900 text-white text-[8px] uppercase"><th className="border-2 border-black p-1 text-right w-[40%]">Local</th><th className="border-2 border-black p-1 text-center w-[6%]">L</th><th className="border-2 border-black p-1 text-center w-[6%]">E</th><th className="border-2 border-black p-1 text-center w-[6%]">V</th><th className="border-2 border-black p-1 text-left w-[40%]">Visita</th></tr></thead>
+                <tbody>
+                  {(partidos || []).map((p) => {
+                    const logoL = obtenerLogo(p.equipo_local)
+                    const logoV = obtenerLogo(p.equipo_visitante)
+                    return (
+                      <tr key={p.id}>
+                        <td className="border border-black p-1 text-right overflow-hidden bg-gray-50"><div className="flex items-center justify-end gap-1"><span className="font-bold uppercase text-[7px] truncate max-w-[80%]">{p.equipo_local}</span>{logoL ? <img src={logoL} alt="" className="w-4 h-4 object-contain" /> : <div className="w-3 h-3 rounded-full border border-black flex items-center justify-center text-[5px]">?</div>}</div></td>
+                        <td className="border border-black p-0.5 text-center font-black text-xs text-blue-800">{ticketAImprimir.selecciones[p.id] === 'L' ? 'X' : ''}</td><td className="border border-black p-0.5 text-center font-black text-xs text-blue-800">{ticketAImprimir.selecciones[p.id] === 'E' ? 'X' : ''}</td><td className="border border-black p-0.5 text-center font-black text-xs text-blue-800">{ticketAImprimir.selecciones[p.id] === 'V' ? 'X' : ''}</td>
+                        <td className="border border-black p-1 text-left overflow-hidden bg-gray-50"><div className="flex items-center justify-start gap-1">{logoV ? <img src={logoV} alt="" className="w-4 h-4 object-contain" /> : <div className="w-3 h-3 rounded-full border border-black flex items-center justify-center text-[5px]">?</div>}<span className="font-bold uppercase text-[7px] truncate max-w-[80%]">{p.equipo_visitante}</span></div></td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+              <div className="border-2 border-black p-2 text-center rounded-xl bg-gray-100 mt-6 flex justify-between items-center px-4"><span className="font-bold uppercase text-[9px]">Desempate (Goles):</span><span className="font-black text-xl">{ticketAImprimir.goles}</span></div>
+              <p className="text-center text-[8px] font-bold uppercase mt-4 text-blue-900">Costo del Boleto: {quiniela.precio_ticket} {quiniela.precio_ticket === 1 ? 'Crédito' : 'Créditos'}</p>
             </div>
-          ))}
+            <div className="mt-4 pt-4 border-t border-black border-dashed">
+              <p className="text-[6px] text-justify leading-tight font-semibold uppercase"><b>REGLAMENTO:</b> 1. PAGO ANTICIPADO: Boleto pagado antes del 1er partido. 2. CORRECCIONES: Revise su jugada, cambios SOLO ANTES de la hora de cierre. Iniciada la jornada participa tal cual. 3. SUSPENDIDOS/APLAZADOS: Si ya inició vale el marcador en ese momento; si no inició, se declara Empate a 0. 4. RESULTADOS: Válidos a los 90 min (sin extras).</p>
+            </div>
+          </div>
         </div>
       )}
 

@@ -85,7 +85,15 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
       });
     });
     
-    return Object.values(grupos);
+    const listaGrupos = Object.values(grupos);
+
+    // 🔥 CORRECCIÓN: Ordenamos los tickets internamente de más antiguo a más reciente
+    // Así tu primera compra siempre será la "Jugada 1" de izquierda a derecha
+    listaGrupos.forEach((grupo: any) => {
+      grupo.tickets.sort((a: any, b: any) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
+    });
+
+    return listaGrupos;
   }
 
   const obtenerLogo = (nombreEquipo: string) => {

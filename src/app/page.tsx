@@ -7,11 +7,13 @@ import MisJugadas from '@/components/MisJugadas'
 import AdminPanel from '@/components/AdminPanel'
 import Posiciones from '@/components/Posiciones'
 import MiBilletera from '@/components/MiBilletera'
+import Perfil from '@/components/Perfil' // 🔥 IMPORTAMOS EL NUEVO COMPONENTE
 
 export default function Home() {
   const [usuarioActivo, setUsuarioActivo] = useState<any>(null)
   const [vista, setVista] = useState<'login' | 'registro'>('login')
-  const [pestana, setPestana] = useState<'jugar' | 'historial' | 'admin' | 'ranking' | 'billetera'>('jugar')
+  // 🔥 AÑADIMOS 'perfil' a los tipos de la pestaña
+  const [pestana, setPestana] = useState<'jugar' | 'historial' | 'admin' | 'ranking' | 'billetera' | 'perfil'>('jugar')
   const [cargandoSesion, setCargandoSesion] = useState(true)
 
   // 1. LA MAGIA DE LA MEMORIA: Recuperamos usuario y pestaña al abrir/recargar
@@ -32,7 +34,7 @@ export default function Home() {
   }, [])
 
   // FUNCIÓN NUEVA: Cambia la pestaña y la guarda en la memoria del navegador
-  const cambiarPestana = (nuevaPestana: 'jugar' | 'historial' | 'admin' | 'ranking' | 'billetera') => {
+  const cambiarPestana = (nuevaPestana: 'jugar' | 'historial' | 'admin' | 'ranking' | 'billetera' | 'perfil') => {
     setPestana(nuevaPestana)
     localStorage.setItem('club_pronosticos_pestana', nuevaPestana)
   }
@@ -97,9 +99,21 @@ export default function Home() {
           </div>
 
           <div className="flex flex-wrap bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800/50 mb-10 w-full max-w-4xl shadow-2xl">
+            {/* 🔥 BOTÓN DEL PERFIL */}
+            <button 
+              onClick={() => cambiarPestana('perfil')}
+              className={`flex-1 min-w-[100px] py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
+                pestana === 'perfil' 
+                ? 'bg-purple-600 text-white shadow-[0_0_20px_rgba(147,51,234,0.4)]' 
+                : 'text-purple-500/70 hover:text-purple-400'
+              }`}
+            >
+              👤 Mi Perfil
+            </button>
+
             <button 
               onClick={() => cambiarPestana('jugar')}
-              className={`flex-1 min-w-[120px] py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
+              className={`flex-1 min-w-[100px] py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
                 pestana === 'jugar' 
                 ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.4)]' 
                 : 'text-slate-500 hover:text-slate-300'
@@ -109,7 +123,7 @@ export default function Home() {
             </button>
             <button 
               onClick={() => cambiarPestana('historial')}
-              className={`flex-1 min-w-[120px] py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
+              className={`flex-1 min-w-[100px] py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
                 pestana === 'historial' 
                 ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.4)]' 
                 : 'text-slate-500 hover:text-slate-300'
@@ -120,7 +134,7 @@ export default function Home() {
 
             <button 
               onClick={() => cambiarPestana('ranking')}
-              className={`flex-1 min-w-[120px] py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
+              className={`flex-1 min-w-[100px] py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
                 pestana === 'ranking' 
                 ? 'bg-amber-600 text-white shadow-[0_0_20px_rgba(217,119,6,0.4)]' 
                 : 'text-amber-500/70 hover:text-amber-400'
@@ -131,7 +145,7 @@ export default function Home() {
 
             <button 
               onClick={() => cambiarPestana('billetera')}
-              className={`flex-1 min-w-[120px] py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
+              className={`flex-1 min-w-[100px] py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
                 pestana === 'billetera' 
                 ? 'bg-green-600 text-white shadow-[0_0_20px_rgba(22,163,74,0.4)]' 
                 : 'text-green-500/70 hover:text-green-400'
@@ -143,7 +157,7 @@ export default function Home() {
             {usuarioActivo.rol === 'admin' && (
               <button 
                 onClick={() => cambiarPestana('admin')}
-                className={`flex-1 min-w-[120px] py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
+                className={`flex-1 min-w-[100px] py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
                   pestana === 'admin' 
                   ? 'bg-red-600 text-white shadow-[0_0_20px_rgba(220,38,38,0.4)]' 
                   : 'text-red-500/40 hover:text-red-400'
@@ -172,6 +186,11 @@ export default function Home() {
 
             {pestana === 'billetera' && (
               <MiBilletera usuarioId={usuarioActivo.id} />
+            )}
+
+            {/* 🔥 RENDERIZAMOS EL COMPONENTE PERFIL */}
+            {pestana === 'perfil' && (
+              <Perfil usuarioActivo={usuarioActivo} />
             )}
             
             {pestana === 'admin' && usuarioActivo.rol === 'admin' && (

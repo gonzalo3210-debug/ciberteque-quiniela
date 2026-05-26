@@ -340,7 +340,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
         </div>
       </div>
 
-      {/* 📜 VENTANA EMERGENTE (MODAL): REGLAMENTO OFICIAL */}
+      {/* 📜 VENTANA EMERGENTE (MODAL): REGLAMENTO OFICIAL ACTUALIZADO */}
       {mostrarReglas && (
         <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 max-w-md w-full p-6 rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200">
@@ -349,11 +349,11 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
               <button onClick={() => setMostrarReglas(false)} className="text-slate-500 hover:text-slate-300 font-bold font-mono text-xl">✕</button>
             </div>
             <div className="space-y-4 text-xs text-slate-300 font-medium leading-relaxed uppercase tracking-wide max-h-[350px] overflow-y-auto pr-1">
-              <p><strong className="text-blue-400">1. Pago Anticipado:</strong> Las quinielas deben estar pagadas antes de iniciar el primer partido de la jornada; de lo contrario, serán borradas del listado y perderán cualquier derecho a premio.</p>
-              <p><strong className="text-blue-400">2. Error en Publicación:</strong> Su quiniela participa tal cual aparece en el sistema. Si por error nuestro aparece diferente a como la envió, participará así para bien o para mal. No hacemos correcciones una vez iniciada la jornada.</p>
-              <p><strong className="text-blue-400">3. Partidos Suspendidos/Aplazados:</strong> Si un partido se suspende o aplaza y no se juega en ese mismo fin de semana, se aplicará el criterio de administración (incluyendo posibles sorteos oficiales para proteger la inversión del usuario).</p>
-              <p><strong className="text-blue-400">4. Tiempo Reglamentario:</strong> En partidos donde debe haber un ganador, se tomará el resultado al terminar el tiempo reglamentario (90 min), sin contar tiempos extra ni penales.</p>
-              <p><strong className="text-blue-400">5. Bolsa y Administración:</strong> El 80% de lo recaudado se destina a la bolsa de premios (repartida según el formato elegido para la jornada) y el 20% corresponde a gastos administrativos de CiberTeque.</p>
+              <p><strong className="text-blue-400">1. Pago Anticipado:</strong> Su boleto debe estar pagado antes de iniciar el primer partido de la jornada; de lo contrario, la jugada será borrada del listado.</p>
+              <p><strong className="text-blue-400">2. Correcciones:</strong> Revise bien su jugada. Los cambios aplican SOLO ANTES de la hora de cierre. Iniciada la jornada, su quiniela participa tal cual fue registrada.</p>
+              <p><strong className="text-blue-400">3. Suspendidos / Aplazados:</strong> Si el partido ya había iniciado al momento de suspenderse, será válido el marcador de ese momento. Si el partido no inició, automáticamente se declara Empate a 0.</p>
+              <p><strong className="text-blue-400">4. Resultados Finales:</strong> Todos los resultados son válidos al terminar los 90 minutos del tiempo reglamentario (no se cuentan tiempos extra ni penales).</p>
+              <p><strong className="text-blue-400">5. Bolsa de Premios:</strong> El 80% de lo recaudado se destina a la bolsa de premios a repartir y el 20% a gastos administrativos de CiberTeque.</p>
               <p className="italic text-slate-500">Al participar en CiberTeque se entiende que conoce y acepta todos los puntos mencionados anteriormente.</p>
             </div>
             <button onClick={() => { setAceptoReglas(true); setMostrarReglas(false); }} className="w-full mt-6 bg-blue-600 hover:bg-blue-500 text-white font-black py-3 rounded-xl uppercase tracking-wider text-xs transition-all shadow-lg">Entendido y Aceptado</button>

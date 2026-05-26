@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export default function Posiciones() {
-  const [quinielasAbiertas, setQuinielasAbiertas] = useState<any[]>([]) 
+  const [quinielasCerradasActivas, setQuinielasCerradasActivas] = useState<any[]>([]) 
   const [quinielaActiva, setQuinielaActiva] = useState<any>(null)
   const [historial, setHistorial] = useState<any[]>([])
   const [cargando, setCargando] = useState(true)
@@ -14,10 +14,11 @@ export default function Posiciones() {
 
   useEffect(() => {
     async function cargarDatos() {
-      // 1. CORRECCIÓN: Ordenar por fecha_cierre y aumentar límite a 10
+      // 1. OBTENEMOS SOLO LAS QUINIELAS CERRADAS (Para proteger selecciones activas)
       const { data: qData } = await supabase
         .from('quinielas')
         .select('*')
+        .eq('estado', 'cerrada') // 🔥 REGLA APLICADA: Solo jornadas cerradas
         .order('fecha_cierre', { ascending: false }) 
         .limit(10)
 
@@ -87,19 +88,17 @@ export default function Posiciones() {
         return { ...q, ranking, partidos: partidosQ, recaudadoPesos, premioPesos }
       })
 
-      // 4. LÓGICA CORREGIDA PARA BOTONES Y SALÓN DE LA FAMA
-      // Se considera "Activa" si está abierta, o si está cerrada pero aún NO tiene goles reales.
-      const activas = quinielasProcesadas.filter(q => 
-        q.estado === 'abierta' || (q.estado === 'cerrada' && q.goles_totales_real === null)
-      )
+      // 4. LÓGICA DE SEPARACIÓN
+      // Se considera "Cerrada en Juego" si está cerrada pero aún NO tiene todos los resultados oficiales (goles).
+      const cerradasEnJuego = quinielasProcesadas.filter(q => q.goles_totales_real === null)
       
-      // Se va al historial SOLO cuando está cerrada Y ya se registraron los goles totales.
-      const pasadas = quinielasProcesadas.filter(q => 
-        q.estado === 'cerrada' && q.goles_totales_real !== null
-      )
+      // Se va al historial del Salón de la Fama si está cerrada Y ya se registraron los goles totales.
+      const pasadas = quinielasProcesadas.filter(q => q.goles_totales_real !== null)
 
-      setQuinielasAbiertas(activas)
-      setQuinielaActiva(activas.length > 0 ? activas[0] : quinielasProcesadas[0])
+      setQuinielasCerradasActivas(cerradasEnJuego)
+      
+      // Priorizamos mostrar primero una que se esté jugando, si no, mostramos la más reciente del historial
+      setQuinielaActiva(cerradasEnJuego.length > 0 ? cerradasEnJuego[0] : pasadas[0])
       setHistorial(pasadas)
       setCargando(false)
     }
@@ -108,7 +107,14 @@ export default function Posiciones() {
   }, [])
 
   if (cargando) return <div className="text-amber-500 animate-pulse text-center mt-10 font-bold uppercase tracking-widest">Calculando Bolsa y Posiciones...</div>
-  if (!quinielaActiva) return <div className="text-slate-500 italic text-center mt-10">No hay datos de quinielas disponibles.</div>
+  
+  if (!quinielaActiva) return (
+    <div className="flex flex-col items-center justify-center py-20 text-center animate-in fade-in duration-500">
+      <span className="text-6xl mb-4 opacity-50">🤫</span>
+      <h2 className="text-xl font-black text-slate-400 uppercase tracking-widest mb-2">Ranking Oculto</h2>
+      <p className="text-sm text-slate-500 font-bold max-w-md">Las tablas de posiciones se revelarán cuando el tiempo de la jornada termine y los partidos comiencen.</p>
+    </div>
+  )
 
   const totalJugadores = quinielaActiva.ranking.length
   const partidosTerminados = quinielaActiva.partidos.filter((p: any) => p.resultado_real).length
@@ -118,10 +124,10 @@ export default function Posiciones() {
       
       <section>
         {/* SELECTOR DE JORNADAS */}
-        {quinielasAbiertas.length > 1 && (
+        {quinielasCerradasActivas.length > 1 && (
           <div className="flex flex-wrap gap-2 mb-6 bg-slate-900/50 p-3 rounded-xl border border-slate-800 shadow-inner">
-            <span className="text-[10px] text-slate-500 font-bold uppercase w-full mb-1">Elige la jornada en vivo:</span>
-            {quinielasAbiertas.map(qa => (
+            <span className="text-[10px] text-slate-500 font-bold uppercase w-full mb-1">Elige la jornada en juego:</span>
+            {quinielasCerradasActivas.map(qa => (
               <button 
                 key={qa.id} 
                 onClick={() => setQuinielaActiva(qa)} 
@@ -131,7 +137,7 @@ export default function Posiciones() {
                     : 'bg-slate-950 border border-slate-700 text-slate-500 hover:text-slate-300'
                 }`}
               >
-                {qa.nombre_jornada} {qa.estado === 'cerrada' ? '(En Juego)' : ''}
+                {qa.nombre_jornada}
               </button>
             ))}
           </div>
@@ -142,7 +148,7 @@ export default function Posiciones() {
           <div className="absolute -right-6 -top-6 p-4 opacity-5 text-9xl select-none">💰</div>
           
           <h2 className="text-center text-2xl md:text-3xl font-black text-white uppercase italic tracking-tight mb-2 relative z-10">
-            {quinielaActiva.estado === 'abierta' ? 'RANKING EN VIVO' : 'RESULTADOS EN JUEGO'}
+            {quinielaActiva.goles_totales_real === null ? 'RESULTADOS EN VIVO' : 'RANKING FINALIZADO'}
           </h2>
           <p className="text-center text-amber-500 text-xs font-black uppercase tracking-widest mb-6">{quinielaActiva.nombre_jornada}</p>
           
@@ -163,7 +169,7 @@ export default function Posiciones() {
 
           <div className="mt-5 bg-amber-500/10 p-5 rounded-2xl border border-amber-500/20 text-center shadow-[0_0_20px_rgba(245,158,11,0.15)] relative z-10">
             <span className="block text-[10px] md:text-xs text-amber-500 font-black uppercase tracking-widest mb-1">
-              {quinielaActiva.estado === 'abierta' ? '👑 Bolsa Garantizada Para El Ganador 👑' : '🏆 PREMIO A REPARTIR 🏆'}
+              {quinielaActiva.goles_totales_real === null ? '👑 Bolsa Garantizada Para El Ganador 👑' : '🏆 PREMIO A REPARTIR 🏆'}
             </span>
             <span className="text-4xl md:text-5xl font-black text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.3)] block">
               ${quinielaActiva.premioPesos.toFixed(0)} <span className="text-sm md:text-lg text-amber-600 uppercase font-bold">MXN</span>
