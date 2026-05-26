@@ -15,13 +15,13 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
   const [estaCerrada, setEstaCerrada] = useState(false)
   const [motivoCierre, setMotivoCierre] = useState('')
 
-  // 🔥 NUEVOS ESTADOS PARA EL REGLAMENTO
+  // 🔥 ESTADOS PARA REGLAMENTO Y RESTRICCIONES
   const [mostrarReglas, setMostrarReglas] = useState(false) 
   const [aceptoReglas, setAceptoReglas] = useState(false) 
+  const [yaParticipo, setYaParticipo] = useState(false) // Nuevo estado para saber si ya jugó esta jornada
 
   useEffect(() => {
     async function cargarJornadas() {
-      // Agregamos tipo_premiacion a la consulta
       const { data: qData } = await supabase
         .from('quinielas')
         .select(`
@@ -35,7 +35,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
 
       if (qData && qData.length > 0) {
         setQuinielasActivas(qData)
-        cambiarQuinielaVisible(qData[0]) 
+        await cambiarQuinielaVisible(qData[0]) // Se hace await porque ahora hace una consulta
       }
       if (eData) {
         setEquiposInfo(eData)
@@ -52,12 +52,13 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
     return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: true}).toUpperCase()}`;
   }
 
-  const cambiarQuinielaVisible = (quiniela: any) => {
+  // Ahora es async para poder buscar si el usuario ya tiene ticket en esta jornada
+  const cambiarQuinielaVisible = async (quiniela: any) => {
     setQuinielaActual(quiniela)
     setPartidos(quiniela.partidos)
     setSelecciones({}) 
     setGolesTotales('')
-    setAceptoReglas(false) // Forzamos a que vuelva a aceptar las reglas si cambia de jornada
+    setAceptoReglas(false) 
 
     const fechaCierreCorta = quiniela.fecha_cierre ? quiniela.fecha_cierre.substring(0, 16) : null
     const fechaCierre = new Date(fechaCierreCorta || quiniela.fecha_cierre)
@@ -75,24 +76,38 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
       setEstaCerrada(false)
       setMotivoCierre('')
     }
+
+    // 🔥 VERIFICACIÓN: Consultamos si ya metió un boleto para esta quiniela específica
+    const { data: ticketsPrevios } = await supabase
+      .from('tickets')
+      .select('id')
+      .eq('usuario_id', usuarioActivo.id)
+      .eq('quiniela_id', quiniela.id)
+
+    setYaParticipo(ticketsPrevios && ticketsPrevios.length > 0 ? true : false)
   }
 
+  // Verificamos si debemos bloquear la interfaz por ser gratis y ya haber participado
+  const esGratis = quinielaActual?.precio_ticket === 0;
+  const bloqueadoPorParticipacion = esGratis && yaParticipo;
+
   const seleccionarOpcion = (partidoId: string, opcion: string) => {
-    if (estaCerrada) return 
+    if (estaCerrada || bloqueadoPorParticipacion) return 
     setSelecciones({ ...selecciones, [partidoId]: opcion })
   }
 
   const guardarQuiniela = async () => {
     if (estaCerrada) return alert('La jornada está cerrada.')
+    if (bloqueadoPorParticipacion) return alert('Solo se permite 1 participación por usuario en quinielas gratuitas.')
     if (!aceptoReglas) return alert('Debes leer y aceptar el reglamento oficial para enviar tu boleto.')
     if (golesTotales === '') {
       alert('¡Falta información! Por favor, anota el total de goles para el desempate.')
       return
     }
 
-    const costoTicket = quinielaActual?.precio_ticket || 1
+    const costoTicket = quinielaActual?.precio_ticket || 0
 
-    if (usuarioActivo.creditos_disponibles < costoTicket) {
+    if (costoTicket > 0 && usuarioActivo.creditos_disponibles < costoTicket) {
       alert('No tienes créditos suficientes. Pasa a mostrador para recargar.')
       return
     }
@@ -127,20 +142,27 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
 
       await supabase.from('pronosticos').insert(pronosticosAGuardar)
 
-      const nuevoSaldo = usuarioActivo.creditos_disponibles - costoTicket
-      await supabase.from('usuarios').update({ creditos_disponibles: nuevoSaldo }).eq('id', usuarioActivo.id)
+      // Solo descontamos y registramos transacción si costó algo
+      if (costoTicket > 0) {
+        const nuevoSaldo = usuarioActivo.creditos_disponibles - costoTicket
+        await supabase.from('usuarios').update({ creditos_disponibles: nuevoSaldo }).eq('id', usuarioActivo.id)
 
-      await supabase.from('transacciones_creditos').insert([{
-        usuario_id: usuarioActivo.id,
-        cantidad: -costoTicket,
-        tipo_movimiento: 'juego_ticket',
-        descripcion: `Ticket ${quinielaActual.nombre_jornada}`
-      }])
+        await supabase.from('transacciones_creditos').insert([{
+          usuario_id: usuarioActivo.id,
+          cantidad: -costoTicket,
+          tipo_movimiento: 'juego_ticket',
+          descripcion: `Ticket ${quinielaActual.nombre_jornada}`
+        }])
+        actualizarSaldo(nuevoSaldo)
+      }
 
-      actualizarSaldo(nuevoSaldo)
       setSelecciones({}) 
       setGolesTotales('')
       setAceptoReglas(false)
+      
+      // Si era gratis, lo bloqueamos inmediatamente para que no pueda meter otro
+      if (esGratis) setYaParticipo(true)
+
       alert('¡Jugada guardada con éxito! Los partidos sin marcar se guardaron como Empate.')
 
     } catch (error) {
@@ -175,7 +197,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
   return (
     <div className="w-full max-w-4xl mt-6 mb-20 animate-in fade-in duration-500 relative">
       
-      {/* 3. SELECTOR DE QUINIELAS */}
+      {/* SELECTOR DE QUINIELAS */}
       {quinielasActivas.length > 1 && (
         <div className="flex flex-wrap gap-3 justify-center mb-6 bg-slate-900/80 p-2 rounded-2xl border border-slate-800 shadow-xl">
           {quinielasActivas.map(q => (
@@ -215,7 +237,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
           
           <div className="flex flex-wrap items-center justify-center gap-3 mt-3">
             <span className="bg-blue-950/40 border border-blue-900/50 text-blue-400 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest">
-              Costo: {quinielaActual.precio_ticket} {quinielaActual.precio_ticket === 1 ? 'Crédito' : 'Créditos'}
+              Costo: {esGratis ? 'GRATIS (1 MÁX)' : `${quinielaActual.precio_ticket} ${quinielaActual.precio_ticket === 1 ? 'Crédito' : 'Créditos'}`}
             </span>
             {/* INFORMATIVO SOBRE PREMIACIÓN DE LA JORNADA */}
             <span className="bg-purple-950/40 border border-purple-900/50 text-purple-400 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest">
@@ -223,7 +245,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
             </span>
           </div>
 
-          {/* 🔥 HORA DE CIERRE VISIBLE PARA EL CLIENTE */}
+          {/* HORA DE CIERRE VISIBLE PARA EL CLIENTE */}
           <div className="mt-4 mb-1 inline-block bg-red-950/40 border border-red-900/60 text-red-400 px-4 py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-widest shadow-inner">
             ⏳ Cierre de Jugadas: {formatearFechaLocal(quinielaActual.fecha_cierre)}
           </div>
@@ -238,7 +260,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
             const fechaObj = formatearFechaObj(partido.fecha_hora)
 
             return (
-              <div key={partido.id} className="bg-slate-800/80 p-5 rounded-xl border border-slate-700 flex flex-col md:flex-row justify-between items-center md:items-start gap-4 transition-all shadow-md relative group hover:border-slate-500">
+              <div key={partido.id} className={`bg-slate-800/80 p-5 rounded-xl border flex flex-col md:flex-row justify-between items-center md:items-start gap-4 transition-all shadow-md relative group ${bloqueadoPorParticipacion ? 'border-slate-800 opacity-60' : 'border-slate-700 hover:border-slate-500'}`}>
                 
                 <div className="flex flex-col w-full md:flex-1">
                   
@@ -262,12 +284,12 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
                         <button 
                           key={opc}
                           onClick={() => seleccionarOpcion(partido.id, opc)}
-                          disabled={estaCerrada}
+                          disabled={estaCerrada || bloqueadoPorParticipacion}
                           className={`flex-1 py-2.5 rounded-lg text-sm font-black transition-all border shadow-sm ${
                             seleccion === opc 
                             ? 'bg-blue-600 border-blue-400 text-white shadow-[0_0_15px_rgba(37,99,235,0.5)] scale-105' 
                             : 'bg-slate-950 border-slate-700 text-slate-500 hover:text-slate-300 hover:bg-slate-800'
-                          }`}
+                          } ${(estaCerrada || bloqueadoPorParticipacion) ? 'cursor-not-allowed' : ''}`}
                         >
                           {opc}
                         </button>
@@ -297,7 +319,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
           })}
         </div>
 
-        <div className="mt-12 mb-6 p-6 bg-blue-950/40 border border-blue-900/50 rounded-2xl max-w-sm mx-auto text-center shadow-2xl z-10 relative">
+        <div className={`mt-12 mb-6 p-6 bg-blue-950/40 border border-blue-900/50 rounded-2xl max-w-sm mx-auto text-center shadow-2xl z-10 relative ${bloqueadoPorParticipacion ? 'opacity-60' : ''}`}>
           <label className="block text-blue-400 font-black uppercase text-[10px] tracking-[0.2em] mb-2">Criterio Desempate</label>
           <p className="text-slate-400 text-[9px] uppercase mb-4 font-bold tracking-tight">Total de goles en la jornada</p>
           <input 
@@ -305,8 +327,8 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
             placeholder="00"
             value={golesTotales}
             onChange={(e) => setGolesTotales(e.target.value)}
-            disabled={estaCerrada}
-            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-4 text-center text-4xl font-black text-white focus:border-blue-500 outline-none transition-all"
+            disabled={estaCerrada || bloqueadoPorParticipacion}
+            className={`w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-4 text-center text-4xl font-black text-white focus:border-blue-500 outline-none transition-all ${(estaCerrada || bloqueadoPorParticipacion) ? 'cursor-not-allowed text-slate-500' : ''}`}
           />
         </div>
 
@@ -317,30 +339,32 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
             id="check-reglas" 
             checked={aceptoReglas} 
             onChange={(e) => setAceptoReglas(e.target.checked)} 
-            disabled={estaCerrada} 
-            className="mt-0.5 w-4 h-4 accent-green-600 rounded border-slate-700 bg-slate-900 cursor-pointer" 
+            disabled={estaCerrada || bloqueadoPorParticipacion} 
+            className={`mt-0.5 w-4 h-4 accent-green-600 rounded border-slate-700 bg-slate-900 cursor-pointer ${(estaCerrada || bloqueadoPorParticipacion) ? 'cursor-not-allowed opacity-50' : ''}`} 
           />
-          <label htmlFor="check-reglas" className="text-[10px] font-bold uppercase tracking-wide text-slate-400 cursor-pointer select-none">
-            He leído las <span onClick={(e) => { e.preventDefault(); setMostrarReglas(true); }} className="text-blue-400 underline hover:text-blue-300">reglas oficiales</span> y acepto los criterios de desempate y premios.
+          <label htmlFor="check-reglas" className={`text-[10px] font-bold uppercase tracking-wide text-slate-400 select-none ${(estaCerrada || bloqueadoPorParticipacion) ? '' : 'cursor-pointer'}`}>
+            He leído las <span onClick={(e) => { e.preventDefault(); setMostrarReglas(true); }} className="text-blue-400 underline hover:text-blue-300 cursor-pointer">reglas oficiales</span> y acepto los criterios de desempate y premios.
           </label>
         </div>
 
         <div className="flex flex-col items-center pt-2 border-t border-slate-800 z-10 relative">
           <button 
             onClick={guardarQuiniela}
-            disabled={guardando || estaCerrada || !aceptoReglas}
+            disabled={guardando || estaCerrada || !aceptoReglas || bloqueadoPorParticipacion}
             className={`w-full max-w-xs py-4 rounded-xl font-black uppercase tracking-widest transition-all ${
-              (guardando || estaCerrada || !aceptoReglas)
-              ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700' 
-              : 'bg-green-600 hover:bg-green-500 text-white shadow-[0_0_20px_rgba(22,163,74,0.4)] hover:scale-105 active:scale-95'
+              bloqueadoPorParticipacion 
+              ? 'bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-700 shadow-inner' 
+              : (guardando || estaCerrada || !aceptoReglas)
+                ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700' 
+                : 'bg-green-600 hover:bg-green-500 text-white shadow-[0_0_20px_rgba(22,163,74,0.4)] hover:scale-105 active:scale-95'
             }`}
           >
-            {guardando ? 'Guardando...' : 'Confirmar Jugada'}
+            {bloqueadoPorParticipacion ? 'YA PARTICIPASTE (MÁX 1)' : guardando ? 'Guardando...' : 'Confirmar Jugada'}
           </button>
         </div>
       </div>
 
-      {/* 📜 VENTANA EMERGENTE (MODAL): REGLAMENTO OFICIAL ACTUALIZADO */}
+      {/* 📜 VENTANA EMERGENTE (MODAL): REGLAMENTO OFICIAL */}
       {mostrarReglas && (
         <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 max-w-md w-full p-6 rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200">
