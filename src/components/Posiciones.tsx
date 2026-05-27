@@ -7,14 +7,17 @@ export default function Posiciones() {
   const [quinielaActiva, setQuinielaActiva] = useState<any>(null)
   const [historial, setHistorial] = useState<any[]>([])
   const [cargando, setCargando] = useState(true)
+  
+  // 🛠️ MODO ADMIN: Cambia esto según la sesión de tu usuario
+  const [isAdmin, setIsAdmin] = useState(true) 
+  const [mostrarJugadasForzado, setMostrarJugadasForzado] = useState(false)
 
-  // ⚙️ CONFIGURACIÓN MONETARIA DE LA BOLSA
+  // ⚙️ CONFIGURACIÓN MONETARIA
   const VALOR_CREDITO = 30 
   const PORCENTAJE_PREMIO = 0.80 
 
   useEffect(() => {
     async function cargarDatos() {
-      // 1. CORRECCIÓN: Ordenar por fecha_cierre y aumentar límite a 10
       const { data: qData } = await supabase
         .from('quinielas')
         .select('*')
@@ -30,8 +33,6 @@ export default function Posiciones() {
 
       const { data: pData } = await supabase.from('partidos').select('*').in('quiniela_id', quinielaIds).order('id', { ascending: true })
       const { data: tData } = await supabase.from('tickets').select('id, usuario_id, quiniela_id, prediccion_goles_total, pronosticos(partido_id, eleccion_usuario)').in('quiniela_id', quinielaIds)
-      
-      // 🔥 MODIFICACIÓN: Solicitamos también el avatar_url de los usuarios
       const { data: uData } = await supabase.from('usuarios').select('id, nombre, avatar_url')
       
       const mapaUsuarios: Record<string, { nombre: string, avatar_url: string | null }> = {}
@@ -70,7 +71,6 @@ export default function Posiciones() {
           return {
             id: ticket.id,
             nombre: userData.nombre,
-            // 🔥 MODIFICACIÓN: Pasamos el avatar_url al ranking
             avatar_url: userData.avatar_url,
             prediccionGoles: ticket.prediccion_goles_total || 0,
             puntos,
@@ -85,21 +85,25 @@ export default function Posiciones() {
           return a.golesDiff - b.golesDiff
         })
 
-        const precioTicketCrds = q.precio_ticket || 1
+        // 🔥 CÁLCULO DE PESOS (Se mantiene normal)
+        // Asumimos que si es promo, precio_ticket podría ser 0. Si es mayor a 0, se calcula normal.
+        const precioTicketCrds = q.precio_ticket || 0
         const totalBoletos = ranking.length
         const recaudadoPesos = totalBoletos * precioTicketCrds * VALOR_CREDITO
         const premioPesos = recaudadoPesos * PORCENTAJE_PREMIO
 
-        return { ...q, ranking, partidos: partidosQ, recaudadoPesos, premioPesos }
+        return { 
+          ...q, 
+          ranking, 
+          partidos: partidosQ, 
+          recaudadoPesos, 
+          premioPesos 
+        }
       })
 
-      // 4. LÓGICA CORREGIDA PARA BOTONES Y SALÓN DE LA FAMA
-      // Se considera "Activa" si está abierta, o si está cerrada pero aún NO tiene goles reales.
       const activas = quinielasProcesadas.filter(q => 
         q.estado === 'abierta' || (q.estado === 'cerrada' && q.goles_totales_real === null)
       )
-      
-      // Se va al historial SOLO cuando está cerrada Y ya se registraron los goles totales.
       const pasadas = quinielasProcesadas.filter(q => 
         q.estado === 'cerrada' && q.goles_totales_real !== null
       )
@@ -118,17 +122,39 @@ export default function Posiciones() {
 
   const totalJugadores = quinielaActiva.ranking.length
   const partidosTerminados = quinielaActiva.partidos.filter((p: any) => p.resultado_real).length
+  
+  // Control de Visibilidad de Jugadas
+  const mostrarPicks = quinielaActiva.estado === 'cerrada' || mostrarJugadasForzado
 
-  // 🔥 FUNCIÓN PARA OBTENER EL AVATAR: Usa la foto o genera las iniciales
   const getAvatarUrl = (nombre: string, url: string | null) => {
     if (url) return url;
     return `https://ui-avatars.com/api/?name=${encodeURIComponent(nombre)}&background=1e293b&color=3b82f6&size=100&bold=true`;
   }
 
+  // 🔥 Verifica si el formato de la quiniela es una promo para cambiar los textos y los montos
+  const esPromo = quinielaActiva.tipo_premiacion?.toLowerCase().includes('promo');
+
   return (
     <div className="w-full max-w-4xl mt-6 animate-in fade-in duration-500 mb-20 space-y-12">
       
       <section>
+        {/* PANEL DE CONTROL ADMIN */}
+        {isAdmin && quinielaActiva.estado === 'abierta' && (
+          <div className="mb-4 bg-red-950/30 border border-red-900/50 p-3 rounded-xl flex items-center justify-between shadow-inner">
+            <span className="text-xs text-red-400 font-bold uppercase tracking-wide">
+              🛠️ Modo Admin: La jornada está abierta. Las jugadas están ocultas.
+            </span>
+            <button 
+              onClick={() => setMostrarJugadasForzado(!mostrarJugadasForzado)}
+              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${
+                mostrarJugadasForzado ? 'bg-red-600 text-white shadow-[0_0_10px_rgba(220,38,38,0.4)]' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+              }`}
+            >
+              {mostrarJugadasForzado ? '👁️ Ocultar Jugadas' : '👁️ Forzar Visibilidad'}
+            </button>
+          </div>
+        )}
+
         {/* SELECTOR DE JORNADAS */}
         {quinielasAbiertas.length > 1 && (
           <div className="flex flex-wrap gap-2 mb-6 bg-slate-900/50 p-3 rounded-xl border border-slate-800 shadow-inner">
@@ -136,7 +162,10 @@ export default function Posiciones() {
             {quinielasAbiertas.map(qa => (
               <button 
                 key={qa.id} 
-                onClick={() => setQuinielaActiva(qa)} 
+                onClick={() => {
+                  setQuinielaActiva(qa)
+                  setMostrarJugadasForzado(false)
+                }} 
                 className={`px-4 py-2 rounded-lg text-xs font-black uppercase transition-all ${
                   quinielaActiva?.id === qa.id 
                     ? 'bg-amber-500 text-slate-900 shadow-md scale-105' 
@@ -163,6 +192,7 @@ export default function Posiciones() {
               <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Participantes</span>
               <span className="text-2xl font-black text-white">{totalJugadores}</span>
             </div>
+            {/* VOLVEMOS A MOSTRAR EL RECAUDADO EN PESOS */}
             <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800/80 text-center shadow-inner">
               <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Recaudado Total</span>
               <span className="text-2xl font-black text-white">${quinielaActiva.recaudadoPesos} <span className="text-xs text-slate-500">MXN</span></span>
@@ -174,15 +204,42 @@ export default function Posiciones() {
           </div>
 
           <div className="mt-5 bg-amber-500/10 p-5 rounded-2xl border border-amber-500/20 text-center shadow-[0_0_20px_rgba(245,158,11,0.15)] relative z-10">
-            <span className="block text-[10px] md:text-xs text-amber-500 font-black uppercase tracking-widest mb-1">
-              {quinielaActiva.estado === 'abierta' ? '👑 Bolsa Garantizada Para El Ganador 👑' : '🏆 PREMIO A REPARTIR 🏆'}
-            </span>
-            <span className="text-4xl md:text-5xl font-black text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.3)] block">
-              ${quinielaActiva.premioPesos.toFixed(0)} <span className="text-sm md:text-lg text-amber-600 uppercase font-bold">MXN</span>
-            </span>
-            <div className="mt-2 text-[9px] text-slate-500 font-bold uppercase tracking-wider">Valor del crédito: $30 MXN | Retención casa: 20%</div>
+            {/* 🔥 CONDICIONAL: SI ES PROMO CAMBIA EL TEXTO A CRÉDITOS, SI NO ES PESOS */}
+            {esPromo ? (
+              <>
+                <span className="block text-[10px] md:text-xs text-amber-500 font-black uppercase tracking-widest mb-1">
+                  🎁 EVENTO PROMOCIONAL 🎁
+                </span>
+                <span className="text-xl md:text-3xl font-black text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.3)] block mt-2">
+                  {quinielaActiva.tipo_premiacion === 'promo_top2' 
+                    ? '1 CRÉDITO AL 1º Y 2º LUGAR' 
+                    : '1 CRÉDITO AL GANADOR'}
+                </span>
+                <div className="mt-2 text-[9px] text-slate-400 font-bold uppercase tracking-wider">
+                  Valor Promocional del Crédito: $30 MXN
+                </div>
+              </>
+            ) : (
+              <>
+                <span className="block text-[10px] md:text-xs text-amber-500 font-black uppercase tracking-widest mb-1">
+                  {quinielaActiva.estado === 'abierta' ? '👑 Bolsa Garantizada Para El Ganador 👑' : '🏆 PREMIO A REPARTIR 🏆'}
+                </span>
+                <span className="text-4xl md:text-5xl font-black text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.3)] block">
+                  ${quinielaActiva.premioPesos.toFixed(0)} <span className="text-sm md:text-lg text-amber-600 uppercase font-bold">MXN</span>
+                </span>
+                <div className="mt-2 text-[9px] text-slate-500 font-bold uppercase tracking-wider">
+                  Valor del crédito: $30 MXN | Retención casa: 20%
+                </div>
+              </>
+            )}
           </div>
         </div>
+
+        {!mostrarPicks && (
+          <div className="mb-4 text-center border border-amber-900/50 bg-amber-950/20 text-amber-500/80 text-xs py-2 rounded-lg font-bold uppercase tracking-widest">
+            🔒 Radiografía oculta hasta el cierre de la jornada para evitar copias.
+          </div>
+        )}
 
         {/* TABLA DE POSICIONES */}
         <div className="bg-slate-900/80 rounded-2xl border border-slate-800 shadow-2xl overflow-hidden">
@@ -209,7 +266,6 @@ export default function Posiciones() {
                          <span className="text-xs font-black text-slate-500 bg-slate-950 border border-slate-800 px-2 py-1 rounded">{idx + 1}</span>}
                       </td>
                       <td className="p-4">
-                        {/* 🔥 MODIFICACIÓN: FOTO AL LADO DEL NOMBRE */}
                         <div className="flex items-center gap-3">
                           <div className={`relative shrink-0 rounded-full border-2 ${esLider ? 'border-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.3)]' : 'border-slate-700'}`}>
                             <img src={getAvatarUrl(jugador.nombre, jugador.avatar_url)} alt={jugador.nombre} className="w-8 h-8 rounded-full object-cover bg-slate-900" />
@@ -219,7 +275,7 @@ export default function Posiciones() {
                               {jugador.nombre} {esLider && <span className="ml-1 text-xs">👑</span>}
                             </span>
                             <div className="block md:hidden text-[10px] font-bold text-slate-500 mt-0.5 uppercase tracking-wide">
-                              Goles: <span className="text-slate-300 font-mono">{jugador.prediccionGoles}</span>
+                              Goles: {mostrarPicks ? <span className="text-slate-300 font-mono">{jugador.prediccionGoles}</span> : '🔒'}
                               {quinielaActiva.goles_totales_real !== null && <span className="text-amber-500/80 ml-2">(Dif: {jugador.golesDiff})</span>}
                             </div>
                           </div>
@@ -231,7 +287,9 @@ export default function Posiciones() {
                         </span>
                       </td>
                       <td className="p-4 text-center hidden md:table-cell">
-                        <span className="text-sm font-mono font-bold text-slate-300 bg-slate-950 px-2.5 py-1 rounded border border-slate-800">{jugador.prediccionGoles}</span>
+                        <span className="text-sm font-mono font-bold text-slate-300 bg-slate-950 px-2.5 py-1 rounded border border-slate-800">
+                          {mostrarPicks ? jugador.prediccionGoles : '🔒'}
+                        </span>
                         {quinielaActiva.goles_totales_real !== null && <span className="text-[10px] font-bold text-amber-500 ml-2 inline-block">Dif: {jugador.golesDiff}</span>}
                       </td>
                       <td className="p-4 text-right pr-6">
@@ -239,6 +297,15 @@ export default function Posiciones() {
                           {quinielaActiva.partidos.map((p: any, i: number) => {
                             const pronostico = jugador.pronosticos.find((pr: any) => pr.partido_id === p.id)
                             const estado = jugador.aciertos[p.id]
+                            
+                            if (!mostrarPicks) {
+                              return (
+                                <div key={p.id} className="w-5 h-5 md:w-6 md:h-6 flex items-center justify-center rounded text-[9px] md:text-[10px] bg-slate-950 border border-slate-800 text-slate-600" title={`Partido ${i+1} Oculto`}>
+                                  🔒
+                                </div>
+                              )
+                            }
+
                             let bgClass = "bg-slate-950 border-slate-800 text-slate-600"
                             if (estado === 'acierto') bgClass = "bg-green-600 border-green-500 text-white"
                             if (estado === 'fallo') bgClass = "bg-red-950/40 border-red-900 text-red-500"
@@ -272,48 +339,56 @@ export default function Posiciones() {
           </h3>
           
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {historial.map(quiniela => (
-              <div key={quiniela.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg relative overflow-hidden">
-                <div className="flex justify-between items-start mb-4 border-b border-slate-800 pb-3">
-                  <div>
-                    <h4 className="font-black text-white uppercase italic">{quiniela.nombre_jornada}</h4>
-                    <span className="text-[10px] text-slate-500 font-bold uppercase mt-1 block">Goles Reales: {quiniela.goles_totales_real}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="block text-[10px] text-amber-500 font-bold uppercase tracking-widest">Premio Entregado</span>
-                    <span className="text-xl font-black text-amber-400 drop-shadow-md">${quiniela.premioPesos.toFixed(0)} <span className="text-xs">MXN</span></span>
-                  </div>
-                </div>
+            {historial.map(quiniela => {
+              const esHistorialPromo = quiniela.tipo_premiacion?.toLowerCase().includes('promo');
 
-                <div className="space-y-2">
-                  {quiniela.ranking.slice(0, 3).map((jugador: any, idx: number) => (
-                    <div key={jugador.id} className="flex justify-between items-center bg-slate-950/50 p-2 rounded-lg border border-slate-800/50">
-                      <div className="flex items-center gap-3">
-                        <span className="text-lg w-6 text-center">
-                          {idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}
+              return (
+                <div key={quiniela.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg relative overflow-hidden">
+                  <div className="flex justify-between items-start mb-4 border-b border-slate-800 pb-3">
+                    <div>
+                      <h4 className="font-black text-white uppercase italic">{quiniela.nombre_jornada}</h4>
+                      <span className="text-[10px] text-slate-500 font-bold uppercase mt-1 block">Goles Reales: {quiniela.goles_totales_real}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="block text-[10px] text-amber-500 font-bold uppercase tracking-widest">Premio Entregado</span>
+                      {esHistorialPromo ? (
+                        <span className="text-sm font-black text-amber-400 drop-shadow-md uppercase block mt-1">
+                          {quiniela.tipo_premiacion === 'promo_top2' ? '1 CRD (1º Y 2º)' : '1 CRD (1º)'}
                         </span>
-                        {/* 🔥 MODIFICACIÓN: FOTO EN EL SALÓN DE LA FAMA */}
-                        <div className="flex items-center gap-2">
-                          <img src={getAvatarUrl(jugador.nombre, jugador.avatar_url)} alt={jugador.nombre} className="w-6 h-6 rounded-full object-cover border border-slate-700 bg-slate-900" />
-                          <span className={`font-black uppercase text-xs truncate max-w-[120px] sm:max-w-[180px] ${idx === 0 ? 'text-amber-400' : 'text-slate-300'}`}>
-                            {jugador.nombre}
+                      ) : (
+                        <span className="text-xl font-black text-amber-400 drop-shadow-md">
+                          ${quiniela.premioPesos.toFixed(0)} <span className="text-xs">MXN</span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    {quiniela.ranking.slice(0, 3).map((jugador: any, idx: number) => (
+                      <div key={jugador.id} className="flex justify-between items-center bg-slate-950/50 p-2 rounded-lg border border-slate-800/50">
+                        <div className="flex items-center gap-3">
+                          <span className="text-lg w-6 text-center">
+                            {idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <img src={getAvatarUrl(jugador.nombre, jugador.avatar_url)} alt={jugador.nombre} className="w-6 h-6 rounded-full object-cover border border-slate-700 bg-slate-900" />
+                            <span className={`font-black uppercase text-xs truncate max-w-[120px] sm:max-w-[180px] ${idx === 0 ? 'text-amber-400' : 'text-slate-300'}`}>
+                              {jugador.nombre}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 text-[10px] font-bold text-slate-500">
+                          <span title="Goles de Desempate">G: {jugador.prediccionGoles} (Dif: {jugador.golesDiff})</span>
+                          <span className="bg-slate-800 text-green-400 px-2 py-1 rounded border border-slate-700 w-12 text-center shadow-inner">
+                            {jugador.puntos} pts
                           </span>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3 text-[10px] font-bold text-slate-500">
-                        <span title="Goles de Desempate">G: {jugador.prediccionGoles} (Dif: {jugador.golesDiff})</span>
-                        <span className="bg-slate-800 text-green-400 px-2 py-1 rounded border border-slate-700 w-12 text-center shadow-inner">
-                          {jugador.puntos} pts
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                  {quiniela.ranking.length === 0 && (
-                    <div className="text-center text-[10px] text-slate-500 italic py-2">Sin participantes.</div>
-                  )}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </section>
       )}

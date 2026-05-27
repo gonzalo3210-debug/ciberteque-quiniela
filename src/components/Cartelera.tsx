@@ -241,7 +241,14 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
             </span>
             {/* INFORMATIVO SOBRE PREMIACIÓN DE LA JORNADA */}
             <span className="bg-purple-950/40 border border-purple-900/50 text-purple-400 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest">
-              🏆 Premiación: {prem === 'unico' ? 'Ganador Único' : prem === 'top2' ? 'Top 2 (70% - 30%)' : 'Top 3 (60% - 25% - 15%)'}
+              🏆 Premiación: {
+                prem === 'unico' ? 'Ganador Único (100%)' : 
+                prem === 'top2' ? 'Top 2 (70% - 30%)' : 
+                prem === 'top3' ? 'Top 3 (60% - 25% - 15%)' :
+                prem === 'promo_unico' ? 'Promo: 1er Lugar (1 Crédito)' :
+                prem === 'promo_top2' ? 'Promo: Top 2 (1 Crédito c/u)' : 
+                'Ganador Único'
+              }
             </span>
           </div>
 

@@ -421,14 +421,27 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
       }
       await supabase.from('quinielas').update({ goles_totales_real: parseInt(golesReales), estado: 'cerrada' }).eq('id', quiniela.id)
       
-      // 🔥 PAGOS AUTOMÁTICOS SI ES PROMO
+      // 🔥 PAGOS AUTOMÁTICOS SI ES PROMO (CORREGIDO PARA REGISTRAR COMO PREMIO)
       if (ganadoresAPagar.length > 0) {
         for (const ganador of ganadoresAPagar) {
           // Buscamos el saldo actual del ganador
           const { data: userData } = await supabase.from('usuarios').select('creditos_disponibles').eq('id', ganador.id).single()
           const saldoActual = userData?.creditos_disponibles || 0;
+          const nuevoSaldo = saldoActual + ganador.cantidad;
           
-          await recargarCreditos(ganador.id, saldoActual, ganador.cantidad);
+          // 1. Actualizamos el saldo en la base de datos
+          await supabase.from('usuarios').update({ creditos_disponibles: nuevoSaldo }).eq('id', ganador.id);
+          
+          // 2. Registramos el movimiento específicamente como PREMIO
+          await supabase.from('transacciones_creditos').insert([{ 
+            usuario_id: ganador.id, 
+            cantidad: ganador.cantidad, 
+            tipo_movimiento: 'premio_quiniela',
+            descripcion: `Premio: ${quiniela.nombre_jornada}`
+          }]);
+
+          // 3. Actualizamos el saldo en la pantalla si el jugador la tiene abierta
+          if (actualizarSaldoGlobal) actualizarSaldoGlobal(ganador.id, nuevoSaldo);
         }
         alert(`🎉 ¡Jornada Promocional Cerrada!\n\nLos premios de créditos han sido depositados automáticamente a los ganadores.`);
       } else {
