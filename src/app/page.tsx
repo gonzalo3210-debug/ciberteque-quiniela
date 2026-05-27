@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import { supabase } from '@/lib/supabase' // 🔥 IMPORTAMOS SUPABASE PARA LA SINCRONIZACIÓN
 import RegistroUsuario from '@/components/RegistroUsuario'
 import Cartelera from '@/components/Cartelera'
 import Login from '@/components/Login'
@@ -7,24 +8,42 @@ import MisJugadas from '@/components/MisJugadas'
 import AdminPanel from '@/components/AdminPanel'
 import Posiciones from '@/components/Posiciones'
 import MiBilletera from '@/components/MiBilletera'
-import Perfil from '@/components/Perfil' // 🔥 IMPORTAMOS EL NUEVO COMPONENTE
+import Perfil from '@/components/Perfil'
 
 export default function Home() {
   const [usuarioActivo, setUsuarioActivo] = useState<any>(null)
   const [vista, setVista] = useState<'login' | 'registro'>('login')
-  // 🔥 AÑADIMOS 'perfil' a los tipos de la pestaña
   const [pestana, setPestana] = useState<'jugar' | 'historial' | 'admin' | 'ranking' | 'billetera' | 'perfil'>('jugar')
   const [cargandoSesion, setCargandoSesion] = useState(true)
 
-  // 1. LA MAGIA DE LA MEMORIA: Recuperamos usuario y pestaña al abrir/recargar
+  // 1. LA MAGIA DE LA MEMORIA + SINCRONIZACIÓN SILENCIOSA
   useEffect(() => {
-    // Recuperar usuario
     const sesionGuardada = localStorage.getItem('club_pronosticos_usuario')
     if (sesionGuardada) {
-      setUsuarioActivo(JSON.parse(sesionGuardada))
+      const usuarioLocal = JSON.parse(sesionGuardada)
+      setUsuarioActivo(usuarioLocal)
+
+      // 🔥 Sincronización silenciosa con la Base de Datos
+      const refrescarDatos = async () => {
+        try {
+          const { data, error } = await supabase
+            .from('usuarios')
+            .select('*')
+            .eq('id', usuarioLocal.id)
+            .single()
+          
+          if (data && !error) {
+            setUsuarioActivo(data)
+            localStorage.setItem('club_pronosticos_usuario', JSON.stringify(data))
+          }
+        } catch (err) {
+          console.error("Error al sincronizar usuario:", err)
+        }
+      }
+      refrescarDatos()
     }
     
-    // Recuperar última pestaña visitada para evitar que te regrese al inicio si se recarga la página
+    // Recuperar última pestaña
     const pestanaGuardada = localStorage.getItem('club_pronosticos_pestana')
     if (pestanaGuardada) {
       setPestana(pestanaGuardada as any)
@@ -33,7 +52,7 @@ export default function Home() {
     setCargandoSesion(false)
   }, [])
 
-  // FUNCIÓN NUEVA: Cambia la pestaña y la guarda en la memoria del navegador
+  // FUNCIÓN NUEVA: Cambia la pestaña y la guarda en la memoria
   const cambiarPestana = (nuevaPestana: 'jugar' | 'historial' | 'admin' | 'ranking' | 'billetera' | 'perfil') => {
     setPestana(nuevaPestana)
     localStorage.setItem('club_pronosticos_pestana', nuevaPestana)
@@ -49,7 +68,7 @@ export default function Home() {
   const cerrarSesion = () => {
     setUsuarioActivo(null)
     localStorage.removeItem('club_pronosticos_usuario')
-    localStorage.removeItem('club_pronosticos_pestana') // Limpiamos la pestaña al salir
+    localStorage.removeItem('club_pronosticos_pestana')
     setPestana('jugar')
   }
 
@@ -57,6 +76,15 @@ export default function Home() {
   const manejarActualizacionSaldo = (idUsuarioModificado: string, nuevoSaldo: number) => {
     if (usuarioActivo && usuarioActivo.id === idUsuarioModificado) {
       const usuarioActualizado = { ...usuarioActivo, creditos_disponibles: nuevoSaldo }
+      setUsuarioActivo(usuarioActualizado)
+      localStorage.setItem('club_pronosticos_usuario', JSON.stringify(usuarioActualizado))
+    }
+  }
+
+  // 5. ACTUALIZAR CUALQUIER DATO DEL USUARIO (COMO LA FOTO DE PERFIL)
+  const manejarCambiosUsuario = (idUsuarioModificado: string, nuevosDatos: any) => {
+    if (usuarioActivo && usuarioActivo.id === idUsuarioModificado) {
+      const usuarioActualizado = { ...usuarioActivo, ...nuevosDatos }
       setUsuarioActivo(usuarioActualizado)
       localStorage.setItem('club_pronosticos_usuario', JSON.stringify(usuarioActualizado))
     }
@@ -99,7 +127,6 @@ export default function Home() {
           </div>
 
           <div className="flex flex-wrap bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800/50 mb-10 w-full max-w-4xl shadow-2xl">
-            {/* 🔥 BOTÓN DEL PERFIL */}
             <button 
               onClick={() => cambiarPestana('perfil')}
               className={`flex-1 min-w-[100px] py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
@@ -188,9 +215,12 @@ export default function Home() {
               <MiBilletera usuarioId={usuarioActivo.id} />
             )}
 
-            {/* 🔥 RENDERIZAMOS EL COMPONENTE PERFIL */}
+            {/* 🔥 LE PASAMOS onUpdate AL PERFIL */}
             {pestana === 'perfil' && (
-              <Perfil usuarioActivo={usuarioActivo} />
+              <Perfil 
+                usuarioActivo={usuarioActivo} 
+                onUpdate={(nuevosDatos) => manejarCambiosUsuario(usuarioActivo.id, nuevosDatos)}
+              />
             )}
             
             {pestana === 'admin' && usuarioActivo.rol === 'admin' && (

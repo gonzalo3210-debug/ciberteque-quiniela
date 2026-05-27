@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
 export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoGlobal?: (id: string, nuevo: number) => void }) {
   
   // 🌐 AQUÍ PONES EL LINK DE TU PÁGINA PÚBLICA PARA QUE SE VAYA EN EL WHATSAPP
-  const ENLACE_PUBLICO_RANKING = "https://tu-sitio-en-vercel.app/ranking" // <-- CÁMBIALO POR TU LINK REAL
+  const ENLACE_PUBLICO_RANKING = "https://ciberteque-quiniela.vercel.app/" // <-- CÁMBIALO POR TU LINK REAL
 
   // --- ESTADOS GLOBALES ---
   const [adminVista, setAdminVista] = useState<'recargas' | 'resultados' | 'crear' | 'equipos' | 'captura'>('recargas')
@@ -34,7 +34,8 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
   const [nombreJornada, setNombreJornada] = useState('')
   const [precioTicket, setPrecioTicket] = useState('1')
   const [fechaCierre, setFechaCierre] = useState('')
-  const [tipoPremiacion, setTipoPremiacion] = useState<'unico' | 'top2' | 'top3'>('unico')
+  // 🔥 AÑADIMOS LAS OPCIONES PROMO AL ESTADO INICIAL
+  const [tipoPremiacion, setTipoPremiacion] = useState<'unico' | 'top2' | 'top3' | 'promo_unico' | 'promo_top2'>('unico')
   const [partidosNuevos, setPartidosNuevos] = useState([{ local: '', visitante: '', fecha_hora: '' }])
   const [creando, setCreando] = useState(false)
   const [ligaFiltroJornada, setLigaFiltroJornada] = useState('Todas')
@@ -44,7 +45,8 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
   const [editandoQuinielaId, setEditandoQuinielaId] = useState<string | null>(null)
   const [editNombreJornada, setEditNombreJornada] = useState('')
   const [editFechaCierre, setEditFechaCierre] = useState('')
-  const [editTipoPremiacion, setEditTipoPremiacion] = useState<'unico' | 'top2' | 'top3'>('unico')
+  // 🔥 AÑADIMOS LAS OPCIONES PROMO A LA EDICIÓN
+  const [editTipoPremiacion, setEditTipoPremiacion] = useState<'unico' | 'top2' | 'top3' | 'promo_unico' | 'promo_top2'>('unico')
   const [editPartidos, setEditPartidos] = useState<any[]>([])
   const [guardandoEdicion, setGuardandoEdicion] = useState(false)
 
@@ -187,8 +189,6 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
     setResultadosReales(res)
     setMarcadoresReales(marcs) 
     
-    // Si hay goles reales ya anotados, obligamos a que el recuadro muestre la suma real
-    // Si no hay nada, respeta lo que diga la base de datos
     if (hayGoles) {
       setGolesReales(sumaGolesCalculada.toString());
     } else {
@@ -196,9 +196,9 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
     }
 
     const { data: tData } = await supabase.from('tickets').select('id, usuario_id, prediccion_goles_total, pronosticos(partido_id, eleccion_usuario)').eq('quiniela_id', qData.id)
-    const { data: uData } = await supabase.from('usuarios').select('id, nombre, telefono')
+    const { data: uData } = await supabase.from('usuarios').select('id, nombre, telefono, creditos_disponibles')
     const mapaU: Record<string, any> = {}
-    if (uData) uData.forEach(u => mapaU[u.id] = { nombre: u.nombre, telefono: u.telefono })
+    if (uData) uData.forEach(u => mapaU[u.id] = { nombre: u.nombre, telefono: u.telefono, creditos: u.creditos_disponibles })
     
     if (tData) {
       const rCalc = tData.map(ticket => {
@@ -210,14 +210,15 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
           if (p && p.resultado_real === pr.eleccion_usuario) pts++
         })
         
-        // Compara contra la suma real calculada, no contra el error de la DB
         const golesRealesAct = hayGoles ? sumaGolesCalculada : (qData.goles_totales_real !== null ? qData.goles_totales_real : -1);
         const golesDiff = golesRealesAct !== -1 ? Math.abs((ticket.prediccion_goles_total || 0) - golesRealesAct) : 999;
 
         return { 
           id: ticket.id, 
+          usuario_id: ticket.usuario_id,
           nombre: mapaU[ticket.usuario_id]?.nombre || 'Mostrador', 
           telefono: mapaU[ticket.usuario_id]?.telefono || '', 
+          creditos_disponibles: mapaU[ticket.usuario_id]?.creditos || 0,
           puntos: pts, 
           prediccionGoles: ticket.prediccion_goles_total, 
           golesDiff: golesDiff, 
@@ -231,11 +232,9 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
     }
   }
 
-  // 🔥 NUEVA LÓGICA DE SUMA AUTOMÁTICA INFALIBLE
   const handleMarcadorExacto = (partidoId: string, tipo: 'l' | 'v', valor: string) => {
     const numValor = valor.replace(/[^0-9]/g, ''); 
     
-    // Primero, preparamos cómo van a quedar los marcadores
     const nuevosMarcadores = {
       ...marcadoresReales,
       [partidoId]: {
@@ -248,25 +247,21 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
     let sumaTotal = 0;
     let hayGoles = false;
 
-    // Repasamos todos los partidos para sumar TODO lo que haya
     partidos.forEach(p => {
       const marcadorP = nuevosMarcadores[p.id] || { l: '', v: '' };
       const ml = parseInt(marcadorP.l);
       const mv = parseInt(marcadorP.v);
       
-      // Checar si hay que pintar la L, E o V
       if (marcadorP.l !== '' && marcadorP.v !== '' && !isNaN(ml) && !isNaN(mv)) {
         if (ml > mv) nuevosResultados[p.id] = 'L';
         else if (ml === mv) nuevosResultados[p.id] = 'E';
         else nuevosResultados[p.id] = 'V';
       }
 
-      // Sumar los goles
       if (!isNaN(ml)) { sumaTotal += ml; hayGoles = true; }
       if (!isNaN(mv)) { sumaTotal += mv; hayGoles = true; }
     });
     
-    // Actualizamos toda la pantalla de un solo golpe
     setMarcadoresReales(nuevosMarcadores);
     setResultadosReales(nuevosResultados);
     setGolesReales(hayGoles ? sumaTotal.toString() : '');
@@ -287,7 +282,6 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
       }
       
       if (golesReales !== '') {
-        // Al guardar, reescribimos goles_totales_real con la suma correcta
         await supabase.from('quinielas').update({ goles_totales_real: parseInt(golesReales) }).eq('id', quiniela.id)
       }
 
@@ -319,11 +313,21 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
 
     const totalBoletosAdmin = rankingAdmin?.length || 0;
     const precioBoletoCrds = quiniela.precio_ticket || 1;
-    const bolsaPesos = totalBoletosAdmin * precioBoletoCrds * VALOR_CREDITO * PORCENTAJE_PREMIO;
+    let bolsaPesos = totalBoletosAdmin * precioBoletoCrds * VALOR_CREDITO * PORCENTAJE_PREMIO;
+    
+    // 🔥 LÓGICA PARA TEXTO PROMO WHATSAPP
+    const tPremio = quiniela.tipo_premiacion || 'unico';
+    if (tPremio === 'promo_unico') bolsaPesos = VALOR_CREDITO;
+    else if (tPremio === 'promo_top2') bolsaPesos = VALOR_CREDITO * 2;
 
     let texto = `🏆 *AVANCE DE QUINIELA: ${quiniela.nombre_jornada}* 🏆\n\n`;
     texto += `⚽ Partidos finalizados: *${partidosJugados} de ${partidos.length}*\n`;
-    texto += `💰 Bolsa Actual: *$${bolsaPesos.toFixed(0)} MXN*\n\n`;
+    
+    if (tPremio.startsWith('promo')) {
+      texto += `🎁 Bolsa Promocional Garantizada: *$${bolsaPesos.toFixed(0)} MXN*\n\n`;
+    } else {
+      texto += `💰 Bolsa Actual: *$${bolsaPesos.toFixed(0)} MXN*\n\n`;
+    }
     
     texto += `🔥 *TOP LÍDERES ACTUALES* 🔥\n`;
     const topJugadores = rankingAdmin.slice(0, 10);
@@ -368,6 +372,9 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
     let desgloseTexto = '';
     const tPremio = quiniela.tipo_premiacion || 'unico';
 
+    // 🔥 PREPARAR LA ESTRUCTURA DE PAGOS AUTOMÁTICOS PROMO
+    const ganadoresAPagar: { id: string, nombre: string, cantidad: number }[] = [];
+
     if (tPremio === 'unico') {
       desgloseTexto = `Ganador 1er Lugar: ${rankingAdmin[0].nombre} -> $${premioBolsa80.toFixed(0)} MXN (100%)`;
     } else if (tPremio === 'top2') {
@@ -379,9 +386,25 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
       const p2 = rankingAdmin.length > 1 ? premioBolsa80 * 0.25 : 0;
       const p3 = rankingAdmin.length > 2 ? premioBolsa80 * 0.15 : 0;
       desgloseTexto = `1er Lugar: ${rankingAdmin[0].nombre} -> $${p1.toFixed(0)} MXN (60%)\n2do Lugar: ${rankingAdmin[1]?.nombre || 'N/A'} -> $${p2.toFixed(0)} MXN (25%)\n3er Lugar: ${rankingAdmin[2]?.nombre || 'N/A'} -> $${p3.toFixed(0)} MXN (15%)`;
+    } 
+    // 🔥 NUEVAS LÓGICAS PROMO
+    else if (tPremio === 'promo_unico') {
+      desgloseTexto = `🎁 EVENTO PROMOCIONAL 🎁\nGanador 1er Lugar: ${rankingAdmin[0].nombre} -> Gana 1 Crédito Patrocinado ($30 MXN)\n(Se abonará automáticamente a su billetera digital)`;
+      ganadoresAPagar.push({ id: rankingAdmin[0].usuario_id, nombre: rankingAdmin[0].nombre, cantidad: 1 });
+    } else if (tPremio === 'promo_top2') {
+      desgloseTexto = `🎁 EVENTO PROMOCIONAL 🎁\n1er Lugar: ${rankingAdmin[0].nombre} -> Gana 1 Crédito\n`;
+      ganadoresAPagar.push({ id: rankingAdmin[0].usuario_id, nombre: rankingAdmin[0].nombre, cantidad: 1 });
+      
+      if (rankingAdmin.length > 1) {
+        desgloseTexto += `2do Lugar: ${rankingAdmin[1].nombre} -> Gana 1 Crédito\n`;
+        ganadoresAPagar.push({ id: rankingAdmin[1].usuario_id, nombre: rankingAdmin[1].nombre, cantidad: 1 });
+      } else {
+        desgloseTexto += `2do Lugar: Nadie (Solo 1 jugador)\n`;
+      }
+      desgloseTexto += `(Se abonarán automáticamente a sus billeteras digitales)`;
     }
 
-    const confirmar = window.confirm(`⚠️ ¿DENTRO DE CAJA REAL? ⚠️\n\nVas a cerrar la jornada de forma DEFINITIVA.\n\nFormato: ${tPremio.toUpperCase()}\nBolsa total a entregar: $${premioBolsa80.toFixed(0)} MXN\n\nDesglose de Premiación:\n${desgloseTexto}\n\n¿Confirmas la liquidación de premios?`)
+    const confirmar = window.confirm(`⚠️ ¿DENTRO DE CAJA REAL? ⚠️\n\nVas a cerrar la jornada de forma DEFINITIVA.\n\nFormato: ${tPremio.replace('_', ' ').toUpperCase()}\n\nDesglose de Premiación:\n${desgloseTexto}\n\n¿Confirmas la liquidación de premios?`)
     if (!confirmar) return
 
     setCalificando(true)
@@ -397,7 +420,21 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
         }).eq('id', pId)
       }
       await supabase.from('quinielas').update({ goles_totales_real: parseInt(golesReales), estado: 'cerrada' }).eq('id', quiniela.id)
-      alert(`🎉 ¡Jornada Cerrada Exitosamente!\n\nRealiza los pagos correspondientes en mostrador.`)
+      
+      // 🔥 PAGOS AUTOMÁTICOS SI ES PROMO
+      if (ganadoresAPagar.length > 0) {
+        for (const ganador of ganadoresAPagar) {
+          // Buscamos el saldo actual del ganador
+          const { data: userData } = await supabase.from('usuarios').select('creditos_disponibles').eq('id', ganador.id).single()
+          const saldoActual = userData?.creditos_disponibles || 0;
+          
+          await recargarCreditos(ganador.id, saldoActual, ganador.cantidad);
+        }
+        alert(`🎉 ¡Jornada Promocional Cerrada!\n\nLos premios de créditos han sido depositados automáticamente a los ganadores.`);
+      } else {
+        alert(`🎉 ¡Jornada Cerrada Exitosamente!\n\nRealiza los pagos de dinero en efectivo en el mostrador.`);
+      }
+
       await cargarPartidosJornada()
     } catch (e) {
       alert('Error al liquidar la jornada.')
@@ -694,6 +731,11 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
   const cajaPremioPesos = cajaTotalPesos * PORCENTAJE_PREMIO
   const cajaCiberPesos = cajaTotalPesos * PORCENTAJE_ADMIN
   const ganadorActualAdmin = totalBoletosAdmin > 0 ? rankingAdmin[0] : null
+  
+  // 🔥 LÓGICAS PROMO PARA VISTA ÁRBITRO
+  const esPromoUnico = quiniela?.tipo_premiacion === 'promo_unico';
+  const esPromoTop2 = quiniela?.tipo_premiacion === 'promo_top2';
+  const esCualquierPromo = esPromoUnico || esPromoTop2;
 
   useEffect(() => {
     const handleAfterPrint = () => setTipoImpresion(null)
@@ -890,9 +932,15 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
              <div>
                <label className="text-[10px] text-slate-500 font-bold uppercase mb-2 block">Tipo de Premiación</label>
                <select value={tipoPremiacion} onChange={(e: any) => setTipoPremiacion(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-3 text-white outline-none focus:border-green-500 transition-all text-xs font-bold h-[46px]">
-                 <option value="unico">Ganador Único (100% al 1ro)</option>
-                 <option value="top2">Top 2 (70% - 30%)</option>
-                 <option value="top3">Top 3 (60% - 25% - 15%)</option>
+                 <optgroup label="Cobro Normal (80%)">
+                   <option value="unico">Ganador Único (100% al 1ro)</option>
+                   <option value="top2">Top 2 (70% - 30%)</option>
+                   <option value="top3">Top 3 (60% - 25% - 15%)</option>
+                 </optgroup>
+                 <optgroup label="Eventos Gratis (Premios Fijos)">
+                   <option value="promo_unico">Promo Ganador Único (1 Crédito)</option>
+                   <option value="promo_top2">Promo Top 2 (1 y 1 Crédito)</option>
+                 </optgroup>
                </select>
              </div>
            </div>
@@ -1015,7 +1063,7 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-slate-950/80 p-5 rounded-2xl border border-red-900/30 shadow-inner">
+                <div className={`grid grid-cols-1 md:grid-cols-4 gap-4 p-5 rounded-2xl border shadow-inner ${esCualquierPromo ? 'bg-purple-950/20 border-purple-900/50' : 'bg-slate-950/80 border-red-900/30'}`}>
                   <div className="text-center p-3 bg-slate-900 border border-slate-800 rounded-xl">
                     <span className="block text-[10px] text-slate-400 font-bold uppercase">Boletos Totales</span>
                     <span className="text-2xl font-black text-white">{totalBoletosAdmin}</span>
@@ -1024,18 +1072,37 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
                     <span className="block text-[10px] text-slate-400 font-bold uppercase">Caja Recaudada</span>
                     <span className="text-2xl font-black text-white">${cajaTotalPesos} <span className="text-[10px] text-slate-500">MXN</span></span>
                   </div>
-                  <div className="text-center p-3 bg-slate-900 border border-amber-500/20 rounded-xl bg-amber-500/5">
-                    <span className="block text-[10px] text-amber-500 font-black uppercase">Premio Ganador (80%)</span>
-                    <span className="text-2xl font-black text-amber-400">${cajaPremioPesos.toFixed(0)} <span className="text-[10px] text-amber-600">MXN</span></span>
-                  </div>
-                  <div className="text-center p-3 bg-slate-900 border border-green-500/20 rounded-xl bg-green-500/5">
-                    <span className="block text-[10px] text-green-500 font-black uppercase">Tu Ganancia Ciber (20%)</span>
-                    <span className="text-2xl font-black text-green-400">${cajaCiberPesos.toFixed(0)} <span className="text-[10px] text-green-600">MXN</span></span>
-                  </div>
+                  
+                  {/* 🔥 SI ES PROMO, MUESTRA LOS PREMIOS FIJOS EN LUGAR DE PORCENTAJES */}
+                  {esCualquierPromo ? (
+                    <div className="md:col-span-2 text-center p-3 bg-purple-900/20 border border-purple-500/30 rounded-xl">
+                      <span className="block text-[10px] text-purple-400 font-black uppercase tracking-widest mb-1">🎁 Evento Promocional Activo 🎁</span>
+                      <span className="text-lg font-black text-purple-300">
+                        {esPromoUnico ? '1 Crédito al Ganador' : '1 Crédito al 1ro y 2do Lugar'}
+                      </span>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="text-center p-3 bg-slate-900 border border-amber-500/20 rounded-xl bg-amber-500/5">
+                        <span className="block text-[10px] text-amber-500 font-black uppercase">Premio Ganador (80%)</span>
+                        <span className="text-2xl font-black text-amber-400">${cajaPremioPesos.toFixed(0)} <span className="text-[10px] text-amber-600">MXN</span></span>
+                      </div>
+                      <div className="text-center p-3 bg-slate-900 border border-green-500/20 rounded-xl bg-green-500/5">
+                        <span className="block text-[10px] text-green-500 font-black uppercase">Tu Ganancia Ciber (20%)</span>
+                        <span className="text-2xl font-black text-green-400">${cajaCiberPesos.toFixed(0)} <span className="text-[10px] text-green-600">MXN</span></span>
+                      </div>
+                    </>
+                  )}
                 </div>
 
-                <div className="p-3 bg-slate-950/50 rounded-xl text-center text-xs border border-slate-800 text-slate-400 font-bold uppercase">
-                  🏆 Formato de Premiación: <span className="text-blue-400 font-black">{quiniela.tipo_premiacion === 'unico' ? 'GANADOR ÚNICO (100%)' : quiniela.tipo_premiacion === 'top2' ? 'TOP 2 (70% - 30%)' : 'TOP 3 (60% - 25% - 15%)'}</span>
+                <div className={`p-3 rounded-xl text-center text-xs border font-bold uppercase ${esCualquierPromo ? 'bg-purple-950/30 border-purple-800 text-purple-300' : 'bg-slate-950/50 border-slate-800 text-slate-400'}`}>
+                  🏆 Formato de Premiación: <span className={`${esCualquierPromo ? 'text-white' : 'text-blue-400'} font-black`}>
+                    {quiniela.tipo_premiacion === 'unico' ? 'GANADOR ÚNICO (100%)' : 
+                     quiniela.tipo_premiacion === 'top2' ? 'TOP 2 (70% - 30%)' : 
+                     quiniela.tipo_premiacion === 'top3' ? 'TOP 3 (60% - 25% - 15%)' :
+                     quiniela.tipo_premiacion === 'promo_unico' ? 'PROMO: GANADOR ÚNICO (1 CRÉDITO)' :
+                     'PROMO: TOP 2 (1 CRÉDITO C/U)'}
+                  </span>
                 </div>
 
                 <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-md">
@@ -1062,9 +1129,7 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
                                   {r.nombre}
                                 </div>
                                 <div className="flex">
-                                  {/* 🔥 BOTÓN PARA COMPARTIR POR WHATSAPP */}
                                   <button onClick={() => enviarWhatsAppBoleto(r)} className="text-[14px] text-green-400 hover:text-green-300 p-1.5 bg-slate-800 hover:bg-slate-700 rounded transition-all shadow-sm mr-1" title="Enviar confirmación por WhatsApp">📲</button>
-                                  {/* 🔥 BOTÓN DE EDITAR JUGADA */}
                                   <button onClick={() => abrirEdicionTicket(r)} className="text-[14px] text-blue-400 hover:text-blue-300 p-1.5 bg-slate-800 hover:bg-slate-700 rounded transition-all shadow-sm mr-1" title="Editar Pronósticos / Goles de este jugador">✏️</button>
                                   <button onClick={() => { 
                                     setTicketAImprimir({ 
@@ -1108,7 +1173,6 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
                   </button>
                 </div>
 
-                {/* 🔥 SECCIÓN DE CAPTURA DE MARCADORES EXACTOS */}
                 <div className="space-y-3">
                   {(partidos || []).map((partido) => {
                     const seleccionado = resultadosReales[partido.id];
@@ -1121,7 +1185,6 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
                         </div>
                         
                         <div className="flex w-full md:w-auto items-center justify-center gap-3">
-                          {/* Inputs de marcador exacto (ahora con placeholder vacío para no confundir) */}
                           <div className="flex items-center gap-2 bg-slate-900 p-1.5 rounded-lg border border-slate-700">
                             <input 
                               type="number" 
@@ -1140,7 +1203,6 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
                             />
                           </div>
 
-                          {/* Botones visuales automáticos */}
                           <div className="flex gap-1 ml-2">
                             {['L', 'E', 'V'].map((opc) => (
                               <div key={opc} className={`w-8 h-8 flex items-center justify-center rounded font-black text-xs transition-all ${seleccionado === opc ? 'bg-red-600 shadow-md shadow-red-900/40 text-white' : 'bg-slate-900/50 border border-slate-800 text-slate-600'}`}>
@@ -1154,7 +1216,6 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
                   })}
                 </div>
 
-                {/* CAMPO DE GOLES ACTUALIZADO: AHORA ES TOTALMENTE MANUAL */}
                 <div className="mt-6 p-5 bg-red-950/10 border border-red-900/40 rounded-xl max-w-xs mx-auto text-center relative overflow-hidden">
                   <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-600 to-amber-500"></div>
                   <label className="block text-red-500 font-black uppercase text-[10px] tracking-wider mb-1">Resultado Oficial (Suma)</label>
@@ -1166,8 +1227,8 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
                   <button onClick={guardarYCalificar} disabled={calificando || Object.keys(resultadosReales || {}).length === 0} className={`w-full sm:w-auto px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-all ${calificando ? 'bg-slate-800 text-slate-600' : 'bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white shadow-md'}`}>
                     💾 Guardar Avance en Vivo
                   </button>
-                  <button onClick={cerrarJornadaDefinitivo} disabled={calificando || totalBoletosAdmin === 0} className={`w-full sm:w-auto px-8 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${calificando || totalBoletosAdmin === 0 ? 'bg-slate-800 text-slate-600 opacity-50 cursor-not-allowed' : 'bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white shadow-lg shadow-red-950/50 hover:scale-105 active:scale-95'}`}>
-                    🏆 Cerrar Jornada y Liquidar
+                  <button onClick={cerrarJornadaDefinitivo} disabled={calificando || totalBoletosAdmin === 0} className={`w-full sm:w-auto px-8 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${calificando || totalBoletosAdmin === 0 ? 'bg-slate-800 text-slate-600 opacity-50 cursor-not-allowed' : esCualquierPromo ? 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white shadow-lg shadow-purple-900/50 hover:scale-105 active:scale-95' : 'bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white shadow-lg shadow-red-950/50 hover:scale-105 active:scale-95'}`}>
+                    {esCualquierPromo ? '🎁 Cerrar y Pagar Créditos' : '🏆 Cerrar Jornada y Liquidar'}
                   </button>
                 </div>
               </>
@@ -1198,9 +1259,15 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
                 <div>
                   <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">Formato Premiación</label>
                   <select value={editTipoPremiacion} onChange={(e: any) => setEditTipoPremiacion(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white text-xs font-bold outline-none focus:border-blue-500 h-[38px]">
-                    <option value="unico">Ganador Único (100%)</option>
-                    <option value="top2">Top 2 (70% - 30%)</option>
-                    <option value="top3">Top 3 (60% - 25% - 15%)</option>
+                    <optgroup label="Cobro Normal (80%)">
+                      <option value="unico">Ganador Único (100%)</option>
+                      <option value="top2">Top 2 (70% - 30%)</option>
+                      <option value="top3">Top 3 (60% - 25% - 15%)</option>
+                    </optgroup>
+                    <optgroup label="Eventos Gratis (Premios Fijos)">
+                      <option value="promo_unico">Promo Ganador Único</option>
+                      <option value="promo_top2">Promo Top 2</option>
+                    </optgroup>
                   </select>
                 </div>
               </div>
@@ -1293,7 +1360,6 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
       )}
 
       {/* --- SECCIÓN DE IMPRESIÓN --- */}
-      {/* 1. Imprime 2 boletos en blanco por hoja */}
       {quiniela && adminVista === 'resultados' && tipoImpresion === 'tickets' && (
         <div className="hidden print:flex print:flex-row print:justify-between print:w-full print:bg-white print:text-black print:fixed print:inset-0 print:p-8 print:m-0 z-50">
           {[1, 2].map((num) => (
@@ -1336,7 +1402,6 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
         </div>
       )}
 
-      {/* 2. Imprime SOLO 1 recibo relleno en la hoja para un cliente */}
       {quiniela && (tipoImpresion === 'recibo') && ticketAImprimir && (
         <div className="hidden print:flex print:flex-col print:items-start print:w-full print:bg-white print:text-black print:fixed print:inset-0 print:p-8 print:m-0 z-50">
           <div className="w-full max-w-sm border-2 border-black rounded-2xl p-4 bg-white flex flex-col justify-between">
