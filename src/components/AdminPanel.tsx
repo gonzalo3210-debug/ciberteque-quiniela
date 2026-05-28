@@ -34,7 +34,6 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
   const [nombreJornada, setNombreJornada] = useState('')
   const [precioTicket, setPrecioTicket] = useState('1')
   const [fechaCierre, setFechaCierre] = useState('')
-  // 🔥 AÑADIMOS LAS OPCIONES PROMO AL ESTADO INICIAL
   const [tipoPremiacion, setTipoPremiacion] = useState<'unico' | 'top2' | 'top3' | 'promo_unico' | 'promo_top2'>('unico')
   const [partidosNuevos, setPartidosNuevos] = useState([{ local: '', visitante: '', fecha_hora: '' }])
   const [creando, setCreando] = useState(false)
@@ -45,7 +44,6 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
   const [editandoQuinielaId, setEditandoQuinielaId] = useState<string | null>(null)
   const [editNombreJornada, setEditNombreJornada] = useState('')
   const [editFechaCierre, setEditFechaCierre] = useState('')
-  // 🔥 AÑADIMOS LAS OPCIONES PROMO A LA EDICIÓN
   const [editTipoPremiacion, setEditTipoPremiacion] = useState<'unico' | 'top2' | 'top3' | 'promo_unico' | 'promo_top2'>('unico')
   const [editPartidos, setEditPartidos] = useState<any[]>([])
   const [guardandoEdicion, setGuardandoEdicion] = useState(false)
@@ -179,8 +177,6 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
       
       if (p.goles_local !== null && p.goles_local !== undefined && p.goles_visitante !== null && p.goles_visitante !== undefined) {
         marcs[p.id] = { l: p.goles_local.toString(), v: p.goles_visitante.toString() };
-        
-        // Sumamos al vuelo para corregir errores viejos de base de datos
         sumaGolesCalculada += p.goles_local + p.goles_visitante;
         hayGoles = true;
       }
@@ -312,10 +308,9 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
     partidos.forEach(p => { if (resultadosReales[p.id]) partidosJugados++; });
 
     const totalBoletosAdmin = rankingAdmin?.length || 0;
-    const precioBoletoCrds = quiniela.precio_ticket || 1;
+    const precioBoletoCrds = quiniela.precio_ticket ?? 1; // 🔥 Corrección a ??
     let bolsaPesos = totalBoletosAdmin * precioBoletoCrds * VALOR_CREDITO * PORCENTAJE_PREMIO;
     
-    // 🔥 LÓGICA PARA TEXTO PROMO WHATSAPP
     const tPremio = quiniela.tipo_premiacion || 'unico';
     if (tPremio === 'promo_unico') bolsaPesos = VALOR_CREDITO;
     else if (tPremio === 'promo_top2') bolsaPesos = VALOR_CREDITO * 2;
@@ -366,45 +361,91 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
     if (golesReales === '') return alert('🚨 Ingresa primero el "Resultado Oficial" de goles totales.')
     if (!rankingAdmin || rankingAdmin.length === 0) return alert('No hay tickets registrados.')
 
-    const totalBoletos = rankingAdmin.length || 0
-    const totalRecaudadoPesos = totalBoletos * (quiniela.precio_ticket || 1) * VALOR_CREDITO
-    const premioBolsa80 = totalRecaudadoPesos * PORCENTAJE_PREMIO
-    let desgloseTexto = '';
+    const totalBoletos = rankingAdmin.length || 0;
+    const precioBoletoCrds = quiniela.precio_ticket ?? 1; // 🔥 Corrección a ??
+    const totalRecaudadoPesos = totalBoletos * precioBoletoCrds * VALOR_CREDITO;
+    const premioBolsa80 = totalRecaudadoPesos * PORCENTAJE_PREMIO;
     const tPremio = quiniela.tipo_premiacion || 'unico';
 
-    // 🔥 PREPARAR LA ESTRUCTURA DE PAGOS AUTOMÁTICOS PROMO
+    let desgloseTexto = '';
     const ganadoresAPagar: { id: string, nombre: string, cantidad: number }[] = [];
 
-    if (tPremio === 'unico') {
-      desgloseTexto = `Ganador 1er Lugar: ${rankingAdmin[0].nombre} -> $${premioBolsa80.toFixed(0)} MXN (100%)`;
-    } else if (tPremio === 'top2') {
-      const p1 = premioBolsa80 * 0.70;
-      const p2 = rankingAdmin.length > 1 ? premioBolsa80 * 0.30 : 0;
-      desgloseTexto = `1er Lugar: ${rankingAdmin[0].nombre} -> $${p1.toFixed(0)} MXN (70%)\n2do Lugar: ${rankingAdmin[1]?.nombre || 'N/A'} -> $${p2.toFixed(0)} MXN (30%)`;
-    } else if (tPremio === 'top3') {
-      const p1 = premioBolsa80 * 0.60;
-      const p2 = rankingAdmin.length > 1 ? premioBolsa80 * 0.25 : 0;
-      const p3 = rankingAdmin.length > 2 ? premioBolsa80 * 0.15 : 0;
-      desgloseTexto = `1er Lugar: ${rankingAdmin[0].nombre} -> $${p1.toFixed(0)} MXN (60%)\n2do Lugar: ${rankingAdmin[1]?.nombre || 'N/A'} -> $${p2.toFixed(0)} MXN (25%)\n3er Lugar: ${rankingAdmin[2]?.nombre || 'N/A'} -> $${p3.toFixed(0)} MXN (15%)`;
-    } 
-    // 🔥 NUEVAS LÓGICAS PROMO
-    else if (tPremio === 'promo_unico') {
-      desgloseTexto = `🎁 EVENTO PROMOCIONAL 🎁\nGanador 1er Lugar: ${rankingAdmin[0].nombre} -> Gana 1 Crédito Patrocinado ($30 MXN)\n(Se abonará automáticamente a su billetera digital)`;
-      ganadoresAPagar.push({ id: rankingAdmin[0].usuario_id, nombre: rankingAdmin[0].nombre, cantidad: 1 });
-    } else if (tPremio === 'promo_top2') {
-      desgloseTexto = `🎁 EVENTO PROMOCIONAL 🎁\n1er Lugar: ${rankingAdmin[0].nombre} -> Gana 1 Crédito\n`;
-      ganadoresAPagar.push({ id: rankingAdmin[0].usuario_id, nombre: rankingAdmin[0].nombre, cantidad: 1 });
-      
-      if (rankingAdmin.length > 1) {
-        desgloseTexto += `2do Lugar: ${rankingAdmin[1].nombre} -> Gana 1 Crédito\n`;
-        ganadoresAPagar.push({ id: rankingAdmin[1].usuario_id, nombre: rankingAdmin[1].nombre, cantidad: 1 });
-      } else {
-        desgloseTexto += `2do Lugar: Nadie (Solo 1 jugador)\n`;
+    // 🔥 LÓGICA DE EMPATES ABSOLUTOS: Agrupamos a los jugadores que tengan los mismos puntos y misma diferencia
+    const grupos: any[][] = [];
+    if (rankingAdmin && rankingAdmin.length > 0) {
+      let currentGroup = [rankingAdmin[0]];
+      for (let i = 1; i < rankingAdmin.length; i++) {
+        const prev = rankingAdmin[i - 1];
+        const curr = rankingAdmin[i];
+        if (curr.puntos === prev.puntos && curr.golesDiff === prev.golesDiff) {
+          currentGroup.push(curr);
+        } else {
+          grupos.push(currentGroup);
+          currentGroup = [curr];
+        }
       }
-      desgloseTexto += `(Se abonarán automáticamente a sus billeteras digitales)`;
+      grupos.push(currentGroup);
     }
 
-    const confirmar = window.confirm(`⚠️ ¿DENTRO DE CAJA REAL? ⚠️\n\nVas a cerrar la jornada de forma DEFINITIVA.\n\nFormato: ${tPremio.replace('_', ' ').toUpperCase()}\n\nDesglose de Premiación:\n${desgloseTexto}\n\n¿Confirmas la liquidación de premios?`)
+    // Calcular distribución de bolsa basada en los grupos
+    if (tPremio === 'unico' || tPremio === 'top2' || tPremio === 'top3') {
+      let porcentajes: number[] = [];
+      if (tPremio === 'unico') porcentajes = [1.0];
+      else if (tPremio === 'top2') porcentajes = [0.70, 0.30];
+      else if (tPremio === 'top3') porcentajes = [0.60, 0.25, 0.15];
+
+      let lugarActual = 0; // Índice del lugar que se está asignando (0 = 1er lugar)
+      
+      for (let i = 0; i < grupos.length; i++) {
+        const grupo = grupos[i];
+        const lugaresTomados = grupo.length;
+        let porcentajeTotalGrupo = 0;
+        
+        // Sumamos los porcentajes de los lugares que este grupo está acaparando
+        for (let j = 0; j < lugaresTomados; j++) {
+          if (lugarActual + j < porcentajes.length) {
+            porcentajeTotalGrupo += porcentajes[lugarActual + j];
+          }
+        }
+        
+        if (porcentajeTotalGrupo > 0) {
+          const premioPorPersona = (premioBolsa80 * porcentajeTotalGrupo) / grupo.length;
+          const porcentajePorPersonaTexto = ((porcentajeTotalGrupo * 100) / grupo.length).toFixed(1);
+          
+          desgloseTexto += `\n🏅 Nivel de Premiación ${i + 1} (${grupo.length} jugador/es):\n`;
+          grupo.forEach(jugador => {
+            desgloseTexto += `- ${jugador.nombre} -> $${premioPorPersona.toFixed(0)} MXN (${porcentajePorPersonaTexto}%)\n`;
+          });
+        }
+        
+        lugarActual += lugaresTomados;
+        if (lugarActual >= porcentajes.length) break; // Si ya se repartió todo, no calculamos más
+      }
+    } 
+    // 🔥 LÓGICA DE EMPATES PARA PROMOCIONES (Créditos Enteros)
+    else if (tPremio === 'promo_unico' || tPremio === 'promo_top2') {
+      desgloseTexto = `🎁 EVENTO PROMOCIONAL 🎁\n`;
+      const grupo1 = grupos[0]; // Los mejores absolutos
+
+      desgloseTexto += `\n🥇 1er Nivel (${grupo1.length} empatados):\n`;
+      grupo1.forEach(jugador => {
+        desgloseTexto += `- ${jugador.nombre} -> Gana 1 Crédito\n`;
+        ganadoresAPagar.push({ id: jugador.usuario_id, nombre: jugador.nombre, cantidad: 1 });
+      });
+
+      // Si es Top 2, evaluamos si el Grupo 1 acaparó los premios (1 solo ganador en el 1er lugar)
+      if (tPremio === 'promo_top2' && grupo1.length === 1 && grupos.length > 1) {
+        const grupo2 = grupos[1];
+        desgloseTexto += `\n🥈 2do Nivel (${grupo2.length} empatados):\n`;
+        grupo2.forEach(jugador => {
+          desgloseTexto += `- ${jugador.nombre} -> Gana 1 Crédito\n`;
+          ganadoresAPagar.push({ id: jugador.usuario_id, nombre: jugador.nombre, cantidad: 1 });
+        });
+      }
+      desgloseTexto += `\n(Se abonarán automáticamente a sus billeteras digitales)`;
+    }
+
+    const confirmar = window.confirm(`⚠️ ¿DENTRO DE CAJA REAL? ⚠️\n\nVas a cerrar la jornada de forma DEFINITIVA.\n\nFormato: ${tPremio.replace('_', ' ').toUpperCase()}\nDesglose de Premiación (Empates Calculados):${desgloseTexto}\n\n¿Confirmas la liquidación de premios?`)
     if (!confirmar) return
 
     setCalificando(true)
@@ -421,26 +462,22 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
       }
       await supabase.from('quinielas').update({ goles_totales_real: parseInt(golesReales), estado: 'cerrada' }).eq('id', quiniela.id)
       
-      // 🔥 PAGOS AUTOMÁTICOS SI ES PROMO (CORREGIDO PARA REGISTRAR COMO PREMIO)
+      // 🔥 PAGOS AUTOMÁTICOS CON REGISTRO DE PREMIO
       if (ganadoresAPagar.length > 0) {
         for (const ganador of ganadoresAPagar) {
-          // Buscamos el saldo actual del ganador
           const { data: userData } = await supabase.from('usuarios').select('creditos_disponibles').eq('id', ganador.id).single()
           const saldoActual = userData?.creditos_disponibles || 0;
           const nuevoSaldo = saldoActual + ganador.cantidad;
           
-          // 1. Actualizamos el saldo en la base de datos
           await supabase.from('usuarios').update({ creditos_disponibles: nuevoSaldo }).eq('id', ganador.id);
           
-          // 2. Registramos el movimiento específicamente como PREMIO
           await supabase.from('transacciones_creditos').insert([{ 
             usuario_id: ganador.id, 
             cantidad: ganador.cantidad, 
             tipo_movimiento: 'premio_quiniela',
-            descripcion: `Premio: ${quiniela.nombre_jornada}`
+            descripcion: `Premio Promocional: ${quiniela.nombre_jornada}`
           }]);
 
-          // 3. Actualizamos el saldo en la pantalla si el jugador la tiene abierta
           if (actualizarSaldoGlobal) actualizarSaldoGlobal(ganador.id, nuevoSaldo);
         }
         alert(`🎉 ¡Jornada Promocional Cerrada!\n\nLos premios de créditos han sido depositados automáticamente a los ganadores.`);
@@ -664,6 +701,7 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
     setCapSelecciones({ ...capSelecciones, [partidoId]: opcion })
   }
 
+  // 🔥 LÓGICA DE GUARDADO Y COBRO CORREGIDA
   const guardarCapturaFisica = async () => {
     if (!capTelefono || !capNombre || !capGoles || !quiniela) return alert('Faltan datos.')
     setGuardandoCaptura(true)
@@ -683,35 +721,39 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
       const seleccionesFinales = { ...capSelecciones }
       partidos.forEach(p => { if (!seleccionesFinales[p.id]) seleccionesFinales[p.id] = 'E' })
       
-      const precio = quiniela.precio_ticket || 1
+      const precio = quiniela.precio_ticket ?? 1 // 🔥 Uso de ??
       let nuevoSaldo = creditosActuales
 
-      if (creditosActuales >= precio) {
-        nuevoSaldo = creditosActuales - precio
-        await supabase.from('usuarios').update({ creditos_disponibles: nuevoSaldo }).eq('id', uid)
-      } else {
-        const faltante = precio - creditosActuales
+      // 🛡️ Solo tocamos la billetera si la quiniela tiene un precio mayor a 0
+      if (precio > 0) {
+        if (creditosActuales >= precio) {
+          nuevoSaldo = creditosActuales - precio
+          await supabase.from('usuarios').update({ creditos_disponibles: nuevoSaldo }).eq('id', uid)
+        } else {
+          const faltante = precio - creditosActuales
+          await supabase.from('transacciones_creditos').insert([{ 
+            usuario_id: uid, 
+            cantidad: faltante, 
+            tipo_movimiento: 'recarga_manual', 
+            descripcion: 'Pago parcial/total en mostrador' 
+          }])
+          nuevoSaldo = 0
+          await supabase.from('usuarios').update({ creditos_disponibles: nuevoSaldo }).eq('id', uid)
+        }
+
         await supabase.from('transacciones_creditos').insert([{ 
           usuario_id: uid, 
-          cantidad: faltante, 
-          tipo_movimiento: 'recarga_manual', 
-          descripcion: 'Pago parcial/total en mostrador' 
+          cantidad: -precio, 
+          tipo_movimiento: 'juego_ticket_fisico', 
+          descripcion: `Ticket físico ${quiniela.nombre_jornada}` 
         }])
-        nuevoSaldo = 0
-        await supabase.from('usuarios').update({ creditos_disponibles: nuevoSaldo }).eq('id', uid)
       }
 
+      // Guardamos el ticket físico (independientemente si fue gratis o cobrado)
       const { data: tk } = await supabase.from('tickets').insert([{ usuario_id: uid, quiniela_id: quiniela.id, metodo_ingreso: 'fisico', prediccion_goles_total: parseInt(capGoles) }]).select().single()
       
       const prons = Object.keys(seleccionesFinales).map(pId => ({ ticket_id: tk.id, partido_id: pId, eleccion_usuario: seleccionesFinales[pId] }))
       await supabase.from('pronosticos').insert(prons)
-      
-      await supabase.from('transacciones_creditos').insert([{ 
-        usuario_id: uid, 
-        cantidad: -precio, 
-        tipo_movimiento: 'juego_ticket_fisico', 
-        descripcion: `Ticket físico ${quiniela.nombre_jornada}` 
-      }])
       
       if (actualizarSaldoGlobal) actualizarSaldoGlobal(uid, nuevoSaldo)
 
@@ -739,13 +781,12 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
   const bloqueoCapturaAdmin = capturaCerradaPorFecha || capturaCerradaPorResultados;
 
   const totalBoletosAdmin = rankingAdmin?.length || 0
-  const precioBoletoCrds = quiniela ? (quiniela.precio_ticket || 1) : 1
+  const precioBoletoCrds = quiniela ? (quiniela.precio_ticket ?? 1) : 1 // 🔥 Uso de ??
   const cajaTotalPesos = totalBoletosAdmin * precioBoletoCrds * VALOR_CREDITO
   const cajaPremioPesos = cajaTotalPesos * PORCENTAJE_PREMIO
   const cajaCiberPesos = cajaTotalPesos * PORCENTAJE_ADMIN
   const ganadorActualAdmin = totalBoletosAdmin > 0 ? rankingAdmin[0] : null
   
-  // 🔥 LÓGICAS PROMO PARA VISTA ÁRBITRO
   const esPromoUnico = quiniela?.tipo_premiacion === 'promo_unico';
   const esPromoTop2 = quiniela?.tipo_premiacion === 'promo_top2';
   const esCualquierPromo = esPromoUnico || esPromoTop2;
@@ -1086,7 +1127,6 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
                     <span className="text-2xl font-black text-white">${cajaTotalPesos} <span className="text-[10px] text-slate-500">MXN</span></span>
                   </div>
                   
-                  {/* 🔥 SI ES PROMO, MUESTRA LOS PREMIOS FIJOS EN LUGAR DE PORCENTAJES */}
                   {esCualquierPromo ? (
                     <div className="md:col-span-2 text-center p-3 bg-purple-900/20 border border-purple-500/30 rounded-xl">
                       <span className="block text-[10px] text-purple-400 font-black uppercase tracking-widest mb-1">🎁 Evento Promocional Activo 🎁</span>
@@ -1405,7 +1445,7 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
                   </tbody>
                 </table>
                 <div className="border-2 border-black p-3 text-center rounded-xl bg-gray-100 mt-6"><span className="font-bold uppercase text-[9px] block mb-2">Desempate (Total de Goles):</span><div className="w-16 border-b-2 border-black mx-auto h-4"></div></div>
-                <p className="text-center text-[8px] font-bold uppercase mt-4 text-blue-900">Costo del Boleto: {quiniela.precio_ticket} {quiniela.precio_ticket === 1 ? 'Crédito' : 'Créditos'}</p>
+                <p className="text-center text-[8px] font-bold uppercase mt-4 text-blue-900">Costo del Boleto: {quiniela.precio_ticket ?? 1} {(quiniela.precio_ticket ?? 1) === 1 ? 'Crédito' : 'Créditos'}</p>
               </div>
               <div className="mt-4 pt-4 border-t border-black border-dashed">
                 <p className="text-[6px] text-justify leading-tight font-semibold uppercase"><b>REGLAMENTO:</b> 1. PAGO ANTICIPADO: Boleto pagado antes del 1er partido. 2. CORRECCIONES: Revise su jugada, cambios SOLO ANTES de la hora de cierre. Iniciada la jornada participa tal cual. 3. SUSPENDIDOS/APLAZADOS: Si ya inició vale el marcador en ese momento; si no inició, se declara Empate a 0. 4. RESULTADOS: Válidos a los 90 min (sin extras).</p>
@@ -1446,7 +1486,7 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
                 </tbody>
               </table>
               <div className="border-2 border-black p-2 text-center rounded-xl bg-gray-100 mt-6 flex justify-between items-center px-4"><span className="font-bold uppercase text-[9px]">Desempate (Goles):</span><span className="font-black text-xl">{ticketAImprimir.goles}</span></div>
-              <p className="text-center text-[8px] font-bold uppercase mt-4 text-blue-900">Costo del Boleto: {quiniela.precio_ticket} {quiniela.precio_ticket === 1 ? 'Crédito' : 'Créditos'}</p>
+              <p className="text-center text-[8px] font-bold uppercase mt-4 text-blue-900">Costo del Boleto: {quiniela.precio_ticket ?? 1} {(quiniela.precio_ticket ?? 1) === 1 ? 'Crédito' : 'Créditos'}</p>
             </div>
             <div className="mt-4 pt-4 border-t border-black border-dashed">
               <p className="text-[6px] text-justify leading-tight font-semibold uppercase"><b>REGLAMENTO:</b> 1. PAGO ANTICIPADO: Boleto pagado antes del 1er partido. 2. CORRECCIONES: Revise su jugada, cambios SOLO ANTES de la hora de cierre. Iniciada la jornada participa tal cual. 3. SUSPENDIDOS/APLAZADOS: Si ya inició vale el marcador en ese momento; si no inició, se declara Empate a 0. 4. RESULTADOS: Válidos a los 90 min (sin extras).</p>

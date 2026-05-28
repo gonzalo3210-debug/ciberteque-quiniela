@@ -7,10 +7,6 @@ export default function Posiciones() {
   const [quinielaActiva, setQuinielaActiva] = useState<any>(null)
   const [historial, setHistorial] = useState<any[]>([])
   const [cargando, setCargando] = useState(true)
-  
-  // 🛠️ MODO ADMIN: Cambia esto según la sesión de tu usuario
-  const [isAdmin, setIsAdmin] = useState(true) 
-  const [mostrarJugadasForzado, setMostrarJugadasForzado] = useState(false)
 
   // ⚙️ CONFIGURACIÓN MONETARIA
   const VALOR_CREDITO = 30 
@@ -18,6 +14,7 @@ export default function Posiciones() {
 
   useEffect(() => {
     async function cargarDatos() {
+      // 📊 Carga de datos de la quiniela
       const { data: qData } = await supabase
         .from('quinielas')
         .select('*')
@@ -85,8 +82,7 @@ export default function Posiciones() {
           return a.golesDiff - b.golesDiff
         })
 
-        // 🔥 CÁLCULO DE PESOS (Se mantiene normal)
-        // Asumimos que si es promo, precio_ticket podría ser 0. Si es mayor a 0, se calcula normal.
+        // 🔥 CÁLCULO DE PESOS
         const precioTicketCrds = q.precio_ticket || 0
         const totalBoletos = ranking.length
         const recaudadoPesos = totalBoletos * precioTicketCrds * VALOR_CREDITO
@@ -123,8 +119,13 @@ export default function Posiciones() {
   const totalJugadores = quinielaActiva.ranking.length
   const partidosTerminados = quinielaActiva.partidos.filter((p: any) => p.resultado_real).length
   
-  // Control de Visibilidad de Jugadas
-  const mostrarPicks = quinielaActiva.estado === 'cerrada' || mostrarJugadasForzado
+  // 🔒 Control de Visibilidad Automático
+  // Verifica si la fecha actual ya superó la fecha_cierre de la quiniela
+  const fechaCierre = new Date(quinielaActiva.fecha_cierre)
+  const yaPasoCierre = new Date() >= fechaCierre
+  
+  // Se muestran las jugadas si el estado ya es 'cerrada' O si ya pasó la fecha de cierre automáticamente
+  const mostrarPicks = quinielaActiva.estado === 'cerrada' || yaPasoCierre
 
   const getAvatarUrl = (nombre: string, url: string | null) => {
     if (url) return url;
@@ -138,23 +139,6 @@ export default function Posiciones() {
     <div className="w-full max-w-4xl mt-6 animate-in fade-in duration-500 mb-20 space-y-12">
       
       <section>
-        {/* PANEL DE CONTROL ADMIN */}
-        {isAdmin && quinielaActiva.estado === 'abierta' && (
-          <div className="mb-4 bg-red-950/30 border border-red-900/50 p-3 rounded-xl flex items-center justify-between shadow-inner">
-            <span className="text-xs text-red-400 font-bold uppercase tracking-wide">
-              🛠️ Modo Admin: La jornada está abierta. Las jugadas están ocultas.
-            </span>
-            <button 
-              onClick={() => setMostrarJugadasForzado(!mostrarJugadasForzado)}
-              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${
-                mostrarJugadasForzado ? 'bg-red-600 text-white shadow-[0_0_10px_rgba(220,38,38,0.4)]' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-              }`}
-            >
-              {mostrarJugadasForzado ? '👁️ Ocultar Jugadas' : '👁️ Forzar Visibilidad'}
-            </button>
-          </div>
-        )}
-
         {/* SELECTOR DE JORNADAS */}
         {quinielasAbiertas.length > 1 && (
           <div className="flex flex-wrap gap-2 mb-6 bg-slate-900/50 p-3 rounded-xl border border-slate-800 shadow-inner">
@@ -162,10 +146,7 @@ export default function Posiciones() {
             {quinielasAbiertas.map(qa => (
               <button 
                 key={qa.id} 
-                onClick={() => {
-                  setQuinielaActiva(qa)
-                  setMostrarJugadasForzado(false)
-                }} 
+                onClick={() => setQuinielaActiva(qa)} 
                 className={`px-4 py-2 rounded-lg text-xs font-black uppercase transition-all ${
                   quinielaActiva?.id === qa.id 
                     ? 'bg-amber-500 text-slate-900 shadow-md scale-105' 
@@ -192,7 +173,6 @@ export default function Posiciones() {
               <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Participantes</span>
               <span className="text-2xl font-black text-white">{totalJugadores}</span>
             </div>
-            {/* VOLVEMOS A MOSTRAR EL RECAUDADO EN PESOS */}
             <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800/80 text-center shadow-inner">
               <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Recaudado Total</span>
               <span className="text-2xl font-black text-white">${quinielaActiva.recaudadoPesos} <span className="text-xs text-slate-500">MXN</span></span>
@@ -204,7 +184,6 @@ export default function Posiciones() {
           </div>
 
           <div className="mt-5 bg-amber-500/10 p-5 rounded-2xl border border-amber-500/20 text-center shadow-[0_0_20px_rgba(245,158,11,0.15)] relative z-10">
-            {/* 🔥 CONDICIONAL: SI ES PROMO CAMBIA EL TEXTO A CRÉDITOS, SI NO ES PESOS */}
             {esPromo ? (
               <>
                 <span className="block text-[10px] md:text-xs text-amber-500 font-black uppercase tracking-widest mb-1">
@@ -237,7 +216,7 @@ export default function Posiciones() {
 
         {!mostrarPicks && (
           <div className="mb-4 text-center border border-amber-900/50 bg-amber-950/20 text-amber-500/80 text-xs py-2 rounded-lg font-bold uppercase tracking-widest">
-            🔒 Radiografía oculta hasta el cierre de la jornada para evitar copias.
+            🔒 Radiografía oculta hasta las {fechaCierre.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} para evitar copias.
           </div>
         )}
 
