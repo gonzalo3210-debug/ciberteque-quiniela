@@ -18,7 +18,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
   // 🔥 ESTADOS PARA REGLAMENTO Y RESTRICCIONES
   const [mostrarReglas, setMostrarReglas] = useState(false) 
   const [aceptoReglas, setAceptoReglas] = useState(false) 
-  const [yaParticipo, setYaParticipo] = useState(false) // Nuevo estado para saber si ya jugó esta jornada
+  const [yaParticipo, setYaParticipo] = useState(false) 
 
   useEffect(() => {
     async function cargarJornadas() {
@@ -35,7 +35,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
 
       if (qData && qData.length > 0) {
         setQuinielasActivas(qData)
-        await cambiarQuinielaVisible(qData[0]) // Se hace await porque ahora hace una consulta
+        await cambiarQuinielaVisible(qData[0]) 
       }
       if (eData) {
         setEquiposInfo(eData)
@@ -52,7 +52,6 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
     return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: true}).toUpperCase()}`;
   }
 
-  // Ahora es async para poder buscar si el usuario ya tiene ticket en esta jornada
   const cambiarQuinielaVisible = async (quiniela: any) => {
     setQuinielaActual(quiniela)
     setPartidos(quiniela.partidos)
@@ -77,7 +76,6 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
       setMotivoCierre('')
     }
 
-    // 🔥 VERIFICACIÓN: Consultamos si ya metió un boleto para esta quiniela específica
     const { data: ticketsPrevios } = await supabase
       .from('tickets')
       .select('id')
@@ -87,7 +85,6 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
     setYaParticipo(ticketsPrevios && ticketsPrevios.length > 0 ? true : false)
   }
 
-  // Verificamos si debemos bloquear la interfaz por ser gratis y ya haber participado
   const esGratis = quinielaActual?.precio_ticket === 0;
   const bloqueadoPorParticipacion = esGratis && yaParticipo;
 
@@ -142,7 +139,6 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
 
       await supabase.from('pronosticos').insert(pronosticosAGuardar)
 
-      // Solo descontamos y registramos transacción si costó algo
       if (costoTicket > 0) {
         const nuevoSaldo = usuarioActivo.creditos_disponibles - costoTicket
         await supabase.from('usuarios').update({ creditos_disponibles: nuevoSaldo }).eq('id', usuarioActivo.id)
@@ -160,7 +156,6 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
       setGolesTotales('')
       setAceptoReglas(false)
       
-      // Si era gratis, lo bloqueamos inmediatamente para que no pueda meter otro
       if (esGratis) setYaParticipo(true)
 
       alert('¡Jugada guardada con éxito! Los partidos sin marcar se guardaron como Empate.')
@@ -195,16 +190,16 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
   const prem = quinielaActual.tipo_premiacion || 'unico';
 
   return (
-    <div className="w-full max-w-4xl mt-6 mb-20 animate-in fade-in duration-500 relative">
+    <div className="w-full max-w-4xl mt-2 mb-20 animate-in fade-in duration-500 relative">
       
       {/* SELECTOR DE QUINIELAS */}
       {quinielasActivas.length > 1 && (
-        <div className="flex flex-wrap gap-3 justify-center mb-6 bg-slate-900/80 p-2 rounded-2xl border border-slate-800 shadow-xl">
+        <div className="flex flex-wrap gap-2 justify-center mb-4 bg-slate-900/80 p-2 rounded-2xl border border-slate-800 shadow-xl">
           {quinielasActivas.map(q => (
             <button
               key={q.id}
               onClick={() => cambiarQuinielaVisible(q)}
-              className={`px-5 py-2.5 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all ${
+              className={`px-4 py-2 rounded-xl text-[10px] md:text-xs font-black uppercase tracking-wider transition-all ${
                 quinielaActual.id === q.id 
                 ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.4)] scale-105' 
                 : 'bg-slate-950 text-slate-500 border border-slate-800 hover:text-slate-300 hover:bg-slate-800'
@@ -217,7 +212,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
       )}
 
       {/* CONTENEDOR PRINCIPAL DEL TICKET */}
-      <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 shadow-2xl relative overflow-hidden">
+      <div className="bg-slate-900/50 p-4 md:p-6 rounded-2xl border border-slate-800 shadow-2xl relative overflow-hidden">
         {estaCerrada && (
           <div className="absolute inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center p-8 text-center border border-red-900/50 rounded-2xl">
             <span className="text-6xl mb-4">🔒</span>
@@ -226,40 +221,37 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
           </div>
         )}
 
-        <div className="text-center mb-8 border-b border-slate-800 pb-6 relative">
+        <div className="text-center mb-6 border-b border-slate-800 pb-4 relative">
           
-          {/* BOTÓN REGLAMENTO ESQUINA SUPERIOR DERECHA */}
-          <button onClick={() => setMostrarReglas(true)} className="absolute top-0 right-0 bg-slate-950 border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-white text-[10px] font-black uppercase px-3 py-1.5 rounded-lg transition-all shadow-inner">
-            📜 Reglas del Juego
+          <button onClick={() => setMostrarReglas(true)} className="absolute top-0 right-0 bg-slate-950 border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-white text-[9px] md:text-[10px] font-black uppercase px-2 py-1.5 rounded-lg transition-all shadow-inner">
+            📜 Reglas
           </button>
 
-          <h2 className="text-3xl font-black text-white uppercase italic pr-24 text-left md:text-center">{quinielaActual.nombre_jornada}</h2>
+          <h2 className="text-2xl md:text-3xl font-black text-white uppercase italic pr-16 md:pr-24 text-left md:text-center">{quinielaActual.nombre_jornada}</h2>
           
-          <div className="flex flex-wrap items-center justify-center gap-3 mt-3">
-            <span className="bg-blue-950/40 border border-blue-900/50 text-blue-400 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest">
+          <div className="flex flex-wrap items-center justify-center gap-2 mt-3">
+            <span className="bg-blue-950/40 border border-blue-900/50 text-blue-400 px-2.5 py-1 rounded-lg text-[9px] md:text-[10px] font-black uppercase tracking-widest">
               Costo: {esGratis ? 'GRATIS (1 MÁX)' : `${quinielaActual.precio_ticket} ${quinielaActual.precio_ticket === 1 ? 'Crédito' : 'Créditos'}`}
             </span>
-            {/* INFORMATIVO SOBRE PREMIACIÓN DE LA JORNADA */}
-            <span className="bg-purple-950/40 border border-purple-900/50 text-purple-400 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest">
+            <span className="bg-purple-950/40 border border-purple-900/50 text-purple-400 px-2.5 py-1 rounded-lg text-[9px] md:text-[10px] font-black uppercase tracking-widest">
               🏆 Premiación: {
-                prem === 'unico' ? 'Ganador Único (100%)' : 
-                prem === 'top2' ? 'Top 2 (70% - 30%)' : 
-                prem === 'top3' ? 'Top 3 (60% - 25% - 15%)' :
-                prem === 'promo_unico' ? 'Promo: 1er Lugar (1 Crédito)' :
-                prem === 'promo_top2' ? 'Promo: Top 2 (1 Crédito c/u)' : 
+                prem === 'unico' ? 'Ganador Único' : 
+                prem === 'top2' ? 'Top 2' : 
+                prem === 'top3' ? 'Top 3' :
+                prem === 'promo_unico' ? 'Promo: 1er (1 Cr)' :
+                prem === 'promo_top2' ? 'Promo: Top 2 (1 Cr c/u)' : 
                 'Ganador Único'
               }
             </span>
           </div>
 
-          {/* HORA DE CIERRE VISIBLE PARA EL CLIENTE */}
-          <div className="mt-4 mb-1 inline-block bg-red-950/40 border border-red-900/60 text-red-400 px-4 py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-widest shadow-inner">
-            ⏳ Cierre de Jugadas: {formatearFechaLocal(quinielaActual.fecha_cierre)}
+          <div className="mt-3 mb-1 inline-block bg-red-950/40 border border-red-900/60 text-red-400 px-3 py-1.5 rounded-lg text-[9px] md:text-[10px] font-black uppercase tracking-widest shadow-inner">
+            ⏳ Cierre: {formatearFechaLocal(quinielaActual.fecha_cierre)}
           </div>
-
         </div>
 
-        <div className="space-y-5">
+        {/* LISTA DE PARTIDOS SUPER COMPACTA */}
+        <div className="space-y-2 md:space-y-3">
           {partidos.map((partido) => {
             const seleccion = selecciones[partido.id]
             const logoL = obtenerLogo(partido.equipo_local)
@@ -267,58 +259,53 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
             const fechaObj = formatearFechaObj(partido.fecha_hora)
 
             return (
-              <div key={partido.id} className={`bg-slate-800/80 p-5 rounded-xl border flex flex-col md:flex-row justify-between items-center md:items-start gap-4 transition-all shadow-md relative group ${bloqueadoPorParticipacion ? 'border-slate-800 opacity-60' : 'border-slate-700 hover:border-slate-500'}`}>
+              <div key={partido.id} className={`bg-slate-800/60 px-3 py-2.5 md:p-3 rounded-lg border flex flex-col md:flex-row justify-between items-center gap-3 md:gap-4 transition-all shadow-sm relative group ${bloqueadoPorParticipacion ? 'border-slate-800 opacity-60' : 'border-slate-700 hover:border-slate-500 hover:bg-slate-800/90'}`}>
                 
-                <div className="flex flex-col w-full md:flex-1">
-                  
-                  <div className="flex w-full justify-between items-center text-sm md:text-base font-bold uppercase tracking-wide">
-                    <div className="flex items-center justify-end gap-3 w-[45%]">
-                      <span className="text-right text-slate-200 truncate">{partido.equipo_local}</span>
-                      {logoL ? <img src={logoL} alt={partido.equipo_local} className="w-10 h-10 object-contain drop-shadow-md" /> : <div className="w-10 h-10 bg-slate-900 rounded-full border border-slate-700 flex items-center justify-center text-[10px] text-slate-500">?</div>}
-                    </div>
-                    
-                    <span className="w-[10%] text-center text-slate-600 text-xs font-black">VS</span>
-                    
-                    <div className="flex items-center justify-start gap-3 w-[45%]">
-                      {logoV ? <img src={logoV} alt={partido.equipo_visitante} className="w-10 h-10 object-contain drop-shadow-md" /> : <div className="w-10 h-10 bg-slate-900 rounded-full border border-slate-700 flex items-center justify-center text-[10px] text-slate-500">?</div>}
-                      <span className="text-left text-slate-200 truncate">{partido.equipo_visitante}</span>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-center mt-5 mb-2 w-full">
-                    <div className="flex gap-4 w-[220px]">
-                      {['L', 'E', 'V'].map((opc) => (
-                        <button 
-                          key={opc}
-                          onClick={() => seleccionarOpcion(partido.id, opc)}
-                          disabled={estaCerrada || bloqueadoPorParticipacion}
-                          className={`flex-1 py-2.5 rounded-lg text-sm font-black transition-all border shadow-sm ${
-                            seleccion === opc 
-                            ? 'bg-blue-600 border-blue-400 text-white shadow-[0_0_15px_rgba(37,99,235,0.5)] scale-105' 
-                            : 'bg-slate-950 border-slate-700 text-slate-500 hover:text-slate-300 hover:bg-slate-800'
-                          } ${(estaCerrada || bloqueadoPorParticipacion) ? 'cursor-not-allowed' : ''}`}
-                        >
-                          {opc}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
+                {/* HORARIO (Izquierda Desktop / Arriba Mobile) */}
+                <div className="w-full md:w-[80px] text-center md:text-left border-b md:border-b-0 md:border-r border-slate-700/50 pb-2 md:pb-0 md:pr-3 flex md:block justify-center items-center gap-2 shrink-0">
+                  {fechaObj ? (
+                    <>
+                      <span className="block text-blue-400 font-black text-[10px] uppercase tracking-widest">{fechaObj.fecha}</span>
+                      <span className="block text-slate-400 font-bold text-[9px] mt-0.5">{fechaObj.hora}</span>
+                    </>
+                  ) : (
+                    <span className="block text-slate-500 text-[9px] uppercase tracking-widest">Definir</span>
+                  )}
                 </div>
 
-                <div className="w-full md:w-auto md:min-w-[140px] flex justify-center md:justify-end items-center md:items-start border-t md:border-t-0 md:border-l border-slate-700 pt-4 md:pt-2 md:pl-6 mt-2 md:mt-0">
-                  {fechaObj ? (
-                    <div className="text-center md:text-right">
-                      <span className="block text-slate-500 text-[9px] uppercase tracking-widest mb-1">Horario</span>
-                      <span className="block text-blue-400 font-black text-sm md:text-base tracking-widest">{fechaObj.fecha}</span>
-                      <span className="block text-slate-300 font-bold text-xs md:text-sm mt-0.5">{fechaObj.hora}</span>
-                    </div>
-                  ) : (
-                    <div className="text-center md:text-right">
-                      <span className="block text-slate-500 text-[9px] uppercase tracking-widest mb-1">Horario</span>
-                      <span className="block text-slate-600 text-xs font-bold uppercase tracking-widest">Por definir</span>
-                    </div>
-                  )}
+                {/* EQUIPOS (Centro Desktop / Medio Mobile) */}
+                <div className="flex-1 w-full flex justify-between md:justify-center items-center text-[11px] md:text-xs font-bold uppercase tracking-wide gap-2 md:gap-4">
+                  <div className="flex items-center justify-end gap-2 flex-1">
+                    <span className="text-right text-slate-200 truncate leading-tight">{partido.equipo_local}</span>
+                    {logoL ? <img src={logoL} alt={partido.equipo_local} className="w-6 h-6 md:w-8 md:h-8 object-contain drop-shadow-md shrink-0" /> : <div className="w-6 h-6 md:w-8 md:h-8 bg-slate-900 rounded-full border border-slate-700 flex items-center justify-center text-[8px] text-slate-500 shrink-0">?</div>}
+                  </div>
+                  
+                  <span className="text-center text-slate-600 text-[9px] font-black shrink-0 w-4">VS</span>
+                  
+                  <div className="flex items-center justify-start gap-2 flex-1">
+                    {logoV ? <img src={logoV} alt={partido.equipo_visitante} className="w-6 h-6 md:w-8 md:h-8 object-contain drop-shadow-md shrink-0" /> : <div className="w-6 h-6 md:w-8 md:h-8 bg-slate-900 rounded-full border border-slate-700 flex items-center justify-center text-[8px] text-slate-500 shrink-0">?</div>}
+                    <span className="text-left text-slate-200 truncate leading-tight">{partido.equipo_visitante}</span>
+                  </div>
+                </div>
+
+                {/* BOTONES (Derecha Desktop / Abajo Mobile) */}
+                <div className="w-full md:w-[130px] shrink-0 mt-1 md:mt-0">
+                  <div className="flex gap-1 md:gap-1.5 w-full">
+                    {['L', 'E', 'V'].map((opc) => (
+                      <button 
+                        key={opc}
+                        onClick={() => seleccionarOpcion(partido.id, opc)}
+                        disabled={estaCerrada || bloqueadoPorParticipacion}
+                        className={`flex-1 py-1.5 md:py-2 rounded text-xs font-black transition-all border shadow-sm ${
+                          seleccion === opc 
+                          ? 'bg-blue-600 border-blue-400 text-white shadow-[0_0_10px_rgba(37,99,235,0.4)] md:scale-105' 
+                          : 'bg-slate-950 border-slate-700 text-slate-500 hover:text-slate-300 hover:bg-slate-800'
+                        } ${(estaCerrada || bloqueadoPorParticipacion) ? 'cursor-not-allowed' : ''}`}
+                      >
+                        {opc}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
               </div>
@@ -326,31 +313,30 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
           })}
         </div>
 
-        <div className={`mt-12 mb-6 p-6 bg-blue-950/40 border border-blue-900/50 rounded-2xl max-w-sm mx-auto text-center shadow-2xl z-10 relative ${bloqueadoPorParticipacion ? 'opacity-60' : ''}`}>
-          <label className="block text-blue-400 font-black uppercase text-[10px] tracking-[0.2em] mb-2">Criterio Desempate</label>
-          <p className="text-slate-400 text-[9px] uppercase mb-4 font-bold tracking-tight">Total de goles en la jornada</p>
+        <div className={`mt-8 mb-5 p-4 bg-blue-950/40 border border-blue-900/50 rounded-2xl max-w-[280px] mx-auto text-center shadow-xl z-10 relative ${bloqueadoPorParticipacion ? 'opacity-60' : ''}`}>
+          <label className="block text-blue-400 font-black uppercase text-[9px] md:text-[10px] tracking-[0.2em] mb-1">Criterio Desempate</label>
+          <p className="text-slate-400 text-[8px] md:text-[9px] uppercase mb-3 font-bold tracking-tight">Total de goles en la jornada</p>
           <input 
             type="number"
             placeholder="00"
             value={golesTotales}
             onChange={(e) => setGolesTotales(e.target.value)}
             disabled={estaCerrada || bloqueadoPorParticipacion}
-            className={`w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-4 text-center text-4xl font-black text-white focus:border-blue-500 outline-none transition-all ${(estaCerrada || bloqueadoPorParticipacion) ? 'cursor-not-allowed text-slate-500' : ''}`}
+            className={`w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-3 text-center text-3xl font-black text-white focus:border-blue-500 outline-none transition-all ${(estaCerrada || bloqueadoPorParticipacion) ? 'cursor-not-allowed text-slate-500' : ''}`}
           />
         </div>
 
-        {/* ☑️ CASILLA DE REGLAS REQUERIDA */}
-        <div className="w-full max-w-xs mx-auto flex items-start gap-2.5 mb-6 bg-slate-950/40 p-3 rounded-xl border border-slate-800">
+        <div className="w-full max-w-[280px] mx-auto flex items-start gap-2 mb-5 bg-slate-950/40 p-2.5 rounded-xl border border-slate-800">
           <input 
             type="checkbox" 
             id="check-reglas" 
             checked={aceptoReglas} 
             onChange={(e) => setAceptoReglas(e.target.checked)} 
             disabled={estaCerrada || bloqueadoPorParticipacion} 
-            className={`mt-0.5 w-4 h-4 accent-green-600 rounded border-slate-700 bg-slate-900 cursor-pointer ${(estaCerrada || bloqueadoPorParticipacion) ? 'cursor-not-allowed opacity-50' : ''}`} 
+            className={`mt-0.5 w-3.5 h-3.5 accent-green-600 rounded border-slate-700 bg-slate-900 cursor-pointer ${(estaCerrada || bloqueadoPorParticipacion) ? 'cursor-not-allowed opacity-50' : ''}`} 
           />
-          <label htmlFor="check-reglas" className={`text-[10px] font-bold uppercase tracking-wide text-slate-400 select-none ${(estaCerrada || bloqueadoPorParticipacion) ? '' : 'cursor-pointer'}`}>
-            He leído las <span onClick={(e) => { e.preventDefault(); setMostrarReglas(true); }} className="text-blue-400 underline hover:text-blue-300 cursor-pointer">reglas oficiales</span> y acepto los criterios de desempate y premios.
+          <label htmlFor="check-reglas" className={`text-[9px] font-bold uppercase tracking-wide text-slate-400 select-none ${(estaCerrada || bloqueadoPorParticipacion) ? '' : 'cursor-pointer'}`}>
+            He leído las <span onClick={(e) => { e.preventDefault(); setMostrarReglas(true); }} className="text-blue-400 underline hover:text-blue-300 cursor-pointer">reglas oficiales</span> y acepto los criterios.
           </label>
         </div>
 
@@ -358,7 +344,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
           <button 
             onClick={guardarQuiniela}
             disabled={guardando || estaCerrada || !aceptoReglas || bloqueadoPorParticipacion}
-            className={`w-full max-w-xs py-4 rounded-xl font-black uppercase tracking-widest transition-all ${
+            className={`w-full max-w-[280px] py-3 md:py-4 rounded-xl font-black uppercase text-xs tracking-widest transition-all ${
               bloqueadoPorParticipacion 
               ? 'bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-700 shadow-inner' 
               : (guardando || estaCerrada || !aceptoReglas)
@@ -371,7 +357,6 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
         </div>
       </div>
 
-      {/* 📜 VENTANA EMERGENTE (MODAL): REGLAMENTO OFICIAL */}
       {mostrarReglas && (
         <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 max-w-md w-full p-6 rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200">
@@ -391,7 +376,6 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
           </div>
         </div>
       )}
-
     </div>
   )
 }

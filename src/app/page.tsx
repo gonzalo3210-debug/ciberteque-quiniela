@@ -95,9 +95,9 @@ export default function Home() {
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center py-12 px-6 bg-slate-950 text-white selection:bg-blue-500/30">
+    <main className="flex min-h-screen flex-col items-center py-4 px-6 bg-slate-950 text-white selection:bg-blue-500/30">
       
-      <div className="text-center mb-12">
+      <div className="text-center mb-4">
         <h1 className="text-6xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-blue-400 to-blue-700 drop-shadow-[0_0_15px_rgba(37,99,235,0.4)]">
           CLUB PRONÓSTICOS
         </h1>
@@ -109,24 +109,9 @@ export default function Home() {
       {usuarioActivo ? (
         <div className="w-full max-w-5xl flex flex-col items-center animate-in fade-in duration-700">
           
-          <div className="bg-slate-900/60 backdrop-blur-md px-8 py-4 rounded-full mb-8 border border-slate-800 text-sm flex flex-wrap gap-6 justify-center items-center shadow-2xl">
-            <span className="text-slate-400 uppercase tracking-widest text-xs font-bold">
-              Jugador: <strong className="text-white ml-1">{usuarioActivo.nombre}</strong>
-            </span>
-            <span className="h-4 w-[1px] bg-slate-800"></span>
-            <span className="text-slate-400 uppercase tracking-widest text-xs font-bold">
-              Créditos: <strong className="text-green-400 text-xl ml-1 drop-shadow-[0_0_8px_rgba(74,222,128,0.3)]">{usuarioActivo.creditos_disponibles}</strong>
-            </span>
-            <span className="h-4 w-[1px] bg-slate-800"></span>
-            <button 
-              onClick={cerrarSesion} 
-              className="text-red-500 hover:text-red-400 font-black uppercase text-xs tracking-tighter transition-all hover:scale-110 active:scale-95"
-            >
-              Cerrar Sesión
-            </button>
-          </div>
+          {/* ELIMINAMOS LA BARRA DE JUGADOR/CRÉDITOS QUE ESTABA AQUÍ */}
 
-          <div className="flex flex-wrap bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800/50 mb-10 w-full max-w-4xl shadow-2xl">
+          <div className="flex flex-wrap gap-1 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800/50 mb-10 w-full max-w-5xl shadow-2xl">
             <button 
               onClick={() => cambiarPestana('perfil')}
               className={`flex-1 min-w-[100px] py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
@@ -193,6 +178,14 @@ export default function Home() {
                 Admin
               </button>
             )}
+
+            {/* BOTÓN DE SALIR INTEGRADO AL MENÚ */}
+            <button 
+              onClick={cerrarSesion} 
+              className="flex-1 sm:flex-none sm:ml-auto min-w-[100px] px-4 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all whitespace-nowrap text-red-500 hover:text-white hover:bg-red-600 flex items-center justify-center gap-2"
+            >
+              <span>🚪</span> Salir
+            </button>
           </div>
 
           <div className="w-full flex justify-center pb-20">
@@ -215,7 +208,6 @@ export default function Home() {
               <MiBilletera usuarioId={usuarioActivo.id} />
             )}
 
-            {/* 🔥 LE PASAMOS onUpdate AL PERFIL */}
             {pestana === 'perfil' && (
               <Perfil 
                 usuarioActivo={usuarioActivo} 
