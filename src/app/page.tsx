@@ -109,8 +109,6 @@ export default function Home() {
       {usuarioActivo ? (
         <div className="w-full max-w-5xl flex flex-col items-center animate-in fade-in duration-700">
           
-          {/* ELIMINAMOS LA BARRA DE JUGADOR/CRÉDITOS QUE ESTABA AQUÍ */}
-
           <div className="flex flex-wrap gap-1 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800/50 mb-10 w-full max-w-5xl shadow-2xl">
             <button 
               onClick={() => cambiarPestana('perfil')}
@@ -224,27 +222,17 @@ export default function Home() {
           
         </div>
       ) : (
-        <div className="w-full max-w-md flex flex-col items-center animate-in zoom-in duration-500">
+        <div className="w-full max-w-md flex flex-col items-center animate-in zoom-in duration-500 mt-6">
+          {/* 🔥 SECCIÓN DE LOGIN/REGISTRO ACTUALIZADA CON LAS FUNCIONES CONECTADAS */}
           {vista === 'login' ? (
-            <>
-              <Login onLogin={iniciarSesion} />
-              <p className="mt-8 text-slate-500 text-sm font-medium">
-                ¿No tienes cuenta todavía?{' '}
-                <button onClick={() => setVista('registro')} className="text-blue-500 hover:text-blue-400 underline underline-offset-4 font-bold ml-1">
-                  Regístrate aquí
-                </button>
-              </p>
-            </>
+            <Login 
+              onLogin={iniciarSesion} 
+              onSwitchToRegister={() => setVista('registro')} 
+            />
           ) : (
-            <>
-              <RegistroUsuario />
-              <p className="mt-8 text-slate-500 text-sm font-medium">
-                ¿Ya eres parte del club?{' '}
-                <button onClick={() => setVista('login')} className="text-blue-500 hover:text-blue-400 underline underline-offset-4 font-bold ml-1">
-                  Inicia sesión aquí
-                </button>
-              </p>
-            </>
+            <RegistroUsuario 
+              onVolverAlLogin={() => setVista('login')} 
+            />
           )}
         </div>
       )}

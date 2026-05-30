@@ -118,8 +118,9 @@ export default function Posiciones() {
   const totalJugadores = quinielaActiva.ranking.length
   const partidosTerminados = quinielaActiva.partidos.filter((p: any) => p.resultado_real).length
   
-  // 🔒 Control de Visibilidad Automático
-  const fechaCierre = new Date(quinielaActiva.fecha_cierre)
+  // 🔒 CONTROL DE VISIBILIDAD CORREGIDO (Zona Horaria Local)
+  const fechaCierreCorta = quinielaActiva.fecha_cierre ? quinielaActiva.fecha_cierre.substring(0, 16) : null
+  const fechaCierre = new Date(fechaCierreCorta || quinielaActiva.fecha_cierre)
   const yaPasoCierre = new Date() >= fechaCierre
   
   const mostrarPicks = quinielaActiva.estado === 'cerrada' || yaPasoCierre
