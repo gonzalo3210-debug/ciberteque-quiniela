@@ -17,7 +17,7 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
           <span>⚙️</span> CONTROL CIBERTEQUE
         </h2>
         <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800 shadow-inner overflow-x-auto w-full lg:w-auto">
-          <button onClick={() => setAdminVista('recargas')} className={`px-4 py-2 rounded-md font-bold text-xs uppercase tracking-wider transition-all whitespace-nowrap ${adminVista === 'recargas' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}>💰 Recargas</button>
+          <button onClick={() => setAdminVista('recargas')} className={`px-4 py-2 rounded-md font-bold text-xs uppercase tracking-wider transition-all whitespace-nowrap ${adminVista === 'recargas' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}>💰 Ventas</button>
           <button onClick={() => setAdminVista('captura')} className={`px-4 py-2 rounded-md font-black text-xs uppercase tracking-wider transition-all whitespace-nowrap flex items-center gap-1 ${adminVista === 'captura' ? 'bg-amber-500 text-slate-900 shadow-md shadow-amber-500/20' : 'text-amber-500 hover:text-amber-400 hover:bg-slate-800'}`}>⚡ Captura Física</button>
           <button onClick={() => setAdminVista('crear')} className={`px-4 py-2 rounded-md font-bold text-xs uppercase tracking-wider transition-all whitespace-nowrap ${adminVista === 'crear' ? 'bg-green-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}>➕ Nueva Jornada</button>
           <button onClick={() => setAdminVista('equipos')} className={`px-4 py-2 rounded-md font-bold text-xs uppercase tracking-wider transition-all whitespace-nowrap ${adminVista === 'equipos' ? 'bg-purple-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}>🛡️ Equipos</button>
@@ -25,8 +25,8 @@ export default function AdminPanel({ actualizarSaldoGlobal }: { actualizarSaldoG
         </div>
       </div>
 
-      {/* 3. Ocultamos los MÓDULOS 1 Y 2 al imprimir */}
-      <div className="print:hidden">
+      {/* 🔥 AQUÍ ESTABA EL PROBLEMA: Le quitamos la clase print:hidden a este contenedor */}
+      <div>
         {(adminVista === 'recargas' || adminVista === 'captura') && (
           <ModuloRecargasCaptura vista={adminVista} actualizarSaldoGlobal={actualizarSaldoGlobal} />
         )}
