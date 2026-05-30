@@ -2,9 +2,9 @@
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
-export default function Login({ onLogin }: { onLogin: (usuario: any) => void }) {
+export default function Login({ onLogin, onSwitchToRegister }: { onLogin: (usuario: any) => void, onSwitchToRegister?: () => void }) {
   const [telefono, setTelefono] = useState('')
-  const [nip, setNip] = useState('') // Nuevo estado para el NIP
+  const [nip, setNip] = useState('') 
   const [cargando, setCargando] = useState(false)
   const [error, setError] = useState('')
 
@@ -18,17 +18,15 @@ export default function Login({ onLogin }: { onLogin: (usuario: any) => void }) 
         .from('usuarios')
         .select('*')
         .eq('telefono', telefono)
-        .eq('nip', nip) // Ahora exigimos que el NIP también coincida
+        .eq('nip', nip) 
         .single()
 
       if (supaError || !data) {
-        // Por seguridad, damos un error genérico (no decimos si falló el número o el NIP)
         setError('Teléfono o NIP incorrectos. Verifica tus datos.')
         setCargando(false)
         return
       }
 
-      // Si el usuario existe y el NIP es correcto, lo dejamos pasar
       onLogin(data)
 
     } catch (err) {
@@ -39,12 +37,14 @@ export default function Login({ onLogin }: { onLogin: (usuario: any) => void }) 
   }
 
   return (
-    <div className="bg-slate-900/50 p-8 rounded-2xl border border-slate-800 shadow-xl w-full max-w-md">
-      <h2 className="text-2xl font-bold text-white mb-6 text-center">Inicia Sesión</h2>
+    <div className="bg-slate-900/60 backdrop-blur-md p-5 md:p-6 rounded-2xl border border-slate-800/60 shadow-2xl w-full max-w-sm mx-auto animate-in zoom-in-95 duration-300">
+      <h2 className="text-xl md:text-2xl font-black text-white mb-5 text-center uppercase tracking-tight italic">
+        Inicia Sesión
+      </h2>
       
       <form onSubmit={handleLogin} className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-slate-400 mb-1">
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
             Tu número de WhatsApp
           </label>
           <input
@@ -52,14 +52,13 @@ export default function Login({ onLogin }: { onLogin: (usuario: any) => void }) 
             required
             value={telefono}
             onChange={(e) => setTelefono(e.target.value)}
-            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-center font-mono tracking-wider"
             placeholder="Ej. 3110000000"
           />
         </div>
 
-        {/* Nueva cajita para pedir el NIP */}
         <div>
-          <label className="block text-sm font-medium text-slate-400 mb-1">
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
             NIP (4 dígitos)
           </label>
           <input
@@ -69,24 +68,44 @@ export default function Login({ onLogin }: { onLogin: (usuario: any) => void }) 
             required
             value={nip}
             onChange={(e) => setNip(e.target.value)}
-            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 tracking-widest text-center text-lg font-bold"
-            placeholder="****"
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 tracking-[0.6em] text-center text-sm font-black transition-all"
+            placeholder="••••"
           />
         </div>
 
-        {error && <p className="text-red-400 text-sm text-center">{error}</p>}
+        {error && (
+          <p className="text-red-400 text-[10px] font-bold uppercase tracking-tight text-center bg-red-950/20 border border-red-900/30 py-1.5 rounded-lg animate-pulse">
+            {error}
+          </p>
+        )}
 
         <button
           type="submit"
           disabled={cargando}
-          className={`w-full font-bold py-3 px-4 rounded-lg transition-all ${
+          className={`w-full font-black uppercase text-xs tracking-widest py-3 px-4 rounded-xl transition-all ${
             cargando 
-              ? 'bg-slate-600 text-slate-400 cursor-not-allowed' 
-              : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/50'
+              ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed' 
+              : 'bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_15px_rgba(37,99,235,0.3)] hover:scale-[1.01] active:scale-95'
           }`}
         >
           {cargando ? 'Verificando...' : 'Entrar a jugar'}
         </button>
+
+        {/* 🔥 SECCIÓN DE REGISTRO INTEGRADA Y ALTAMENTE NOTORIA */}
+        {onSwitchToRegister && (
+          <div className="border-t border-slate-800/60 pt-4 mt-2 text-center space-y-2">
+            <p className="text-[9px] md:text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+              ¿No tienes cuenta todavía?
+            </p>
+            <button
+              type="button"
+              onClick={onSwitchToRegister}
+              className="w-full bg-slate-950 hover:bg-slate-900 border border-blue-900/40 hover:border-blue-500/50 text-blue-400 hover:text-blue-300 font-black uppercase text-[10px] tracking-widest py-2.5 px-4 rounded-xl transition-all shadow-inner transform active:scale-95"
+            >
+              ✨ Regístrate aquí
+            </button>
+          </div>
+        )}
       </form>
     </div>
   )

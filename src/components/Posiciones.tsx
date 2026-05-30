@@ -14,7 +14,6 @@ export default function Posiciones() {
 
   useEffect(() => {
     async function cargarDatos() {
-      // 📊 Carga de datos de la quiniela
       const { data: qData } = await supabase
         .from('quinielas')
         .select('*')
@@ -113,18 +112,16 @@ export default function Posiciones() {
     cargarDatos()
   }, [])
 
-  if (cargando) return <div className="text-amber-500 animate-pulse text-center mt-10 font-bold uppercase tracking-widest">Calculando Bolsa y Posiciones...</div>
-  if (!quinielaActiva) return <div className="text-slate-500 italic text-center mt-10">No hay datos de quinielas disponibles.</div>
+  if (cargando) return <div className="text-amber-500 animate-pulse text-center mt-10 font-bold uppercase tracking-widest text-xs">Calculando Bolsa y Posiciones...</div>
+  if (!quinielaActiva) return <div className="text-slate-500 italic text-center mt-10 text-sm">No hay datos de quinielas disponibles.</div>
 
   const totalJugadores = quinielaActiva.ranking.length
   const partidosTerminados = quinielaActiva.partidos.filter((p: any) => p.resultado_real).length
   
   // 🔒 Control de Visibilidad Automático
-  // Verifica si la fecha actual ya superó la fecha_cierre de la quiniela
   const fechaCierre = new Date(quinielaActiva.fecha_cierre)
   const yaPasoCierre = new Date() >= fechaCierre
   
-  // Se muestran las jugadas si el estado ya es 'cerrada' O si ya pasó la fecha de cierre automáticamente
   const mostrarPicks = quinielaActiva.estado === 'cerrada' || yaPasoCierre
 
   const getAvatarUrl = (nombre: string, url: string | null) => {
@@ -132,22 +129,20 @@ export default function Posiciones() {
     return `https://ui-avatars.com/api/?name=${encodeURIComponent(nombre)}&background=1e293b&color=3b82f6&size=100&bold=true`;
   }
 
-  // 🔥 Verifica si el formato de la quiniela es una promo para cambiar los textos y los montos
   const esPromo = quinielaActiva.tipo_premiacion?.toLowerCase().includes('promo');
 
   return (
-    <div className="w-full max-w-4xl mt-6 animate-in fade-in duration-500 mb-20 space-y-12">
+    <div className="w-full max-w-4xl mt-2 animate-in fade-in duration-500 mb-20 space-y-6">
       
       <section>
-        {/* SELECTOR DE JORNADAS */}
+        {/* SELECTOR DE JORNADAS COMPACTO */}
         {quinielasAbiertas.length > 1 && (
-          <div className="flex flex-wrap gap-2 mb-6 bg-slate-900/50 p-3 rounded-xl border border-slate-800 shadow-inner">
-            <span className="text-[10px] text-slate-500 font-bold uppercase w-full mb-1">Elige la jornada en vivo:</span>
+          <div className="flex flex-wrap gap-1.5 mb-4 bg-slate-900/50 p-2 rounded-xl border border-slate-800 shadow-inner justify-center">
             {quinielasAbiertas.map(qa => (
               <button 
                 key={qa.id} 
                 onClick={() => setQuinielaActiva(qa)} 
-                className={`px-4 py-2 rounded-lg text-xs font-black uppercase transition-all ${
+                className={`px-3 py-1.5 rounded-lg text-[10px] md:text-xs font-black uppercase transition-all ${
                   quinielaActiva?.id === qa.id 
                     ? 'bg-amber-500 text-slate-900 shadow-md scale-105' 
                     : 'bg-slate-950 border border-slate-700 text-slate-500 hover:text-slate-300'
@@ -159,78 +154,68 @@ export default function Posiciones() {
           </div>
         )}
 
-        {/* TARJETA DE ESTADÍSTICAS */}
-        <div className="bg-gradient-to-br from-amber-950/40 to-slate-900 border border-amber-500/30 p-6 rounded-3xl shadow-[0_0_30px_rgba(245,158,11,0.1)] relative overflow-hidden mb-6">
-          <div className="absolute -right-6 -top-6 p-4 opacity-5 text-9xl select-none">💰</div>
+        {/* TARJETA DE ESTADÍSTICAS COMPACTA */}
+        <div className="bg-gradient-to-br from-amber-950/40 to-slate-900 border border-amber-500/30 p-4 rounded-2xl shadow-[0_0_20px_rgba(245,158,11,0.1)] relative overflow-hidden mb-4">
+          <div className="absolute -right-4 -top-4 p-2 opacity-5 text-7xl select-none">💰</div>
           
-          <h2 className="text-center text-2xl md:text-3xl font-black text-white uppercase italic tracking-tight mb-2 relative z-10">
+          <h2 className="text-center text-lg md:text-xl font-black text-white uppercase italic tracking-tight mb-0.5 relative z-10">
             {quinielaActiva.estado === 'abierta' ? 'RANKING EN VIVO' : 'RESULTADOS EN JUEGO'}
           </h2>
-          <p className="text-center text-amber-500 text-xs font-black uppercase tracking-widest mb-6">{quinielaActiva.nombre_jornada}</p>
+          <p className="text-center text-amber-500 text-[10px] font-black uppercase tracking-widest mb-3">{quinielaActiva.nombre_jornada}</p>
           
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 relative z-10">
-            <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800/80 text-center shadow-inner">
-              <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Participantes</span>
-              <span className="text-2xl font-black text-white">{totalJugadores}</span>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2 relative z-10">
+            <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80 text-center shadow-inner">
+              <span className="block text-[8px] md:text-[9px] text-slate-400 font-bold uppercase tracking-widest mb-0.5">Participantes</span>
+              <span className="text-lg md:text-xl font-black text-white">{totalJugadores}</span>
             </div>
-            <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800/80 text-center shadow-inner">
-              <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Recaudado Total</span>
-              <span className="text-2xl font-black text-white">${quinielaActiva.recaudadoPesos} <span className="text-xs text-slate-500">MXN</span></span>
+            <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80 text-center shadow-inner">
+              <span className="block text-[8px] md:text-[9px] text-slate-400 font-bold uppercase tracking-widest mb-0.5">Recaudado Total</span>
+              <span className="text-lg md:text-xl font-black text-white">${quinielaActiva.recaudadoPesos} <span className="text-[10px] text-slate-500">MXN</span></span>
             </div>
-            <div className="bg-slate-950/60 p-4 rounded-xl border border-blue-900/40 text-center md:col-span-1 col-span-2 shadow-[0_0_15px_rgba(37,99,235,0.1)]">
-              <span className="block text-[10px] text-blue-400 font-bold uppercase tracking-widest mb-1">Avance Jornada</span>
-              <span className="text-2xl font-black text-blue-400">{partidosTerminados} <span className="text-xs text-blue-500/50">de</span> {quinielaActiva.partidos.length}</span>
+            <div className="bg-slate-950/60 p-2.5 rounded-xl border border-blue-900/40 text-center md:col-span-1 col-span-2 shadow-[0_0_10px_rgba(37,99,235,0.1)]">
+              <span className="block text-[8px] md:text-[9px] text-blue-400 font-bold uppercase tracking-widest mb-0.5">Avance Jornada</span>
+              <span className="text-lg md:text-xl font-black text-blue-400">{partidosTerminados} <span className="text-[10px] text-blue-500/50">de</span> {quinielaActiva.partidos.length}</span>
             </div>
           </div>
 
-          <div className="mt-5 bg-amber-500/10 p-5 rounded-2xl border border-amber-500/20 text-center shadow-[0_0_20px_rgba(245,158,11,0.15)] relative z-10">
+          <div className="mt-3 bg-amber-500/10 p-3 rounded-xl border border-amber-500/20 text-center shadow-[0_0_15px_rgba(245,158,11,0.1)] relative z-10">
             {esPromo ? (
               <>
-                <span className="block text-[10px] md:text-xs text-amber-500 font-black uppercase tracking-widest mb-1">
-                  🎁 EVENTO PROMOCIONAL 🎁
+                <span className="block text-[9px] text-amber-500 font-black uppercase tracking-widest mb-0.5">🎁 EVENTO PROMOCIONAL 🎁</span>
+                <span className="text-base md:text-lg font-black text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.3)] block">
+                  {quinielaActiva.tipo_premiacion === 'promo_top2' ? '1 CRD AL 1º Y 2º LUGAR' : '1 CRÉDITO AL GANADOR'}
                 </span>
-                <span className="text-xl md:text-3xl font-black text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.3)] block mt-2">
-                  {quinielaActiva.tipo_premiacion === 'promo_top2' 
-                    ? '1 CRÉDITO AL 1º Y 2º LUGAR' 
-                    : '1 CRÉDITO AL GANADOR'}
-                </span>
-                <div className="mt-2 text-[9px] text-slate-400 font-bold uppercase tracking-wider">
-                  Valor Promocional del Crédito: $30 MXN
-                </div>
               </>
             ) : (
               <>
-                <span className="block text-[10px] md:text-xs text-amber-500 font-black uppercase tracking-widest mb-1">
-                  {quinielaActiva.estado === 'abierta' ? '👑 Bolsa Garantizada Para El Ganador 👑' : '🏆 PREMIO A REPARTIR 🏆'}
+                <span className="block text-[9px] text-amber-500 font-black uppercase tracking-widest mb-0.5">
+                  {quinielaActiva.estado === 'abierta' ? '👑 Bolsa Para El Ganador 👑' : '🏆 PREMIO A REPARTIR 🏆'}
                 </span>
-                <span className="text-4xl md:text-5xl font-black text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.3)] block">
-                  ${quinielaActiva.premioPesos.toFixed(0)} <span className="text-sm md:text-lg text-amber-600 uppercase font-bold">MXN</span>
+                <span className="text-2xl md:text-3xl font-black text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.3)] block">
+                  ${quinielaActiva.premioPesos.toFixed(0)} <span className="text-[10px] md:text-xs text-amber-600 uppercase font-bold">MXN</span>
                 </span>
-                <div className="mt-2 text-[9px] text-slate-500 font-bold uppercase tracking-wider">
-                  Valor del crédito: $30 MXN | Retención casa: 20%
-                </div>
               </>
             )}
           </div>
         </div>
 
         {!mostrarPicks && (
-          <div className="mb-4 text-center border border-amber-900/50 bg-amber-950/20 text-amber-500/80 text-xs py-2 rounded-lg font-bold uppercase tracking-widest">
-            🔒 Radiografía oculta hasta las {fechaCierre.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} para evitar copias.
+          <div className="mb-3 text-center border border-amber-900/50 bg-amber-950/20 text-amber-500/80 text-[10px] py-1.5 rounded-lg font-bold uppercase tracking-widest">
+            🔒 Radiografía oculta hasta las {fechaCierre.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
           </div>
         )}
 
-        {/* TABLA DE POSICIONES */}
-        <div className="bg-slate-900/80 rounded-2xl border border-slate-800 shadow-2xl overflow-hidden">
+        {/* TABLA DE POSICIONES ULTRA COMPACTA */}
+        <div className="bg-slate-900/80 rounded-xl border border-slate-800 shadow-2xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-slate-950/80 text-[10px] uppercase text-slate-500 tracking-widest border-b border-slate-800">
-                  <th className="p-4 w-14 text-center">Pos</th>
-                  <th className="p-4">Jugador</th>
-                  <th className="p-4 text-center">Aciertos</th>
-                  <th className="p-4 text-center hidden md:table-cell">Goles (Desempate)</th>
-                  <th className="p-4 text-right pr-6">Radiografía</th>
+                <tr className="bg-slate-950/80 text-[9px] uppercase text-slate-500 tracking-widest border-b border-slate-800">
+                  <th className="p-2 w-8 text-center">#</th>
+                  <th className="p-2">Jugador</th>
+                  <th className="p-2 text-center w-12">Pts</th>
+                  <th className="p-2 text-center w-12">Goles</th>
+                  <th className="p-2 text-right pr-3">Radiografía</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/40">
@@ -238,48 +223,57 @@ export default function Posiciones() {
                   const esLider = idx === 0 && totalJugadores > 1 && jugador.puntos > 0
                   return (
                     <tr key={jugador.id} className={`transition-colors hover:bg-slate-800/30 ${esLider ? 'bg-gradient-to-r from-amber-900/15 to-transparent' : ''}`}>
-                      <td className="p-4 text-center">
-                        {idx === 0 && partidosTerminados > 0 ? <span className="text-2xl drop-shadow-md block">🥇</span> : 
-                         idx === 1 && partidosTerminados > 0 ? <span className="text-xl block">🥈</span> : 
-                         idx === 2 && partidosTerminados > 0 ? <span className="text-xl block">🥉</span> : 
-                         <span className="text-xs font-black text-slate-500 bg-slate-950 border border-slate-800 px-2 py-1 rounded">{idx + 1}</span>}
+                      
+                      {/* POSICIÓN */}
+                      <td className="p-2 text-center">
+                        {idx === 0 && partidosTerminados > 0 ? <span className="text-lg drop-shadow-md block">🥇</span> : 
+                         idx === 1 && partidosTerminados > 0 ? <span className="text-base block">🥈</span> : 
+                         idx === 2 && partidosTerminados > 0 ? <span className="text-base block">🥉</span> : 
+                         <span className="text-[10px] font-black text-slate-500 bg-slate-950 border border-slate-800 px-1.5 py-0.5 rounded">{idx + 1}</span>}
                       </td>
-                      <td className="p-4">
-                        <div className="flex items-center gap-3">
-                          <div className={`relative shrink-0 rounded-full border-2 ${esLider ? 'border-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.3)]' : 'border-slate-700'}`}>
-                            <img src={getAvatarUrl(jugador.nombre, jugador.avatar_url)} alt={jugador.nombre} className="w-8 h-8 rounded-full object-cover bg-slate-900" />
+                      
+                      {/* JUGADOR */}
+                      <td className="p-2">
+                        <div className="flex items-center gap-2">
+                          <div className={`relative shrink-0 rounded-full border-2 ${esLider ? 'border-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.3)]' : 'border-slate-700'}`}>
+                            <img src={getAvatarUrl(jugador.nombre, jugador.avatar_url)} alt={jugador.nombre} className="w-6 h-6 md:w-7 md:h-7 rounded-full object-cover bg-slate-900" />
                           </div>
                           <div>
-                            <span className={`font-black uppercase text-sm block tracking-tight ${esLider ? 'text-amber-400' : 'text-slate-200'}`}>
-                              {jugador.nombre} {esLider && <span className="ml-1 text-xs">👑</span>}
+                            <span className={`font-black uppercase text-[10px] md:text-xs block tracking-tight truncate max-w-[100px] md:max-w-[150px] ${esLider ? 'text-amber-400' : 'text-slate-200'}`}>
+                              {jugador.nombre} {esLider && <span className="ml-0.5 text-[9px]">👑</span>}
                             </span>
-                            <div className="block md:hidden text-[10px] font-bold text-slate-500 mt-0.5 uppercase tracking-wide">
-                              Goles: {mostrarPicks ? <span className="text-slate-300 font-mono">{jugador.prediccionGoles}</span> : '🔒'}
-                              {quinielaActiva.goles_totales_real !== null && <span className="text-amber-500/80 ml-2">(Dif: {jugador.golesDiff})</span>}
+                            <div className="block md:hidden text-[8px] font-bold text-slate-500 mt-0.5 uppercase tracking-wide">
+                              Dif: {quinielaActiva.goles_totales_real !== null ? jugador.golesDiff : '?'}
                             </div>
                           </div>
                         </div>
                       </td>
-                      <td className="p-4 text-center">
-                        <span className={`text-xl font-black ${esLider ? 'text-amber-400 drop-shadow-[0_0_8px_rgba(245,158,11,0.3)]' : 'text-green-400 drop-shadow-[0_0_6px_rgba(74,222,128,0.15)]'}`}>
+                      
+                      {/* PUNTOS */}
+                      <td className="p-2 text-center">
+                        <span className={`text-sm md:text-base font-black ${esLider ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(245,158,11,0.3)]' : 'text-green-400 drop-shadow-[0_0_4px_rgba(74,222,128,0.15)]'}`}>
                           {jugador.puntos}
                         </span>
                       </td>
-                      <td className="p-4 text-center hidden md:table-cell">
-                        <span className="text-sm font-mono font-bold text-slate-300 bg-slate-950 px-2.5 py-1 rounded border border-slate-800">
+                      
+                      {/* GOLES (DESEMPATE) */}
+                      <td className="p-2 text-center">
+                        <span className="text-[10px] md:text-xs font-mono font-bold text-slate-300 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">
                           {mostrarPicks ? jugador.prediccionGoles : '🔒'}
                         </span>
-                        {quinielaActiva.goles_totales_real !== null && <span className="text-[10px] font-bold text-amber-500 ml-2 inline-block">Dif: {jugador.golesDiff}</span>}
+                        {quinielaActiva.goles_totales_real !== null && <span className="hidden md:inline-block text-[8px] font-bold text-amber-500 ml-1">Dif:{jugador.golesDiff}</span>}
                       </td>
-                      <td className="p-4 text-right pr-6">
-                        <div className="flex gap-1 justify-end flex-wrap w-full max-w-[240px] ml-auto">
+                      
+                      {/* RADIOGRAFÍA DE PARTIDOS (MINI CUADRADOS) */}
+                      <td className="p-2 text-right pr-3">
+                        <div className="flex gap-0.5 md:gap-1 justify-end flex-wrap w-full max-w-[180px] ml-auto">
                           {quinielaActiva.partidos.map((p: any, i: number) => {
                             const pronostico = jugador.pronosticos.find((pr: any) => pr.partido_id === p.id)
                             const estado = jugador.aciertos[p.id]
                             
                             if (!mostrarPicks) {
                               return (
-                                <div key={p.id} className="w-5 h-5 md:w-6 md:h-6 flex items-center justify-center rounded text-[9px] md:text-[10px] bg-slate-950 border border-slate-800 text-slate-600" title={`Partido ${i+1} Oculto`}>
+                                <div key={p.id} className="w-4 h-4 md:w-5 md:h-5 flex items-center justify-center rounded text-[7px] md:text-[8px] bg-slate-950 border border-slate-800 text-slate-600" title={`Partido ${i+1} Oculto`}>
                                   🔒
                                 </div>
                               )
@@ -291,75 +285,76 @@ export default function Posiciones() {
                             if (estado === 'pendiente' && pronostico) bgClass = "bg-slate-800 border-slate-600 text-slate-300"
                             
                             return (
-                              <div key={p.id} className={`w-5 h-5 md:w-6 md:h-6 flex items-center justify-center rounded text-[9px] md:text-[10px] font-black border ${bgClass}`} title={`Partido ${i+1}`}>
+                              <div key={p.id} className={`w-4 h-4 md:w-5 md:h-5 flex items-center justify-center rounded text-[7px] md:text-[9px] font-black border ${bgClass}`} title={`Partido ${i+1}`}>
                                 {pronostico ? pronostico.eleccion_usuario : '-'}
                               </div>
                             )
                           })}
                         </div>
                       </td>
+
                     </tr>
                   )
                 })}
               </tbody>
             </table>
             {quinielaActiva.ranking.length === 0 && (
-              <div className="p-10 text-center text-slate-500 text-sm font-bold uppercase tracking-widest italic">Aún no hay boletos registrados para esta jornada.</div>
+              <div className="p-6 text-center text-slate-500 text-[10px] font-bold uppercase tracking-widest italic">Aún no hay boletos para esta jornada.</div>
             )}
           </div>
         </div>
       </section>
 
-      {/* SALÓN DE LA FAMA */}
+      {/* SALÓN DE LA FAMA COMPACTO */}
       {historial.length > 0 && (
-        <section className="pt-8 border-t border-slate-800">
-          <h3 className="text-xl font-black text-slate-400 mb-6 uppercase tracking-widest flex items-center gap-2">
-            <span>📜</span> Salón de la Fama <span className="text-[10px] font-normal tracking-normal ml-2 opacity-60">(Jornadas Terminadas)</span>
+        <section className="pt-6 border-t border-slate-800">
+          <h3 className="text-lg font-black text-slate-400 mb-4 uppercase tracking-widest flex items-center gap-2">
+            <span>📜</span> Salón de la Fama <span className="text-[9px] font-normal tracking-normal ml-1 opacity-60">(Terminadas)</span>
           </h3>
           
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {historial.map(quiniela => {
               const esHistorialPromo = quiniela.tipo_premiacion?.toLowerCase().includes('promo');
 
               return (
-                <div key={quiniela.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg relative overflow-hidden">
-                  <div className="flex justify-between items-start mb-4 border-b border-slate-800 pb-3">
+                <div key={quiniela.id} className="bg-slate-900 border border-slate-800 rounded-xl p-3 md:p-4 shadow-lg relative overflow-hidden">
+                  <div className="flex justify-between items-start mb-3 border-b border-slate-800 pb-2">
                     <div>
-                      <h4 className="font-black text-white uppercase italic">{quiniela.nombre_jornada}</h4>
-                      <span className="text-[10px] text-slate-500 font-bold uppercase mt-1 block">Goles Reales: {quiniela.goles_totales_real}</span>
+                      <h4 className="font-black text-white text-[10px] md:text-xs uppercase italic">{quiniela.nombre_jornada}</h4>
+                      <span className="text-[8px] md:text-[9px] text-slate-500 font-bold uppercase mt-0.5 block">Goles Reales: {quiniela.goles_totales_real}</span>
                     </div>
                     <div className="text-right">
-                      <span className="block text-[10px] text-amber-500 font-bold uppercase tracking-widest">Premio Entregado</span>
+                      <span className="block text-[8px] md:text-[9px] text-amber-500 font-bold uppercase tracking-widest">Premio</span>
                       {esHistorialPromo ? (
-                        <span className="text-sm font-black text-amber-400 drop-shadow-md uppercase block mt-1">
+                        <span className="text-[10px] md:text-xs font-black text-amber-400 drop-shadow-md uppercase block mt-0.5">
                           {quiniela.tipo_premiacion === 'promo_top2' ? '1 CRD (1º Y 2º)' : '1 CRD (1º)'}
                         </span>
                       ) : (
-                        <span className="text-xl font-black text-amber-400 drop-shadow-md">
-                          ${quiniela.premioPesos.toFixed(0)} <span className="text-xs">MXN</span>
+                        <span className="text-sm md:text-base font-black text-amber-400 drop-shadow-md">
+                          ${quiniela.premioPesos.toFixed(0)} <span className="text-[9px]">MXN</span>
                         </span>
                       )}
                     </div>
                   </div>
 
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     {quiniela.ranking.slice(0, 3).map((jugador: any, idx: number) => (
-                      <div key={jugador.id} className="flex justify-between items-center bg-slate-950/50 p-2 rounded-lg border border-slate-800/50">
-                        <div className="flex items-center gap-3">
-                          <span className="text-lg w-6 text-center">
+                      <div key={jugador.id} className="flex justify-between items-center bg-slate-950/50 p-1.5 md:p-2 rounded-lg border border-slate-800/50">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm w-4 md:w-5 text-center">
                             {idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}
                           </span>
-                          <div className="flex items-center gap-2">
-                            <img src={getAvatarUrl(jugador.nombre, jugador.avatar_url)} alt={jugador.nombre} className="w-6 h-6 rounded-full object-cover border border-slate-700 bg-slate-900" />
-                            <span className={`font-black uppercase text-xs truncate max-w-[120px] sm:max-w-[180px] ${idx === 0 ? 'text-amber-400' : 'text-slate-300'}`}>
+                          <div className="flex items-center gap-1.5">
+                            <img src={getAvatarUrl(jugador.nombre, jugador.avatar_url)} alt={jugador.nombre} className="w-4 h-4 md:w-5 md:h-5 rounded-full object-cover border border-slate-700 bg-slate-900" />
+                            <span className={`font-black uppercase text-[9px] md:text-[10px] truncate w-[80px] sm:w-[100px] ${idx === 0 ? 'text-amber-400' : 'text-slate-300'}`}>
                               {jugador.nombre}
                             </span>
                           </div>
                         </div>
-                        <div className="flex items-center gap-3 text-[10px] font-bold text-slate-500">
-                          <span title="Goles de Desempate">G: {jugador.prediccionGoles} (Dif: {jugador.golesDiff})</span>
-                          <span className="bg-slate-800 text-green-400 px-2 py-1 rounded border border-slate-700 w-12 text-center shadow-inner">
-                            {jugador.puntos} pts
+                        <div className="flex items-center gap-2 text-[8px] md:text-[9px] font-bold text-slate-500">
+                          <span title="Goles de Desempate" className="hidden xs:inline-block">G:{jugador.prediccionGoles}</span>
+                          <span className="bg-slate-800 text-green-400 px-1.5 py-0.5 rounded border border-slate-700 w-9 md:w-10 text-center shadow-inner">
+                            {jugador.puntos}
                           </span>
                         </div>
                       </div>
@@ -371,7 +366,6 @@ export default function Posiciones() {
           </div>
         </section>
       )}
-
     </div>
   )
 }

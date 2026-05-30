@@ -156,99 +156,99 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
     : 0;
 
   return (
-    <div className="w-full max-w-2xl mx-auto mt-8 animate-in fade-in duration-500 mb-20 space-y-6">
+    <div className="w-full max-w-2xl mx-auto mt-2 animate-in fade-in duration-500 mb-20 space-y-4">
       
-      {/* TARJETA PRINCIPAL: FOTO Y SALDO */}
-      <div className="bg-slate-900/80 p-8 rounded-3xl border border-slate-800 shadow-2xl text-center relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-b from-blue-900/40 to-transparent"></div>
+      {/* TARJETA PRINCIPAL: FOTO Y SALDO COMPACTOS */}
+      <div className="bg-slate-900/80 p-5 md:p-6 rounded-3xl border border-slate-800 shadow-2xl text-center relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-20 md:h-24 bg-gradient-to-b from-blue-900/40 to-transparent"></div>
         
         <div className="relative z-10 flex flex-col items-center">
-          <div className="relative group mb-4">
+          <div className="relative group mb-3">
             <img 
               src={avatarUrl || avatarFallback} 
               alt="Avatar" 
-              className={`w-32 h-32 rounded-full border-4 border-slate-800 object-cover shadow-xl transition-all ${subiendo ? 'opacity-50 blur-sm' : 'group-hover:border-blue-500'}`} 
+              className={`w-20 h-20 md:w-24 md:h-24 rounded-full border-4 border-slate-800 object-cover shadow-xl transition-all ${subiendo ? 'opacity-50 blur-sm' : 'group-hover:border-blue-500'}`} 
             />
-            {subiendo && <div className="absolute inset-0 flex items-center justify-center font-black text-white drop-shadow-md">Cargando...</div>}
+            {subiendo && <div className="absolute inset-0 flex items-center justify-center font-black text-[10px] md:text-xs text-white drop-shadow-md">...</div>}
             
-            <label className="absolute bottom-1 right-1 bg-blue-600 p-2.5 rounded-full cursor-pointer hover:bg-blue-500 hover:scale-110 transition-all shadow-lg border-2 border-slate-900" title="Cambiar foto">
-              <span className="text-sm">📷</span>
+            <label className="absolute bottom-0 right-0 bg-blue-600 p-2 rounded-full cursor-pointer hover:bg-blue-500 hover:scale-110 transition-all shadow-lg border-2 border-slate-900" title="Cambiar foto">
+              <span className="text-[10px] md:text-xs">📷</span>
               <input type="file" accept="image/*" className="hidden" onChange={subirAvatar} disabled={subiendo} />
             </label>
           </div>
           
-          <h2 className="text-3xl font-black text-white uppercase tracking-tight">{usuarioActivo?.nombre}</h2>
-          <p className="text-slate-400 font-mono text-sm mt-1">{usuarioActivo?.telefono}</p>
+          <h2 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tight leading-none">{usuarioActivo?.nombre}</h2>
+          <p className="text-slate-400 font-mono text-[11px] md:text-xs mt-1">{usuarioActivo?.telefono}</p>
           
-          <div className="mt-6 bg-slate-950/50 inline-block px-6 py-3 rounded-2xl border border-slate-800 shadow-inner">
-            <span className="block text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Tu Billetera Digital</span>
-            <span className="text-3xl font-black text-green-400 drop-shadow-[0_0_10px_rgba(74,222,128,0.2)]">
-              ${usuarioActivo?.creditos_disponibles} <span className="text-sm text-green-600 uppercase">Créditos</span>
+          <div className="mt-4 bg-slate-950/50 inline-block px-5 py-2.5 rounded-2xl border border-slate-800 shadow-inner">
+            <span className="block text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-0.5">Tu Billetera Digital</span>
+            <span className="text-2xl md:text-3xl font-black text-green-400 drop-shadow-[0_0_10px_rgba(74,222,128,0.2)]">
+              ${usuarioActivo?.creditos_disponibles} <span className="text-xs text-green-600 uppercase">Créditos</span>
             </span>
           </div>
         </div>
       </div>
 
       {cargando ? (
-        <div className="text-center py-10 text-blue-400 font-bold uppercase tracking-widest animate-pulse">Analizando trayectoria...</div>
+        <div className="text-center py-6 text-blue-400 font-bold uppercase tracking-widest text-xs animate-pulse">Analizando trayectoria...</div>
       ) : (
         <>
-          {/* TARJETA DE NÚMEROS GLOBALES (Modificada para Efectividad) */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800 flex items-center justify-between shadow-md">
+          {/* TARJETA DE NÚMEROS GLOBALES COMPACTA */}
+          <div className="grid grid-cols-2 gap-3 md:gap-4">
+            <div className="bg-slate-900/60 p-4 md:p-5 rounded-2xl border border-slate-800 flex items-center justify-between shadow-md">
               <div>
-                <span className="block text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Boletos Jugados</span>
-                <span className="text-2xl font-black text-white">{estadisticas.jugadas}</span>
+                <span className="block text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1">Boletos Jugados</span>
+                <span className="text-xl md:text-2xl font-black text-white">{estadisticas.jugadas}</span>
               </div>
-              <div className="text-3xl opacity-20">🎫</div>
+              <div className="text-2xl opacity-20">🎫</div>
             </div>
 
-            <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800 flex items-center justify-between shadow-md">
+            <div className="bg-slate-900/60 p-4 md:p-5 rounded-2xl border border-slate-800 flex items-center justify-between shadow-md">
               <div>
-                <span className="block text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Efectividad</span>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-2xl font-black text-blue-400">{porcentajeEfectividad}%</span>
-                  <span className="text-[11px] font-bold text-slate-400 tracking-wide">
+                <span className="block text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1">Efectividad</span>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-xl md:text-2xl font-black text-blue-400">{porcentajeEfectividad}%</span>
+                  <span className="text-[10px] font-bold text-slate-400 tracking-wide">
                     ({estadisticas.aciertos}/{estadisticas.seleccionesTotales})
                   </span>
                 </div>
               </div>
-              <div className="text-3xl opacity-20">🎯</div>
+              <div className="text-2xl opacity-20">🎯</div>
             </div>
           </div>
 
-          {/* LA VITRINA DE TROFEOS */}
-          <div className="bg-gradient-to-b from-amber-950/20 to-slate-900 border border-amber-900/30 p-6 rounded-3xl shadow-xl">
-            <div className="text-center mb-6">
-              <h3 className="text-xl font-black text-amber-500 uppercase tracking-widest">🏆 Vitrina de Trofeos</h3>
-              <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Tu historial de podios en CiberTeque</p>
+          {/* LA VITRINA DE TROFEOS COMPACTA */}
+          <div className="bg-gradient-to-b from-amber-950/20 to-slate-900 border border-amber-900/30 p-4 md:p-5 rounded-3xl shadow-xl">
+            <div className="text-center mb-4">
+              <h3 className="text-lg md:text-xl font-black text-amber-500 uppercase tracking-widest">🏆 Vitrina de Trofeos</h3>
+              <p className="text-[9px] text-slate-400 font-bold uppercase mt-0.5">Tu historial de podios</p>
             </div>
             
-            <div className="flex justify-center gap-4 sm:gap-8">
-              {/* PLATA (Comillas corregidas) */}
-              <div className="flex flex-col items-center justify-end mt-6">
-                <span className={`text-4xl drop-shadow-md mb-2 ${estadisticas.platas === 0 ? 'opacity-30 grayscale' : ''}`}>🥈</span>
-                <div className="bg-slate-950 border border-slate-800 w-16 text-center py-2 rounded-t-lg">
-                  <span className="block text-[10px] text-slate-500 font-bold uppercase">2dos</span>
-                  <span className="text-xl font-black text-slate-300">{estadisticas.platas}</span>
-                </div>
-              </div>
-
-              {/* ORO (Comillas corregidas) */}
+            <div className="flex justify-center gap-3 sm:gap-6 items-end">
+              {/* PLATA */}
               <div className="flex flex-col items-center justify-end">
-                <span className={`text-5xl drop-shadow-[0_0_15px_rgba(251,191,36,0.5)] mb-2 ${estadisticas.oros === 0 ? 'opacity-30 grayscale' : ''}`}>🥇</span>
-                <div className="bg-slate-950 border border-amber-900/30 w-20 text-center py-4 rounded-t-lg shadow-inner">
-                  <span className="block text-[10px] text-amber-500/80 font-bold uppercase">1ros</span>
-                  <span className="text-2xl font-black text-amber-400">{estadisticas.oros}</span>
+                <span className={`text-3xl md:text-4xl drop-shadow-md mb-1.5 ${estadisticas.platas === 0 ? 'opacity-30 grayscale' : ''}`}>🥈</span>
+                <div className="bg-slate-950 border border-slate-800 w-14 md:w-16 text-center py-1.5 rounded-t-lg">
+                  <span className="block text-[9px] text-slate-500 font-bold uppercase">2dos</span>
+                  <span className="text-lg md:text-xl font-black text-slate-300">{estadisticas.platas}</span>
                 </div>
               </div>
 
-              {/* BRONCE (Comillas corregidas) */}
-              <div className="flex flex-col items-center justify-end mt-8">
-                <span className={`text-3xl drop-shadow-md mb-2 ${estadisticas.bronces === 0 ? 'opacity-30 grayscale' : ''}`}>🥉</span>
-                <div className="bg-slate-950 border border-slate-800 w-16 text-center py-2 rounded-t-lg">
-                  <span className="block text-[10px] text-slate-500 font-bold uppercase">3ros</span>
-                  <span className="text-lg font-black text-amber-700">{estadisticas.bronces}</span>
+              {/* ORO */}
+              <div className="flex flex-col items-center justify-end">
+                <span className={`text-4xl md:text-5xl drop-shadow-[0_0_15px_rgba(251,191,36,0.5)] mb-1.5 ${estadisticas.oros === 0 ? 'opacity-30 grayscale' : ''}`}>🥇</span>
+                <div className="bg-slate-950 border border-amber-900/30 w-16 md:w-20 text-center py-3 rounded-t-lg shadow-inner">
+                  <span className="block text-[9px] text-amber-500/80 font-bold uppercase">1ros</span>
+                  <span className="text-xl md:text-2xl font-black text-amber-400">{estadisticas.oros}</span>
+                </div>
+              </div>
+
+              {/* BRONCE */}
+              <div className="flex flex-col items-center justify-end">
+                <span className={`text-2xl md:text-3xl drop-shadow-md mb-1.5 ${estadisticas.bronces === 0 ? 'opacity-30 grayscale' : ''}`}>🥉</span>
+                <div className="bg-slate-950 border border-slate-800 w-14 md:w-16 text-center py-1.5 rounded-t-lg">
+                  <span className="block text-[9px] text-slate-500 font-bold uppercase">3ros</span>
+                  <span className="text-base md:text-lg font-black text-amber-700">{estadisticas.bronces}</span>
                 </div>
               </div>
             </div>
