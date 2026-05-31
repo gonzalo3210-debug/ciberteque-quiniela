@@ -14,16 +14,20 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
   const PORCENTAJE_ADMIN = 0.20 
 
   // --- ESTADOS ---
+  const [vistaActual, setVistaActual] = useState<'activas' | 'historico'>('activas')
   const [equipos, setEquipos] = useState<any[]>([])
+  
   const [quinielasAbiertas, setQuinielasAbiertas] = useState<any[]>([])
+  const [quinielasCerradas, setQuinielasCerradas] = useState<any[]>([]) 
   const [quiniela, setQuiniela] = useState<any>(null)
+  
   const [partidos, setPartidos] = useState<any[]>([])
   const [resultadosReales, setResultadosReales] = useState<Record<string, string>>({})
   const [marcadoresReales, setMarcadoresReales] = useState<Record<string, { l: string, v: string }>>({}) 
   const [golesReales, setGolesReales] = useState<string>('')
   const [calificando, setCalificando] = useState(false)
   const [rankingAdmin, setRankingAdmin] = useState<any[]>([]) 
-  const [tipoImpresion, setTipoImpresion] = useState<'tickets' | 'sabana' | 'recibo' | null>(null)
+  const [tipoImpresion, setTipoImpresion] = useState<'tickets' | 'sabana' | 'recibo' | 'tabla' | null>(null)
   const [ticketAImprimir, setTicketAImprimir] = useState<any>(null)
   const [busquedaJugador, setBusquedaJugador] = useState('')
 
@@ -45,8 +49,8 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
   // --- EFECTOS ---
   useEffect(() => {
     cargarEquiposDB()
-    cargarPartidosJornada()
-  }, [])
+    cargarJornadas()
+  }, [vistaActual])
 
   useEffect(() => {
     const handleAfterPrint = () => setTipoImpresion(null)
@@ -66,18 +70,33 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
     return equipo?.logo_url || null
   }
 
-  const cargarPartidosJornada = async () => {
-    const { data: abiertas } = await supabase
-      .from('quinielas')
-      .select('id, nombre_jornada, precio_ticket, goles_totales_real, fecha_cierre, estado, tipo_premiacion, partidos (id, equipo_local, equipo_visitante, resultado_real, fecha_hora, goles_local, goles_visitante)')
-      .eq('estado', 'abierta')
-      .order('fecha_cierre', { ascending: true })
-      
-    if (abiertas && abiertas.length > 0) {
-      setQuinielasAbiertas(abiertas)
-      if (!quiniela || !abiertas.find(q => q.id === quiniela.id)) cargarDetallesQuiniela(abiertas[0])
-      else cargarDetallesQuiniela(abiertas.find(q => q.id === quiniela.id))
-    } else { setQuinielasAbiertas([]); setQuiniela(null); setPartidos([]); setRankingAdmin([]) }
+  const cargarJornadas = async () => {
+    if (vistaActual === 'activas') {
+      const { data: abiertas } = await supabase
+        .from('quinielas')
+        .select('id, nombre_jornada, precio_ticket, goles_totales_real, fecha_cierre, estado, tipo_premiacion, partidos (id, equipo_local, equipo_visitante, resultado_real, fecha_hora, goles_local, goles_visitante)')
+        .eq('estado', 'abierta')
+        .order('fecha_cierre', { ascending: true })
+        
+      if (abiertas && abiertas.length > 0) {
+        setQuinielasAbiertas(abiertas)
+        if (!quiniela || !abiertas.find(q => q.id === quiniela.id)) cargarDetallesQuiniela(abiertas[0])
+        else cargarDetallesQuiniela(abiertas.find(q => q.id === quiniela.id))
+      } else { setQuinielasAbiertas([]); setQuiniela(null); setPartidos([]); setRankingAdmin([]) }
+    } 
+    else {
+      const { data: cerradas } = await supabase
+        .from('quinielas')
+        .select('id, nombre_jornada, precio_ticket, goles_totales_real, fecha_cierre, estado, tipo_premiacion, partidos (id, equipo_local, equipo_visitante, resultado_real, fecha_hora, goles_local, goles_visitante)')
+        .eq('estado', 'cerrada')
+        .order('fecha_cierre', { ascending: false })
+        
+      if (cerradas && cerradas.length > 0) {
+        setQuinielasCerradas(cerradas)
+        if (!quiniela || !cerradas.find(q => q.id === quiniela.id)) cargarDetallesQuiniela(cerradas[0])
+        else cargarDetallesQuiniela(cerradas.find(q => q.id === quiniela.id))
+      } else { setQuinielasCerradas([]); setQuiniela(null); setPartidos([]); setRankingAdmin([]) }
+    }
   }
 
   const cargarDetallesQuiniela = async (qData: any) => {
@@ -111,9 +130,10 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
     }
 
     const { data: tData } = await supabase.from('tickets').select('id, usuario_id, prediccion_goles_total, pronosticos(partido_id, eleccion_usuario)').eq('quiniela_id', qData.id)
-    const { data: uData } = await supabase.from('usuarios').select('id, nombre, telefono, creditos_disponibles')
+    const { data: uData } = await supabase.from('usuarios').select('id, nombre, telefono, credited_disponibles', 'creditos_disponibles')
+    const { data: uDataReal } = await supabase.from('usuarios').select('id, nombre, telefono, creditos_disponibles')
     const mapaU: Record<string, any> = {}
-    if (uData) uData.forEach(u => mapaU[u.id] = { nombre: u.nombre, telefono: u.telefono, creditos: u.creditos_disponibles })
+    if (uDataReal) uDataReal.forEach(u => mapaU[u.id] = { nombre: u.nombre, telefono: u.telefono, creditos: u.creditos_disponibles })
     
     if (tData) {
       const rCalc = tData.map(ticket => {
@@ -212,7 +232,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
         }
       }
       alert('¡Avance guardado con éxito! Posiciones actualizadas.')
-      await cargarPartidosJornada()
+      await cargarJornadas()
     } catch (error) {
       alert('Hubo un error al guardar el avance.')
     } finally {
@@ -234,33 +254,34 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
     if (tPremio === 'promo_unico') bolsaPesos = VALOR_CREDITO;
     else if (tPremio === 'promo_top2') bolsaPesos = VALOR_CREDITO * 2;
 
-    let texto = `🏆 *AVANCE DE QUINIELA: ${quiniela.nombre_jornada}* 🏆\n\n`;
+    const estaCerrada = quiniela.estado === 'cerrada';
+    
+    let texto = `🏆 *${estaCerrada ? 'RESULTADOS FINALES' : 'AVANCE DE QUINIELA'}: ${quiniela.nombre_jornada}* 🏆\n\n`;
     texto += `⚽ Partidos finalizados: *${partidosJugados} de ${partidos.length}*\n`;
     
     if (tPremio.startsWith('promo')) {
-      texto += `🎁 Bolsa Promocional Garantizada: *$${bolsaPesos.toFixed(0)} MXN*\n\n`;
+      texto += `🎁 Bolsa Promocional: *$${bolsaPesos.toFixed(0)} MXN*\n\n`;
     } else {
-      texto += `💰 Bolsa Actual: *$${bolsaPesos.toFixed(0)} MXN*\n\n`;
+      texto += `💰 Bolsa ${estaCerrada ? 'Repartida' : 'Actual'}: *$${bolsaPesos.toFixed(0)} MXN*\n\n`;
     }
     
-    texto += `🔥 *TOP LÍDERES ACTUALES* 🔥\n`;
+    texto += `🔥 *${estaCerrada ? 'TOP GANADORES' : 'TOP LÍDERES ACTUALES'}* 🔥\n`;
     const topJugadores = rankingAdmin.slice(0, 10);
     if (topJugadores.length === 0) {
       texto += `Aún no hay participantes.\n`;
     } else {
       topJugadores.forEach((r, i) => {
-        // 🔥 MEDALLAS SÓLO PARA LOS PRIMEROS 3 LUGARES 🔥
         let medalla = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '🔹';
-        texto += `${medalla} ${r.nombre} - *${r.puntos} pts*\n`;
+        texto += `${medalla} ${r.nombre.toUpperCase()} - *${r.puntos} pts*\n`;
       });
     }
 
-    texto += `\n💻 *Revisa la tabla COMPLETA en vivo aquí:*\n`;
-    texto += `👉 ${ENLACE_PUBLICO_RANKING}\n\n`;
-    texto += `_¡Suerte a todos!_`;
+    if (!estaCerrada) {
+      texto += `\n💻 *Revisa la tabla COMPLETA en vivo aquí:*\n👉 ${ENLACE_PUBLICO_RANKING}\n\n_¡Suerte a todos!_`;
+    }
 
     navigator.clipboard.writeText(texto).then(() => {
-      alert('📋 ¡Resumen y Enlace copiados al portapapeles!\n\nVe a tu grupo de WhatsApp y dale a "Pegar" (Paste).');
+      alert('📋 ¡Resumen y Enlace copiados al portapapeles!\n\nVe a tu grupo de WhatsApp y dale a "Pegar".');
     }).catch(() => {
       window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
     });
@@ -298,7 +319,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
 
     let desgloseTexto = '';
     
-    // 🔥 ESTABLECEMOS EL TIPO CON "lugar" PARA EL CONCEPTO EXACTO 🔥
     const ganadoresAPagar: { id: string, nombre: string, cantidad: number, lugar: string }[] = [];
 
     const grupos: any[][] = [];
@@ -327,7 +347,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
       
       for (let i = 0; i < grupos.length; i++) {
         const grupo = grupos[i];
-        const lugaresTomados = grupo.length;
+        const lugaresTomados = group.length;
         let porcentajeTotalGrupo = 0;
         
         for (let j = 0; j < lugaresTomados; j++) {
@@ -357,7 +377,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
       desgloseTexto += `\n🥇 1er Nivel (${grupo1.length} empatados):\n`;
       grupo1.forEach(jugador => {
         desgloseTexto += `- ${jugador.nombre} -> Gana 1 Crédito\n`;
-        // 🔥 ASIGNAMOS EL TEXTO EXACTO DEL PREMIO
         ganadoresAPagar.push({ id: jugador.usuario_id, nombre: jugador.nombre, cantidad: 1, lugar: '1er Lugar' });
       });
 
@@ -366,7 +385,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
         desgloseTexto += `\n🥈 2do Nivel (${grupo2.length} empatados):\n`;
         grupo2.forEach(jugador => {
           desgloseTexto += `- ${jugador.nombre} -> Gana 1 Crédito\n`;
-          // 🔥 ASIGNAMOS EL TEXTO EXACTO DEL PREMIO
           ganadoresAPagar.push({ id: jugador.usuario_id, nombre: jugador.nombre, cantidad: 1, lugar: '2do Lugar' });
         });
       }
@@ -390,7 +408,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
       }
       await supabase.from('quinielas').update({ goles_totales_real: parseInt(golesReales), estado: 'cerrada' }).eq('id', quiniela.id)
       
-      // 🔥 PAGOS AUTOMÁTICOS CON REGISTRO DE PREMIO EXPLICITO 🔥
       if (ganadoresAPagar.length > 0) {
         for (const ganador of ganadoresAPagar) {
           const { data: userData } = await supabase.from('usuarios').select('creditos_disponibles').eq('id', ganador.id).single()
@@ -403,7 +420,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
             usuario_id: ganador.id, 
             cantidad: ganador.cantidad, 
             tipo_movimiento: 'premio_quiniela',
-            descripcion: `Premio ${ganador.lugar}: ${quiniela.nombre_jornada}` // Ej: Premio 1er Lugar: Finales Champions
+            descripcion: `Premio ${ganador.lugar}: ${quiniela.nombre_jornada}` 
           }]);
 
           if (actualizarSaldoGlobal) actualizarSaldoGlobal(ganador.id, nuevoSaldo);
@@ -413,7 +430,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
         alert(`🎉 ¡Jornada Cerrada Exitosamente!\n\nRealiza los pagos de dinero en efectivo en el mostrador.`);
       }
 
-      await cargarPartidosJornada()
+      await cargarJornadas()
     } catch (e) {
       alert('Error al liquidar la jornada.')
     } finally {
@@ -456,7 +473,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
       }
       alert("¡Jornada actualizada!")
       setEditandoQuinielaId(null)
-      await cargarPartidosJornada() 
+      await cargarJornadas() 
     } catch (error: any) {
       alert("Error: " + error.message)
     } finally {
@@ -499,7 +516,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
 
       alert('✅ ¡Jugada actualizada correctamente!')
       setEditandoTicketId(null)
-      await cargarPartidosJornada() 
+      await cargarJornadas() 
     } catch(e:any) {
       alert('Error al actualizar jugada: ' + e.message)
     } finally {
@@ -532,20 +549,44 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
   const esCualquierPromo = esPromoUnico || esPromoTop2;
 
   const jornadaCerrada = quiniela && quiniela.fecha_cierre ? new Date() > new Date(quiniela.fecha_cierre.substring(0, 16)) : false;
+  const esHistoricoLiquidado = vistaActual === 'historico' && quiniela?.estado === 'cerrada';
 
   const boletosFiltrados = rankingAdmin.filter(r => 
     r.nombre.toLowerCase().includes(busquedaJugador.toLowerCase()) || 
     (r.telefono && r.telefono.includes(busquedaJugador))
   );
 
+  const listaQuinielasMostrar = vistaActual === 'activas' ? quinielasAbiertas : quinielasCerradas;
+
   return (
     <>
-      {/* VISTA PRINCIPAL DEL ÁRBITRO */}
       <div className="animate-in fade-in duration-300 space-y-4 w-full max-w-4xl mx-auto">
-        {quinielasAbiertas.length > 1 && (
+        
+        {/* PESTAÑAS: ACTIVAS vs HISTÓRICO */}
+        <div className="flex bg-slate-900 rounded-xl border border-slate-800 p-1 mb-4 shadow-sm">
+          <button 
+            onClick={() => setVistaActual('activas')}
+            className={`flex-1 py-2 rounded-lg text-[10px] md:text-xs font-black uppercase tracking-widest transition-all ${
+              vistaActual === 'activas' ? 'bg-red-600 text-white shadow-md' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            ⚽ Activas
+          </button>
+          <button 
+            onClick={() => setVistaActual('historico')}
+            className={`flex-1 py-2 rounded-lg text-[10px] md:text-xs font-black uppercase tracking-widest transition-all ${
+              vistaActual === 'historico' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            📜 Histórico
+          </button>
+        </div>
+
+        {/* SELECTOR DE JORNADAS */}
+        {listaQuinielasMostrar.length > 1 && (
           <div className="flex flex-wrap justify-center gap-1.5 mb-2 bg-slate-900/50 p-2 rounded-xl border border-slate-800">
-            {quinielasAbiertas.map(qa => (
-              <button key={qa.id} onClick={() => cargarDetallesQuiniela(qa)} className={`px-3 py-1.5 rounded-lg text-[10px] md:text-xs font-black uppercase transition-all ${quiniela?.id === qa.id ? 'bg-red-600 text-white shadow-md' : 'bg-slate-950 border border-slate-700 text-slate-500 hover:text-slate-300'}`}>
+            {listaQuinielasMostrar.map(qa => (
+              <button key={qa.id} onClick={() => cargarDetallesQuiniela(qa)} className={`px-3 py-1.5 rounded-lg text-[10px] md:text-xs font-black uppercase transition-all ${quiniela?.id === qa.id ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-950 border border-slate-700 text-slate-500 hover:text-slate-300'}`}>
                 {qa.nombre_jornada}
               </button>
             ))}
@@ -553,13 +594,28 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
         )}
 
         {!quiniela ? (
-          <p className="text-center text-slate-500 py-10 text-[10px] font-bold uppercase tracking-widest bg-slate-900/50 rounded-xl border border-slate-800">No hay jornada abierta actualmente.</p>
+          <p className="text-center text-slate-500 py-10 text-[10px] font-bold uppercase tracking-widest bg-slate-900/50 rounded-xl border border-slate-800">
+            {vistaActual === 'activas' ? 'No hay jornada abierta actualmente.' : 'No hay jornadas cerradas en el historial.'}
+          </p>
         ) : (
           <>
-            <div className="flex justify-end">
-              <button onClick={iniciarEdicionJornada} className="bg-slate-900 border border-slate-700 hover:border-slate-500 text-slate-300 hover:text-white text-[9px] md:text-[10px] font-bold uppercase px-3 py-1.5 rounded-lg transition-all shadow-sm flex items-center gap-1.5">
-                ✏️ Ajustar Jornada
-              </button>
+            <div className="flex justify-between items-center bg-slate-900/60 p-3 rounded-xl border border-slate-800 mb-2 shadow-sm">
+              <div className="flex items-center gap-3">
+                <h2 className="text-lg md:text-xl font-black text-white uppercase tracking-tight">
+                  {quiniela.nombre_jornada}
+                </h2>
+                {esHistoricoLiquidado && (
+                  <span className="bg-slate-800 text-slate-400 px-2 py-1 rounded md:rounded-lg text-[8px] md:text-[9px] font-black uppercase flex items-center border border-slate-700">
+                    🔒 Cerrada
+                  </span>
+                )}
+              </div>
+
+              {!esHistoricoLiquidado && (
+                <button onClick={iniciarEdicionJornada} className="bg-slate-900 border border-slate-700 hover:border-slate-500 text-slate-300 hover:text-white text-[9px] md:text-[10px] font-bold uppercase px-3 py-1.5 rounded-lg transition-all shadow-sm flex items-center gap-1.5 shrink-0">
+                  ✏️ Ajustar Jornada
+                </button>
+              )}
             </div>
 
             <div className={`grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 p-3 md:p-4 rounded-xl border shadow-inner ${esCualquierPromo ? 'bg-purple-950/20 border-purple-900/50' : 'bg-slate-900/40 border-slate-800'}`}>
@@ -603,7 +659,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
               </span>
             </div>
 
-            {/* TABLA DE BOLETOS CON BUSCADOR Y SEGURIDAD */}
+            {/* TABLA DE BOLETOS CON MODIFICACIÓN DE LA COLUMNA DE DESEMPATE */}
             <div className="bg-slate-900/60 rounded-xl border border-slate-800 overflow-hidden shadow-sm">
               <div className="bg-slate-950 p-2.5 border-b border-slate-800 flex flex-col sm:flex-row justify-between items-center gap-2">
                 <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -625,7 +681,8 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                       <thead className="bg-slate-900/80 text-slate-500 uppercase tracking-widest sticky top-0 z-10 backdrop-blur-sm">
                         <tr>
                           <th className="p-2 font-bold border-b border-slate-800">Pos / Jugador</th>
-                          <th className="p-2 text-center font-bold border-b border-slate-800">Goles</th>
+                          {/* 🔥 CAMBIO DE ENCABEZADO A DIFERENCIA */}
+                          <th className="p-2 text-center font-bold border-b border-slate-800" title="Diferencia de goles contra resultado real">Dif.</th>
                           <th className="p-2 text-center text-green-500 font-bold border-b border-slate-800">Pts</th>
                         </tr>
                       </thead>
@@ -640,7 +697,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                               <div className="flex gap-1 shrink-0">
                                 <button onClick={() => enviarWhatsAppBoleto(r)} className="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-green-400 hover:text-green-300 transition-all" title="WhatsApp">📲</button>
                                 
-                                {jornadaCerrada ? (
+                                {jornadaCerrada || esHistoricoLiquidado ? (
                                   <button onClick={() => alert('🚫 Por seguridad, no se pueden modificar las jugadas después de la fecha de cierre.')} className="w-6 h-6 flex items-center justify-center bg-slate-900 border border-slate-800 rounded text-slate-600 transition-all cursor-not-allowed" title="Edición bloqueada por seguridad">🔒</button>
                                 ) : (
                                   <button onClick={() => abrirEdicionTicket(r)} className="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-blue-400 hover:text-blue-300 transition-all" title="Editar">✏️</button>
@@ -652,7 +709,10 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                                 }} className="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-slate-400 hover:text-white transition-all" title="Imprimir">🖨️</button>
                               </div>
                             </td>
-                            <td className="p-2 text-center text-slate-500 font-mono font-bold bg-slate-900/30">{r.prediccionGoles}</td>
+                            {/* 🔥 CAMBIO TOTAL: MUESTRA LA DIFERENCIA ABSOLUTA DE GOLES CALCULADA */}
+                            <td className="p-2 text-center text-slate-500 font-mono font-bold bg-slate-900/30">
+                              {r.golesDiff === 999 ? '-' : r.golesDiff}
+                            </td>
                             <td className="p-2 text-center font-black text-green-400">{r.puntos}</td>
                           </tr>
                         ))}
@@ -669,14 +729,20 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
 
             {/* BOTONES DE DIFUSIÓN */}
             <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-3 flex flex-wrap justify-center gap-2">
-              <button onClick={() => activarImpresion('tickets')} className="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white font-bold px-3 py-2 rounded-lg text-[9px] md:text-[10px] uppercase tracking-widest transition-all flex items-center gap-1.5 flex-1 md:flex-none justify-center">
-                🖨️ Formatos Blanco
-              </button>
+              {!esHistoricoLiquidado ? (
+                <button onClick={() => activarImpresion('tickets')} className="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white font-bold px-3 py-2 rounded-lg text-[9px] md:text-[10px] uppercase tracking-widest transition-all flex items-center gap-1.5 flex-1 md:flex-none justify-center">
+                  🖨️ Formatos Blanco
+                </button>
+              ) : (
+                <button onClick={() => activarImpresion('tabla')} className="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white font-bold px-3 py-2 rounded-lg text-[9px] md:text-[10px] uppercase tracking-widest transition-all flex items-center gap-1.5 flex-1 md:flex-none justify-center">
+                  🖨️ Tabla Final
+                </button>
+              )}
               <button onClick={() => activarImpresion('sabana')} className="bg-blue-900 hover:bg-blue-800 border border-blue-700 text-white font-bold px-3 py-2 rounded-lg text-[9px] md:text-[10px] uppercase tracking-widest transition-all flex items-center gap-1.5 flex-1 md:flex-none justify-center">
                 📊 Sábana (PDF)
               </button>
               <button onClick={compartirAvanceGrupo} className="bg-green-700 hover:bg-green-600 border border-green-600 text-white font-bold px-3 py-2 rounded-lg text-[9px] md:text-[10px] uppercase tracking-widest transition-all flex items-center gap-1.5 w-full md:w-auto justify-center">
-                📢 Copiar Avance para WA
+                📢 Copiar {esHistoricoLiquidado ? 'Resultados' : 'Avance'}
               </button>
             </div>
 
@@ -696,9 +762,9 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                     
                     <div className="flex w-full md:w-auto items-center justify-between md:justify-end gap-3 shrink-0">
                       <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800">
-                        <input type="number" placeholder="-" value={marcadoresReales[partido.id]?.l || ''} onChange={(e) => handleMarcadorExacto(partido.id, 'l', e.target.value)} className="w-8 h-8 md:w-9 md:h-9 bg-slate-900 rounded text-center font-black text-sm text-white outline-none focus:border-red-500 transition-all" />
+                        <input type="number" placeholder="-" value={marcadoresReales[partido.id]?.l || ''} onChange={(e) => handleMarcadorExacto(partido.id, 'l', e.target.value)} disabled={esHistoricoLiquidado} className="w-8 h-8 md:w-9 md:h-9 bg-slate-900 rounded text-center font-black text-sm text-white outline-none focus:border-red-500 transition-all disabled:opacity-50" />
                         <span className="text-slate-600 font-black text-[10px]">-</span>
-                        <input type="number" placeholder="-" value={marcadoresReales[partido.id]?.v || ''} onChange={(e) => handleMarcadorExacto(partido.id, 'v', e.target.value)} className="w-8 h-8 md:w-9 md:h-9 bg-slate-900 rounded text-center font-black text-sm text-white outline-none focus:border-red-500 transition-all" />
+                        <input type="number" placeholder="-" value={marcadoresReales[partido.id]?.v || ''} onChange={(e) => handleMarcadorExacto(partido.id, 'v', e.target.value)} disabled={esHistoricoLiquidado} className="w-8 h-8 md:w-9 md:h-9 bg-slate-900 rounded text-center font-black text-sm text-white outline-none focus:border-red-500 transition-all disabled:opacity-50" />
                       </div>
 
                       <div className="flex gap-1">
@@ -715,26 +781,37 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
             </div>
 
             {/* SECCIÓN FINAL: RESULTADO TOTAL Y BOTONES */}
-            <div className="flex flex-col md:flex-row items-center gap-3 border-t border-slate-800 pt-4 mt-2">
-              <div className="w-full md:w-1/3 p-3 bg-red-950/20 border border-red-900/40 rounded-xl text-center flex flex-col justify-center items-center gap-1.5">
-                <label className="text-red-500 font-black uppercase text-[9px] md:text-[10px] tracking-widest leading-tight">Total Goles (Desempate)</label>
-                <input type="number" placeholder="Ej. 14" value={golesReales} onChange={(e) => setGolesReales(e.target.value)} className="w-20 bg-slate-950 border border-red-900/50 rounded-lg px-2 py-1 text-center text-xl font-black text-white focus:border-red-500 outline-none transition-all" />
+            {!esHistoricoLiquidado && (
+              <div className="flex flex-col md:flex-row items-center gap-3 border-t border-slate-800 pt-4 mt-2">
+                <div className="w-full md:w-1/3 p-3 bg-red-950/20 border border-red-900/40 rounded-xl text-center flex flex-col justify-center items-center gap-1.5">
+                  <label className="text-red-500 font-black uppercase text-[9px] md:text-[10px] tracking-widest leading-tight">Total Goles (Desempate)</label>
+                  <input type="number" placeholder="Ej. 14" value={golesReales} onChange={(e) => setGolesReales(e.target.value)} className="w-20 bg-slate-950 border border-red-900/50 rounded-lg px-2 py-1 text-center text-xl font-black text-white focus:border-red-500 outline-none transition-all" />
+                </div>
+                
+                <div className="w-full md:w-2/3 flex flex-col sm:flex-row gap-2">
+                  <button onClick={guardarYCalificar} disabled={calificando || Object.keys(resultadosReales || {}).length === 0} className={`flex-1 py-3 md:py-4 rounded-xl font-bold text-[10px] md:text-xs uppercase tracking-widest transition-all ${calificando ? 'bg-slate-800 text-slate-600' : 'bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white'}`}>
+                    💾 Guardar Avance
+                  </button>
+                  <button onClick={cerrarJornadaDefinitivo} disabled={calificando || totalBoletosAdmin === 0} className={`flex-1 py-3 md:py-4 rounded-xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all ${calificando || totalBoletosAdmin === 0 ? 'bg-slate-800 text-slate-600 opacity-50 cursor-not-allowed' : esCualquierPromo ? 'bg-purple-600 hover:bg-purple-500 text-white shadow-[0_0_15px_rgba(147,51,234,0.3)]' : 'bg-red-600 hover:bg-red-500 text-white shadow-[0_0_15px_rgba(220,38,38,0.3)]'}`}>
+                    {esCualquierPromo ? '🎁 Cerrar y Pagar' : '🏆 Cerrar y Liquidar'}
+                  </button>
+                </div>
               </div>
-              
-              <div className="w-full md:w-2/3 flex flex-col sm:flex-row gap-2">
-                <button onClick={guardarYCalificar} disabled={calificando || Object.keys(resultadosReales || {}).length === 0} className={`flex-1 py-3 md:py-4 rounded-xl font-bold text-[10px] md:text-xs uppercase tracking-widest transition-all ${calificando ? 'bg-slate-800 text-slate-600' : 'bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white'}`}>
-                  💾 Guardar Avance
-                </button>
-                <button onClick={cerrarJornadaDefinitivo} disabled={calificando || totalBoletosAdmin === 0} className={`flex-1 py-3 md:py-4 rounded-xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all ${calificando || totalBoletosAdmin === 0 ? 'bg-slate-800 text-slate-600 opacity-50 cursor-not-allowed' : esCualquierPromo ? 'bg-purple-600 hover:bg-purple-500 text-white shadow-[0_0_15px_rgba(147,51,234,0.3)]' : 'bg-red-600 hover:bg-red-500 text-white shadow-[0_0_15px_rgba(220,38,38,0.3)]'}`}>
-                  {esCualquierPromo ? '🎁 Cerrar y Pagar' : '🏆 Cerrar y Liquidar'}
-                </button>
+            )}
+            
+            {/* Mostrar los goles finales si es histórico */}
+            {esHistoricoLiquidado && (
+              <div className="mt-4 p-4 bg-slate-900 border border-slate-800 rounded-xl text-center">
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest block mb-1">Goles Totales Oficiales</span>
+                <span className="text-3xl font-black text-white">{golesReales || '0'}</span>
               </div>
-            </div>
+            )}
+
           </>
         )}
       </div>
 
-      {/* 📜 VENTANA MODAL FLOTANTE: EDICIÓN EN CALIENTE DE JORNADA */}
+      {/* 📜 VENTANA MODAL FLOTANTE: EDICIÓN JORNADA */}
       {editandoQuinielaId && (
         <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-slate-900 border border-slate-700 max-w-2xl w-full p-5 rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200">
@@ -799,7 +876,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
         </div>
       )}
 
-      {/* 🔥 VENTANA MODAL FLOTANTE: EDITAR JUGADA ESPECÍFICA (TICKET) */}
+      {/* 📜 VENTANA MODAL FLOTANTE: EDITAR TICKET */}
       {editandoTicketId && (
         <div className="fixed inset-0 z-[110] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-slate-900 border border-blue-900/50 max-w-lg w-full p-5 rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200">
@@ -876,7 +953,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
         `}</style>
       )}
 
-      {/* IMPRESIÓN 1: TICKETS EN BLANCO (2 por hoja) */}
+      {/* TICKETS EN BLANCO */}
       {quiniela && tipoImpresion === 'tickets' && (
         <div className="hidden print:flex print:flex-row print:justify-between print:w-full print:h-full print:bg-white print:text-black zona-impresion z-[99999]">
           {[1, 2].map((num) => (
@@ -919,7 +996,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
         </div>
       )}
 
-      {/* IMPRESIÓN 2: RECIBO INDIVIDUAL (Pantalla completa) */}
+      {/* RECIBO INDIVIDUAL */}
       {quiniela && tipoImpresion === 'recibo' && ticketAImprimir && (
         <div className="hidden print:flex print:flex-col print:items-center print:w-full print:h-full print:bg-white print:text-black zona-impresion z-[99999]">
           <div className="w-full h-full border-4 border-black rounded-3xl p-6 bg-white flex flex-col justify-between">
@@ -993,7 +1070,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
         </div>
       )}
 
-      {/* IMPRESIÓN 3: SÁBANA OFICIAL PDF (AHORA CON ABREVIATURAS) */}
+      {/* SÁBANA OFICIAL PDF */}
       {quiniela && tipoImpresion === 'sabana' && (
         <div className="hidden print:block print:w-full print:bg-white print:text-black zona-impresion z-[99999] p-6">
           <div className="text-center mb-6">
@@ -1028,7 +1105,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                   {partidos.map(p => {
                     const pick = r.pronosticosDiccionario?.[p.id] || '-'
                     return (
-                      <td key={p.id} className={`border-2 border-black p-1 text-center font-black text-xs ${pick === 'L' ? 'text-blue-800' : pick === 'E' ? 'text-green-800' : pick === 'V' ? 'text-red-800' : ''}`}>
+                      <td key={p.id} className="border-2 border-black p-1 text-center font-black text-xs text-black">
                         {pick}
                       </td>
                     )
@@ -1039,6 +1116,37 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
             </tbody>
           </table>
           <div className="mt-8 text-center text-[10px] font-bold text-gray-500 uppercase">Documento generado automáticamente por el sistema CiberTeque. Todos los derechos reservados.</div>
+        </div>
+      )}
+      {/* IMPRESIÓN 4: TABLA DE POSICIONES FINALES */}
+      {quiniela && tipoImpresion === 'tabla' && (
+        <div className="hidden print:block print:w-full print:bg-white print:text-black zona-impresion z-[99999] p-8">
+          <div className="text-center mb-8">
+            <h1 className="font-black text-3xl uppercase tracking-widest text-black border-b-4 border-black inline-block pb-2">RESULTADOS FINALES</h1>
+            <h2 className="text-2xl font-bold uppercase mt-4">{quiniela.nombre_jornada}</h2>
+            <p className="text-sm font-bold mt-2 text-gray-600 uppercase">Boletos Registrados: {totalBoletosAdmin} | Formato: {quiniela.tipo_premiacion}</p>
+          </div>
+          <table className="w-full border-collapse border-2 border-black text-sm uppercase">
+            <thead>
+              <tr className="bg-gray-200">
+                <th className="border-2 border-black p-3 text-center w-16">Pos</th>
+                <th className="border-2 border-black p-3 text-left">Jugador</th>
+                <th className="border-2 border-black p-3 text-center w-24">Dif. Goles</th>
+                <th className="border-2 border-black p-3 text-center w-24">Puntos</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rankingAdmin.map((r, index) => (
+                <tr key={index} className="border-b border-black">
+                  <td className="border-2 border-black p-3 text-center font-black text-lg">{index + 1}</td>
+                  <td className="border-2 border-black p-3 font-bold text-lg">{r.nombre}</td>
+                  <td className="border-2 border-black p-3 text-center font-bold text-lg">{r.golesDiff === 999 ? '-' : r.golesDiff}</td>
+                  <td className="border-2 border-black p-3 text-center font-black text-xl">{r.puntos}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="mt-8 text-center text-xs font-bold text-gray-500 uppercase">CiberTeque - Generado automáticamente</div>
         </div>
       )}
     </>

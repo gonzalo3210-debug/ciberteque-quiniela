@@ -8,12 +8,19 @@ interface ModuloRecargasCapturaProps {
 }
 
 export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: ModuloRecargasCapturaProps) {
+  // --- CONSTANTES ---
+  const PRECIO_CREDITO = 30; // 👈 El costo de un crédito en pesos
+
   // --- ESTADOS VENTAS (Antes Recargas) ---
   const [usuarios, setUsuarios] = useState<any[]>([])
   const [busqueda, setBusqueda] = useState('')
   const [cargando, setCargando] = useState(false)
   const [historialActivo, setHistorialActivo] = useState<string | null>(null)
   const [datosHistorial, setDatosHistorial] = useState<any[]>([])
+  
+  // Estado para Modal de Recarga Libre ($)
+  const [recargaLibreAbierta, setRecargaLibreAbierta] = useState<string | null>(null)
+  const [montoRecargaLibre, setMontoRecargaLibre] = useState('')
 
   // --- ESTADOS CAPTURA FÍSICA ---
   const [quinielasAbiertas, setQuinielasAbiertas] = useState<any[]>([])
@@ -70,6 +77,7 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
     if (data) setDatosHistorial(data)
   }
 
+  // RECARGA DIRECTA DE CRÉDITOS (+1, +5, +10)
   const recargarCreditos = async (usuarioId: string, saldoActual: number, cantidad: number) => {
     const nuevoSaldo = saldoActual + cantidad
     const { error } = await supabase.from('usuarios').update({ creditos_disponibles: nuevoSaldo }).eq('id', usuarioId)
@@ -83,9 +91,63 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
       if (actualizarSaldoGlobal) actualizarSaldoGlobal(usuarioId, nuevoSaldo)
       await buscarUsuarios() 
       if (historialActivo === usuarioId) await verHistorial(usuarioId, true)
-      alert('¡Venta registrada con éxito!')
+      alert('¡Venta de créditos registrada con éxito!')
     }
   }
+
+  // 🔥 NUEVA FUNCIÓN: RECARGA LIBRE EN PESOS (LA BILLETERA INTELIGENTE)
+  const procesarRecargaLibre = async (usuario: any) => {
+    const pesosIngresados = parseFloat(montoRecargaLibre);
+    if (isNaN(pesosIngresados) || pesosIngresados <= 0) {
+      alert("Por favor ingresa una cantidad válida en pesos.");
+      return;
+    }
+
+    // 1. Sumamos lo que traía guardado + lo nuevo que nos da hoy
+    const saldoPesosAnterior = usuario.saldo_pesos || 0;
+    const totalPesosDisponibles = saldoPesosAnterior + pesosIngresados;
+
+    // 2. Calculamos para cuántos créditos completos le alcanza
+    const creditosNuevos = Math.floor(totalPesosDisponibles / PRECIO_CREDITO);
+    
+    // 3. Lo que sobra (el cambio virtual)
+    const nuevoSaldoPesos = totalPesosDisponibles % PRECIO_CREDITO;
+
+    // 4. Saldo total de créditos
+    const saldoCreditosActual = usuario.creditos_disponibles || 0;
+    const nuevoSaldoCreditos = saldoCreditosActual + creditosNuevos;
+
+    try {
+      // Actualizamos al usuario con sus dos nuevas "bolsas"
+      await supabase.from('usuarios').update({ 
+        creditos_disponibles: nuevoSaldoCreditos,
+        saldo_pesos: nuevoSaldoPesos
+      }).eq('id', usuario.id);
+
+      // Si alcanzó para generar al menos 1 crédito, lo registramos en el historial
+      if (creditosNuevos > 0) {
+        await supabase.from('transacciones_creditos').insert([{ 
+          usuario_id: usuario.id, 
+          cantidad: creditosNuevos, 
+          tipo_movimiento: 'recarga_billetera',
+          descripcion: `Conversión Auto: $${pesosIngresados} MXN` 
+        }]);
+      }
+
+      if (actualizarSaldoGlobal) actualizarSaldoGlobal(usuario.id, nuevoSaldoCreditos);
+      
+      alert(`✅ ¡Transacción Exitosa!\n\nSe recibieron: $${pesosIngresados} MXN\nCréditos agregados: +${creditosNuevos}\nSaldo (Cambio) guardado: $${nuevoSaldoPesos} MXN`);
+      
+      setRecargaLibreAbierta(null);
+      setMontoRecargaLibre('');
+      await buscarUsuarios(); 
+      if (historialActivo === usuario.id) await verHistorial(usuario.id, true);
+
+    } catch (e: any) {
+      alert("Error procesando el pago: " + e.message);
+    }
+  }
+
 
   // --- FUNCIONES CAPTURA ---
   const cargarPartidosJornada = async () => {
@@ -133,7 +195,8 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
       let creditosActuales = 0
 
       if (!uid) {
-        const { data: nu } = await supabase.from('usuarios').insert([{ nombre: capNombre, telefono: capTelefono, creditos_disponibles: 0 }]).select().single()
+        // 🔥 Si es usuario nuevo, lo creamos asegurando que la columna saldo_pesos empiece en 0
+        const { data: nu } = await supabase.from('usuarios').insert([{ nombre: capNombre, telefono: capTelefono, creditos_disponibles: 0, saldo_pesos: 0 }]).select().single()
         uid = nu.id
       } else {
         const { data: eu } = await supabase.from('usuarios').select('creditos_disponibles').eq('id', uid).single()
@@ -228,24 +291,72 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
                   <div>
                     <p className="font-black text-white text-xs md:text-sm uppercase tracking-tight">{u.nombre}</p>
-                    <div className="flex items-center gap-3 mt-1">
+                    <div className="flex flex-wrap items-center gap-3 mt-1">
                       <p className="text-[10px] text-slate-400 font-mono font-bold bg-slate-950 px-2 py-0.5 rounded border border-slate-800">{u.telefono}</p>
+                      
                       <div className="flex items-center gap-1">
-                        <span className="text-[9px] uppercase text-slate-500 font-bold">Saldo:</span>
+                        <span className="text-[9px] uppercase text-slate-500 font-bold">Créditos:</span>
                         <span className="text-green-400 font-black text-sm drop-shadow-[0_0_5px_rgba(74,222,128,0.2)]">{u.creditos_disponibles}</span>
+                      </div>
+
+                      <div className="flex items-center gap-1 border-l border-slate-700 pl-3">
+                        <span className="text-[9px] uppercase text-slate-500 font-bold">Saldo:</span>
+                        <span className="text-amber-500 font-black text-sm">${u.saldo_pesos || 0}</span>
                       </div>
                     </div>
                   </div>
+                  
                   <div className="flex flex-wrap gap-1.5 w-full md:w-auto">
                     <button onClick={() => verHistorial(u.id)} className="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-[9px] md:text-[10px] font-black uppercase transition-all text-slate-300 border border-slate-700 flex-1 md:flex-none">
                       📜 Historial
                     </button>
+                    
+                    {/* Botón de Recarga Libre ($) */}
+                    <button onClick={() => setRecargaLibreAbierta(u.id)} className="bg-amber-900 hover:bg-amber-800 border border-amber-600/50 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all shadow-[0_0_10px_rgba(245,158,11,0.2)] flex-1 md:flex-none">
+                      +$ Libre
+                    </button>
+
                     <button onClick={() => recargarCreditos(u.id, u.creditos_disponibles, 1)} className="bg-green-950 hover:bg-green-900 border border-green-700/50 text-green-400 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all flex-1 md:flex-none">+1</button>
                     <button onClick={() => recargarCreditos(u.id, u.creditos_disponibles, 5)} className="bg-green-800 hover:bg-green-700 border border-green-600/50 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all flex-1 md:flex-none">+5</button>
                     <button onClick={() => recargarCreditos(u.id, u.creditos_disponibles, 10)} className="bg-green-600 hover:bg-green-500 border border-green-500/50 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all shadow-[0_0_10px_rgba(22,163,74,0.3)] flex-1 md:flex-none">+10</button>
                   </div>
                 </div>
 
+                {/* MODAL FLOTANTE: Recarga Libre ($) */}
+                {recargaLibreAbierta === u.id && (
+                  <div className="mt-3 p-4 bg-amber-950/20 border border-amber-900/50 rounded-xl animate-in fade-in zoom-in-95">
+                    <div className="flex justify-between items-center mb-2">
+                      <label className="text-[10px] text-amber-500 font-bold uppercase tracking-widest block">¿Cuánto dinero te entregó el cliente?</label>
+                      <button onClick={() => setRecargaLibreAbierta(null)} className="text-slate-500 hover:text-white font-mono text-sm">✕</button>
+                    </div>
+                    
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <div className="relative flex-1">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
+                        <input 
+                          type="number" 
+                          value={montoRecargaLibre} 
+                          onChange={(e) => setMontoRecargaLibre(e.target.value)} 
+                          placeholder="Ej. 100" 
+                          className="w-full bg-slate-950 border border-amber-900/50 rounded-lg pl-7 pr-3 py-2 text-white outline-none focus:border-amber-500 transition-all font-black text-lg" 
+                        />
+                      </div>
+                      <button onClick={() => procesarRecargaLibre(u)} className="bg-amber-600 hover:bg-amber-500 text-white font-black px-6 py-2 rounded-lg text-[10px] uppercase tracking-widest transition-all">
+                        Calcular y Cobrar
+                      </button>
+                    </div>
+
+                    {/* Previsualización del cálculo en tiempo real */}
+                    {parseFloat(montoRecargaLibre) > 0 && (
+                      <div className="mt-3 flex items-center justify-between bg-slate-900 p-2 rounded-lg border border-slate-800 text-[10px] font-bold uppercase">
+                        <span className="text-slate-400">Recibirá: <span className="text-green-400 font-black text-sm">+{Math.floor(((u.saldo_pesos || 0) + parseFloat(montoRecargaLibre)) / PRECIO_CREDITO)} Crts</span></span>
+                        <span className="text-slate-400">Sobrante a guardar: <span className="text-amber-500 font-black text-sm">${((u.saldo_pesos || 0) + parseFloat(montoRecargaLibre)) % PRECIO_CREDITO}</span></span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* HISTORIAL */}
                 {historialActivo === u.id && (
                   <div className="mt-3 pt-3 border-t border-slate-800 animate-in slide-in-from-top-2">
                     <div className="max-h-[250px] overflow-y-auto pr-1">

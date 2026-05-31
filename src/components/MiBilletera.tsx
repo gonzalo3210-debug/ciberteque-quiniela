@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 
 export default function MiBilletera({ usuarioId }: { usuarioId: string }) {
   const [saldo, setSaldo] = useState<number>(0)
+  const [saldoPesos, setSaldoPesos] = useState<number>(0) 
   const [transacciones, setTransacciones] = useState<any[]>([])
   const [cargando, setCargando] = useState(true)
 
@@ -19,15 +20,16 @@ export default function MiBilletera({ usuarioId }: { usuarioId: string }) {
     async function cargarBilletera() {
       setCargando(true)
       
-      // 1. Traer el saldo actual del usuario
+      // 1. Traer el saldo de créditos Y el saldo en pesos
       const { data: userData } = await supabase
         .from('usuarios')
-        .select('creditos_disponibles')
+        .select('creditos_disponibles, saldo_pesos')
         .eq('id', usuarioId)
         .single()
         
       if (userData) {
         setSaldo(userData.creditos_disponibles || 0)
+        setSaldoPesos(userData.saldo_pesos || 0) 
       }
 
       // 2. Traer el historial de movimientos (últimos 30)
@@ -59,8 +61,9 @@ export default function MiBilletera({ usuarioId }: { usuarioId: string }) {
   const interpretarTransaccion = (tipo: string, descripcion: string) => {
     switch (tipo) {
       case 'recarga_manual': return { titulo: 'Recarga Mostrador', icono: '💵', color: 'text-green-400', bg: 'bg-green-950/30 border-green-900/50' }
+      case 'recarga_billetera': return { titulo: 'Conversión Auto', icono: '🔄', color: 'text-amber-400', bg: 'bg-amber-950/30 border-amber-900/50' }
       case 'juego_ticket_fisico': 
-      case 'juego_ticket': return { titulo: 'Compra Boleto', icono: '🎟️', color: 'text-amber-500', bg: 'bg-amber-950/20 border-amber-900/40' }
+      case 'juego_ticket': return { titulo: 'Compra Boleto', icono: '🎟️', color: 'text-blue-400', bg: 'bg-blue-950/20 border-blue-900/40' }
       case 'premio_quiniela': return { titulo: 'Premio Ganado', icono: '🏆', color: 'text-yellow-400', bg: 'bg-yellow-950/40 border-yellow-600/50' }
       default: return { titulo: descripcion || 'Movimiento', icono: '📝', color: 'text-slate-300', bg: 'bg-slate-800/40 border-slate-700' }
     }
@@ -83,6 +86,7 @@ export default function MiBilletera({ usuarioId }: { usuarioId: string }) {
         </h2>
         
         <div className="flex flex-col items-center justify-center relative z-10">
+          {/* Créditos */}
           <div className="flex items-baseline gap-1.5 md:gap-2">
             <span className="text-4xl md:text-5xl font-black text-green-400 drop-shadow-[0_0_10px_rgba(74,222,128,0.2)]">
               {saldo}
@@ -92,9 +96,12 @@ export default function MiBilletera({ usuarioId }: { usuarioId: string }) {
             </span>
           </div>
           
-          <div className="mt-3 bg-slate-950/80 px-4 py-1.5 rounded-full border border-slate-800 shadow-inner flex items-center gap-1.5">
-            <span className="text-[9px] md:text-[10px] text-slate-500 font-bold uppercase">Valor Real:</span>
-            <span className="text-sm md:text-base font-black text-white">${(saldo * VALOR_CREDITO).toFixed(2)} <span className="text-[9px] text-slate-400">MXN</span></span>
+          <div className="flex flex-wrap justify-center gap-2 mt-3">
+            {/* Saldo a Favor en Pesos (El Cambio) */}
+            <div className="bg-amber-950/30 px-5 py-2 rounded-full border border-amber-900/50 shadow-inner flex items-center gap-2">
+              <span className="text-[10px] md:text-[11px] text-amber-500/80 font-bold uppercase">Saldo a Favor (Cambio):</span>
+              <span className="text-sm md:text-base font-black text-amber-400">${saldoPesos.toFixed(2)} <span className="text-[9px] text-amber-600">MXN</span></span>
+            </div>
           </div>
         </div>
       </div>

@@ -9,11 +9,13 @@ import AdminPanel from '@/components/AdminPanel'
 import Posiciones from '@/components/Posiciones'
 import MiBilletera from '@/components/MiBilletera'
 import Perfil from '@/components/Perfil'
+import ModuloFinanzas from '@/components/ModuloFinanzas' // 👈 IMPORTAMOS EL NUEVO MÓDULO
 
 export default function Home() {
   const [usuarioActivo, setUsuarioActivo] = useState<any>(null)
   const [vista, setVista] = useState<'login' | 'registro'>('login')
-  const [pestana, setPestana] = useState<'jugar' | 'historial' | 'admin' | 'ranking' | 'billetera' | 'perfil'>('jugar')
+  // 👇 Agregamos 'finanzas' a las opciones posibles
+  const [pestana, setPestana] = useState<'jugar' | 'historial' | 'admin' | 'ranking' | 'billetera' | 'perfil' | 'finanzas'>('jugar')
   const [cargandoSesion, setCargandoSesion] = useState(true)
 
   // 1. LA MAGIA DE LA MEMORIA + SINCRONIZACIÓN SILENCIOSA
@@ -53,7 +55,7 @@ export default function Home() {
   }, [])
 
   // FUNCIÓN NUEVA: Cambia la pestaña y la guarda en la memoria
-  const cambiarPestana = (nuevaPestana: 'jugar' | 'historial' | 'admin' | 'ranking' | 'billetera' | 'perfil') => {
+  const cambiarPestana = (nuevaPestana: 'jugar' | 'historial' | 'admin' | 'ranking' | 'billetera' | 'perfil' | 'finanzas') => {
     setPestana(nuevaPestana)
     localStorage.setItem('club_pronosticos_pestana', nuevaPestana)
   }
@@ -164,17 +166,31 @@ export default function Home() {
               💳 Billetera
             </button>
             
+            {/* BOTONES EXCLUSIVOS DE ADMINISTRADOR */}
             {usuarioActivo.rol === 'admin' && (
-              <button 
-                onClick={() => cambiarPestana('admin')}
-                className={`flex-1 min-w-[100px] py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
-                  pestana === 'admin' 
-                  ? 'bg-red-600 text-white shadow-[0_0_20px_rgba(220,38,38,0.4)]' 
-                  : 'text-red-500/40 hover:text-red-400'
-                }`}
-              >
-                Admin
-              </button>
+              <>
+                <button 
+                  onClick={() => cambiarPestana('admin')}
+                  className={`flex-1 min-w-[100px] py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
+                    pestana === 'admin' 
+                    ? 'bg-red-600 text-white shadow-[0_0_20px_rgba(220,38,38,0.4)]' 
+                    : 'text-red-500/40 hover:text-red-400'
+                  }`}
+                >
+                  Admin
+                </button>
+                
+                <button 
+                  onClick={() => cambiarPestana('finanzas')}
+                  className={`flex-1 min-w-[100px] py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
+                    pestana === 'finanzas' 
+                    ? 'bg-emerald-600 text-white shadow-[0_0_20px_rgba(5,150,105,0.4)]' 
+                    : 'text-emerald-500/40 hover:text-emerald-400'
+                  }`}
+                >
+                  📊 Finanzas
+                </button>
+              </>
             )}
 
             {/* BOTÓN DE SALIR INTEGRADO AL MENÚ */}
@@ -217,6 +233,11 @@ export default function Home() {
               <AdminPanel 
                 actualizarSaldoGlobal={manejarActualizacionSaldo}
               />
+            )}
+
+            {/* 👇 RENDERIZADO DEL DASHBOARD FINANCIERO PROTEGIDO */}
+            {pestana === 'finanzas' && usuarioActivo.rol === 'admin' && (
+              <ModuloFinanzas />
             )}
           </div>
           

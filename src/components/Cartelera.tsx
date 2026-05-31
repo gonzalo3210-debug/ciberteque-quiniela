@@ -54,7 +54,15 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
 
   const cambiarQuinielaVisible = async (quiniela: any) => {
     setQuinielaActual(quiniela)
-    setPartidos(quiniela.partidos)
+    
+    // 🔥 ACOMODAR PARTIDOS POR FECHA Y HORA (Orden Cronológico)
+    const partidosAcomodados = [...(quiniela.partidos || [])].sort((a: any, b: any) => {
+      if (!a.fecha_hora) return 1;
+      if (!b.fecha_hora) return -1;
+      return new Date(a.fecha_hora).getTime() - new Date(b.fecha_hora).getTime();
+    });
+    
+    setPartidos(partidosAcomodados)
     setSelecciones({}) 
     setGolesTotales('')
     setAceptoReglas(false) 

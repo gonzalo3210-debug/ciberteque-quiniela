@@ -28,7 +28,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
           quinielas (id, nombre_jornada, goles_totales_real, estado),
           pronosticos (
             eleccion_usuario,
-            partidos (id, equipo_local, equipo_visitante, resultado_real)
+            partidos (id, equipo_local, equipo_visitante, resultado_real, fecha_hora)
           )
         `)
         .eq('usuario_id', usuarioId)
@@ -62,8 +62,13 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
             id: pr.partidos?.id || `${pr.partidos?.equipo_local}-${pr.partidos?.equipo_visitante}`,
             local: pr.partidos?.equipo_local,
             visitante: pr.partidos?.equipo_visitante,
-            real: pr.partidos?.resultado_real
-          })),
+            real: pr.partidos?.resultado_real,
+            fecha_hora: pr.partidos?.fecha_hora
+          })).sort((a: any, b: any) => {
+            if (!a.fecha_hora) return 1;
+            if (!b.fecha_hora) return -1;
+            return new Date(a.fecha_hora).getTime() - new Date(b.fecha_hora).getTime();
+          }),
           tickets: []
         };
       }

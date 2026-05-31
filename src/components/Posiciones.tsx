@@ -27,7 +27,8 @@ export default function Posiciones() {
 
       const quinielaIds = qData.map(q => q.id)
 
-      const { data: pData } = await supabase.from('partidos').select('*').in('quiniela_id', quinielaIds).order('id', { ascending: true })
+      // 🔥 Cambiamos el .order('id') a .order('fecha_hora') para el orden cronológico
+      const { data: pData } = await supabase.from('partidos').select('*').in('quiniela_id', quinielaIds).order('fecha_hora', { ascending: true })
       const { data: tData } = await supabase.from('tickets').select('id, usuario_id, quiniela_id, prediccion_goles_total, pronosticos(partido_id, eleccion_usuario)').in('quiniela_id', quinielaIds)
       const { data: uData } = await supabase.from('usuarios').select('id, nombre, avatar_url')
       
@@ -339,11 +340,14 @@ export default function Posiciones() {
                   </div>
 
                   <div className="space-y-1.5">
-                    {quiniela.ranking.slice(0, 3).map((jugador: any, idx: number) => (
+                    {quiniela.ranking.slice(0, 5).map((jugador: any, idx: number) => (
                       <div key={jugador.id} className="flex justify-between items-center bg-slate-950/50 p-1.5 md:p-2 rounded-lg border border-slate-800/50">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm w-4 md:w-5 text-center">
-                            {idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}
+                          <span className="flex justify-center items-center text-sm w-4 md:w-5 text-center">
+                            {idx === 0 ? '🥇' : 
+                             idx === 1 ? '🥈' : 
+                             idx === 2 ? '🥉' : 
+                             <span className="text-[9px] font-black text-slate-500 bg-slate-900 border border-slate-700 px-1.5 rounded">{idx + 1}</span>}
                           </span>
                           <div className="flex items-center gap-1.5">
                             <img src={getAvatarUrl(jugador.nombre, jugador.avatar_url)} alt={jugador.nombre} className="w-4 h-4 md:w-5 md:h-5 rounded-full object-cover border border-slate-700 bg-slate-900" />
