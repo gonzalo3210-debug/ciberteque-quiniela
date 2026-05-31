@@ -934,16 +934,22 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
       {tipoImpresion && (
         <style>{`
           @media print {
-            @page { margin: 0mm; size: letter; }
-            body { background: white; margin: 0; padding: 0; }
+            @page { margin: 5mm; } /* 🔥 Quitamos el forzado a horizontal para que tú elijas en el menú */
+            body { 
+              background: white; 
+              margin: 0; 
+              padding: 0; 
+              -webkit-print-color-adjust: exact !important; 
+              print-color-adjust: exact !important;
+            }
             body * { visibility: hidden !important; }
+            img { visibility: visible !important; } 
             .zona-impresion, .zona-impresion * { visibility: visible !important; }
             .zona-impresion { 
               position: absolute !important; 
               left: 0 !important; 
               top: 0 !important; 
               width: 100% !important; 
-              height: 100% !important;
               margin: 0 !important; 
               padding: 15px !important; 
               box-sizing: border-box !important;
@@ -996,37 +1002,37 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
         </div>
       )}
 
-      {/* RECIBO INDIVIDUAL */}
+      {/* IMPRESIÓN 2: RECIBO INDIVIDUAL (Pantalla completa) */}
       {quiniela && tipoImpresion === 'recibo' && ticketAImprimir && (
-        <div className="hidden print:flex print:flex-col print:items-center print:w-full print:h-full print:bg-white print:text-black zona-impresion z-[99999]">
-          <div className="w-full h-full border-4 border-black rounded-3xl p-6 bg-white flex flex-col justify-between">
+        <div className="hidden print:flex print:flex-col print:items-center print:w-full print:bg-white print:text-black zona-impresion z-[99999]">
+          <div className="w-full max-w-3xl border-2 border-black rounded-2xl p-6 bg-white flex flex-col mx-auto my-2">
             <div>
-              <div className="text-center mb-6">
-                <h1 className="font-black text-4xl uppercase tracking-widest text-blue-900">CIBERTEQUE</h1>
-                <p className="text-lg font-bold uppercase tracking-widest border-b-4 border-blue-900 inline-block pb-1 mt-2 text-blue-900">RECIBO DE JUGADA</p>
-                <div className="mt-4 text-sm font-black uppercase bg-blue-900 text-white py-2 px-4 rounded-lg inline-block">Cierre: {formatearFechaLocal(quiniela.fecha_cierre)}</div>
+              <div className="text-center mb-4">
+                <h1 className="font-black text-3xl uppercase tracking-widest text-blue-900">CIBERTEQUE</h1>
+                <p className="text-base font-bold uppercase tracking-widest border-b-2 border-blue-900 inline-block pb-1 mt-1 text-blue-900">RECIBO DE JUGADA</p>
+                <div className="mt-2 text-xs font-black uppercase bg-blue-900 text-white py-1.5 px-3 rounded-lg inline-block">Cierre: {formatearFechaLocal(quiniela.fecha_cierre)}</div>
               </div>
-              <h2 className="text-center font-black text-2xl uppercase mb-6 bg-amber-400 py-2 border-y-4 border-black text-black">{quiniela.nombre_jornada}</h2>
+              <h2 className="text-center font-black text-xl uppercase mb-4 bg-amber-400 py-1.5 border-y-2 border-black text-black">{quiniela.nombre_jornada}</h2>
               
-              <div className="mb-6 space-y-3">
-                <div className="flex justify-between items-end border-b-2 border-black border-dashed pb-2">
-                  <span className="font-bold text-lg uppercase">Nombre:</span>
-                  <span className="font-black text-xl uppercase">{ticketAImprimir.nombre}</span>
+              <div className="mb-4 space-y-2">
+                <div className="flex justify-between items-end border-b border-black border-dashed pb-1">
+                  <span className="font-bold text-sm uppercase">Nombre:</span>
+                  <span className="font-black text-lg uppercase">{ticketAImprimir.nombre}</span>
                 </div>
-                <div className="flex justify-between items-end border-b-2 border-black border-dashed pb-2">
-                  <span className="font-bold text-lg uppercase">WhatsApp:</span>
-                  <span className="font-black text-xl uppercase">{ticketAImprimir.telefono}</span>
+                <div className="flex justify-between items-end border-b border-black border-dashed pb-1">
+                  <span className="font-bold text-sm uppercase">WhatsApp:</span>
+                  <span className="font-black text-lg uppercase">{ticketAImprimir.telefono}</span>
                 </div>
               </div>
               
-              <table className="w-full text-base mb-6 border-collapse table-fixed">
+              <table className="w-full text-sm mb-4 border-collapse table-fixed">
                 <thead>
-                  <tr className="bg-blue-900 text-white text-xs uppercase">
-                    <th className="border-4 border-black p-2 text-right w-[40%]">Local</th>
-                    <th className="border-4 border-black p-2 text-center w-[6%]">L</th>
-                    <th className="border-4 border-black p-2 text-center w-[6%]">E</th>
-                    <th className="border-4 border-black p-2 text-center w-[6%]">V</th>
-                    <th className="border-4 border-black p-2 text-left w-[40%]">Visita</th>
+                  <tr className="bg-blue-900 text-white text-[10px] uppercase">
+                    <th className="border-2 border-black p-1.5 text-right w-[40%]">Local</th>
+                    <th className="border-2 border-black p-1.5 text-center w-[6%]">L</th>
+                    <th className="border-2 border-black p-1.5 text-center w-[6%]">E</th>
+                    <th className="border-2 border-black p-1.5 text-center w-[6%]">V</th>
+                    <th className="border-2 border-black p-1.5 text-left w-[40%]">Visita</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1035,19 +1041,19 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                     const logoV = obtenerLogo(p.equipo_visitante)
                     return (
                       <tr key={p.id}>
-                        <td className="border-4 border-black p-2 text-right overflow-hidden bg-gray-50">
-                          <div className="flex items-center justify-end gap-2">
-                            <span className="font-bold uppercase text-xs truncate max-w-[80%]">{p.equipo_local}</span>
-                            {logoL ? <img src={logoL} alt="" className="w-6 h-6 object-contain" /> : <div className="w-5 h-5 rounded-full border-2 border-black flex items-center justify-center text-[8px]">?</div>}
+                        <td className="border-2 border-black p-1.5 text-right overflow-hidden bg-gray-50">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <span className="font-bold uppercase text-[10px] truncate max-w-[80%]">{p.equipo_local}</span>
+                            {logoL ? <img src={logoL} alt="" className="w-5 h-5 object-contain" /> : <div className="w-4 h-4 rounded-full border border-black flex items-center justify-center text-[6px]">?</div>}
                           </div>
                         </td>
-                        <td className="border-4 border-black p-1 text-center font-black text-xl text-blue-800">{ticketAImprimir.selecciones[p.id] === 'L' ? 'X' : ''}</td>
-                        <td className="border-4 border-black p-1 text-center font-black text-xl text-blue-800">{ticketAImprimir.selecciones[p.id] === 'E' ? 'X' : ''}</td>
-                        <td className="border-4 border-black p-1 text-center font-black text-xl text-blue-800">{ticketAImprimir.selecciones[p.id] === 'V' ? 'X' : ''}</td>
-                        <td className="border-4 border-black p-2 text-left overflow-hidden bg-gray-50">
-                          <div className="flex items-center justify-start gap-2">
-                            {logoV ? <img src={logoV} alt="" className="w-6 h-6 object-contain" /> : <div className="w-5 h-5 rounded-full border-2 border-black flex items-center justify-center text-[8px]">?</div>}
-                            <span className="font-bold uppercase text-xs truncate max-w-[80%]">{p.equipo_visitante}</span>
+                        <td className="border-2 border-black p-1 text-center font-black text-lg text-blue-800">{ticketAImprimir.selecciones[p.id] === 'L' ? 'X' : ''}</td>
+                        <td className="border-2 border-black p-1 text-center font-black text-lg text-blue-800">{ticketAImprimir.selecciones[p.id] === 'E' ? 'X' : ''}</td>
+                        <td className="border-2 border-black p-1 text-center font-black text-lg text-blue-800">{ticketAImprimir.selecciones[p.id] === 'V' ? 'X' : ''}</td>
+                        <td className="border-2 border-black p-1.5 text-left overflow-hidden bg-gray-50">
+                          <div className="flex items-center justify-start gap-1.5">
+                            {logoV ? <img src={logoV} alt="" className="w-5 h-5 object-contain" /> : <div className="w-4 h-4 rounded-full border border-black flex items-center justify-center text-[6px]">?</div>}
+                            <span className="font-bold uppercase text-[10px] truncate max-w-[80%]">{p.equipo_visitante}</span>
                           </div>
                         </td>
                       </tr>
@@ -1056,15 +1062,15 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                 </tbody>
               </table>
               
-              <div className="border-4 border-black p-4 text-center rounded-2xl bg-gray-100 mt-6 flex justify-between items-center px-6">
-                <span className="font-bold uppercase text-sm">Desempate (Goles):</span>
-                <span className="font-black text-3xl">{ticketAImprimir.goles}</span>
+              <div className="border-2 border-black p-3 text-center rounded-xl bg-gray-100 mt-4 flex justify-between items-center px-4">
+                <span className="font-bold uppercase text-xs">Desempate (Goles):</span>
+                <span className="font-black text-2xl">{ticketAImprimir.goles}</span>
               </div>
-              <p className="text-center text-sm font-bold uppercase mt-6 text-blue-900">Costo del Boleto: {quiniela.precio_ticket ?? 1} {(quiniela.precio_ticket ?? 1) === 1 ? 'Crédito' : 'Créditos'}</p>
+              <p className="text-center text-xs font-bold uppercase mt-4 text-blue-900">Costo del Boleto: {quiniela.precio_ticket ?? 1} {(quiniela.precio_ticket ?? 1) === 1 ? 'Crédito' : 'Créditos'}</p>
             </div>
             
-            <div className="mt-6 pt-6 border-t-2 border-black border-dashed">
-              <p className="text-[9px] text-justify leading-tight font-bold uppercase text-black"><b>REGLAMENTO:</b> 1. PAGO ANTICIPADO: Boleto pagado antes del 1er partido. 2. CORRECCIONES: Revise su jugada, cambios SOLO ANTES de la hora de cierre. Iniciada la jornada participa tal cual. 3. SUSPENDIDOS/APLAZADOS: Si ya inició vale el marcador en ese momento; si no inició, se declara Empate a 0. 4. RESULTADOS: Válidos a los 90 min (sin extras).</p>
+            <div className="mt-4 pt-4 border-t border-black border-dashed">
+              <p className="text-[8px] text-justify leading-tight font-bold uppercase text-black"><b>REGLAMENTO:</b> 1. PAGO ANTICIPADO: Boleto pagado antes del 1er partido. 2. CORRECCIONES: Revise su jugada, cambios SOLO ANTES de la hora de cierre. Iniciada la jornada participa tal cual. 3. SUSPENDIDOS/APLAZADOS: Si ya inició vale el marcador en ese momento; si no inició, se declara Empate a 0. 4. RESULTADOS: Válidos a los 90 min (sin extras).</p>
             </div>
           </div>
         </div>
