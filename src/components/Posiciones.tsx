@@ -7,6 +7,9 @@ export default function Posiciones() {
   const [quinielaActiva, setQuinielaActiva] = useState<any>(null)
   const [historial, setHistorial] = useState<any[]>([])
   const [cargando, setCargando] = useState(true)
+  
+  // 🆕 ESTADO NUEVO: Controla qué quinielas del historial están expandidas
+  const [quinielasExpandidas, setQuinielasExpandidas] = useState<Record<string, boolean>>({})
 
   // ⚙️ CONFIGURACIÓN MONETARIA
   const VALOR_CREDITO = 30 
@@ -27,7 +30,6 @@ export default function Posiciones() {
 
       const quinielaIds = qData.map(q => q.id)
 
-      // 🔥 Cambiamos el .order('id') a .order('fecha_hora') para el orden cronológico
       const { data: pData } = await supabase.from('partidos').select('*').in('quiniela_id', quinielaIds).order('fecha_hora', { ascending: true })
       const { data: tData } = await supabase.from('tickets').select('id, usuario_id, quiniela_id, prediccion_goles_total, pronosticos(partido_id, eleccion_usuario)').in('quiniela_id', quinielaIds)
       const { data: uData } = await supabase.from('usuarios').select('id, nombre, avatar_url')
@@ -82,7 +84,19 @@ export default function Posiciones() {
           return a.golesDiff - b.golesDiff
         })
 
-        // 🔥 CÁLCULO DE PESOS
+        ranking.forEach((item: any, idx) => {
+          if (idx > 0) {
+            const anterior = ranking[idx - 1];
+            if (item.puntos === anterior.puntos && item.golesDiff === anterior.golesDiff) {
+              item.posicion = anterior.posicion; 
+            } else {
+              item.posicion = idx + 1; 
+            }
+          } else {
+            item.posicion = 1;
+          }
+        });
+
         const precioTicketCrds = q.precio_ticket || 0
         const totalBoletos = ranking.length
         const recaudadoPesos = totalBoletos * precioTicketCrds * VALOR_CREDITO
@@ -113,13 +127,20 @@ export default function Posiciones() {
     cargarDatos()
   }, [])
 
+  // 🆕 FUNCIÓN NUEVA: Alterna el estado de expansión de una quiniela específica
+  const toggleExpandir = (id: string) => {
+    setQuinielasExpandidas(prev => ({
+      ...prev,
+      [id]: !prev[id]
+    }))
+  }
+
   if (cargando) return <div className="text-amber-500 animate-pulse text-center mt-10 font-bold uppercase tracking-widest text-xs">Calculando Bolsa y Posiciones...</div>
   if (!quinielaActiva) return <div className="text-slate-500 italic text-center mt-10 text-sm">No hay datos de quinielas disponibles.</div>
 
   const totalJugadores = quinielaActiva.ranking.length
   const partidosTerminados = quinielaActiva.partidos.filter((p: any) => p.resultado_real).length
   
-  // 🔒 CONTROL DE VISIBILIDAD CORREGIDO (Zona Horaria Local)
   const fechaCierreCorta = quinielaActiva.fecha_cierre ? quinielaActiva.fecha_cierre.substring(0, 16) : null
   const fechaCierre = new Date(fechaCierreCorta || quinielaActiva.fecha_cierre)
   const yaPasoCierre = new Date() >= fechaCierre
@@ -221,20 +242,18 @@ export default function Posiciones() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/40">
-                {quinielaActiva.ranking.map((jugador: any, idx: number) => {
-                  const esLider = idx === 0 && totalJugadores > 1 && jugador.puntos > 0
+                {quinielaActiva.ranking.map((jugador: any) => {
+                  const esLider = jugador.posicion === 1 && totalJugadores > 1 && jugador.puntos > 0
                   return (
                     <tr key={jugador.id} className={`transition-colors hover:bg-slate-800/30 ${esLider ? 'bg-gradient-to-r from-amber-900/15 to-transparent' : ''}`}>
                       
-                      {/* POSICIÓN */}
                       <td className="p-2 text-center">
-                        {idx === 0 && partidosTerminados > 0 ? <span className="text-lg drop-shadow-md block">🥇</span> : 
-                         idx === 1 && partidosTerminados > 0 ? <span className="text-base block">🥈</span> : 
-                         idx === 2 && partidosTerminados > 0 ? <span className="text-base block">🥉</span> : 
-                         <span className="text-[10px] font-black text-slate-500 bg-slate-950 border border-slate-800 px-1.5 py-0.5 rounded">{idx + 1}</span>}
+                        {jugador.posicion === 1 && partidosTerminados > 0 ? <span className="text-lg drop-shadow-md block">🥇</span> : 
+                         jugador.posicion === 2 && partidosTerminados > 0 ? <span className="text-base block">🥈</span> : 
+                         jugador.posicion === 3 && partidosTerminados > 0 ? <span className="text-base block">🥉</span> : 
+                         <span className="text-[10px] font-black text-slate-500 bg-slate-950 border border-slate-800 px-1.5 py-0.5 rounded">{jugador.posicion}</span>}
                       </td>
                       
-                      {/* JUGADOR */}
                       <td className="p-2">
                         <div className="flex items-center gap-2">
                           <div className={`relative shrink-0 rounded-full border-2 ${esLider ? 'border-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.3)]' : 'border-slate-700'}`}>
@@ -251,14 +270,12 @@ export default function Posiciones() {
                         </div>
                       </td>
                       
-                      {/* PUNTOS */}
                       <td className="p-2 text-center">
                         <span className={`text-sm md:text-base font-black ${esLider ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(245,158,11,0.3)]' : 'text-green-400 drop-shadow-[0_0_4px_rgba(74,222,128,0.15)]'}`}>
                           {jugador.puntos}
                         </span>
                       </td>
                       
-                      {/* GOLES (DESEMPATE) */}
                       <td className="p-2 text-center">
                         <span className="text-[10px] md:text-xs font-mono font-bold text-slate-300 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">
                           {mostrarPicks ? jugador.prediccionGoles : '🔒'}
@@ -266,7 +283,6 @@ export default function Posiciones() {
                         {quinielaActiva.goles_totales_real !== null && <span className="hidden md:inline-block text-[8px] font-bold text-amber-500 ml-1">Dif:{jugador.golesDiff}</span>}
                       </td>
                       
-                      {/* RADIOGRAFÍA DE PARTIDOS (MINI CUADRADOS) */}
                       <td className="p-2 text-right pr-3">
                         <div className="flex gap-0.5 md:gap-1 justify-end flex-wrap w-full max-w-[180px] ml-auto">
                           {quinielaActiva.partidos.map((p: any, i: number) => {
@@ -317,9 +333,13 @@ export default function Posiciones() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {historial.map(quiniela => {
               const esHistorialPromo = quiniela.tipo_premiacion?.toLowerCase().includes('promo');
+              // 🆕 LÓGICA NUEVA: Verifica si esta jornada en particular está expandida
+              const estaExpandida = quinielasExpandidas[quiniela.id] || false;
+              // 🆕 LÓGICA NUEVA: Decide cuántos jugadores mostrar
+              const jugadoresAMostrar = estaExpandida ? quiniela.ranking : quiniela.ranking.slice(0, 5);
 
               return (
-                <div key={quiniela.id} className="bg-slate-900 border border-slate-800 rounded-xl p-3 md:p-4 shadow-lg relative overflow-hidden">
+                <div key={quiniela.id} className="bg-slate-900 border border-slate-800 rounded-xl p-3 md:p-4 shadow-lg relative overflow-hidden flex flex-col">
                   <div className="flex justify-between items-start mb-3 border-b border-slate-800 pb-2">
                     <div>
                       <h4 className="font-black text-white text-[10px] md:text-xs uppercase italic">{quiniela.nombre_jornada}</h4>
@@ -339,19 +359,20 @@ export default function Posiciones() {
                     </div>
                   </div>
 
-                  <div className="space-y-1.5">
-                    {quiniela.ranking.slice(0, 5).map((jugador: any, idx: number) => (
+                  <div className="space-y-1.5 flex-grow">
+                    {/* 🆕 AHORA MAPEAMOS SOBRE 'jugadoresAMostrar' EN LUGAR DEL SLICE DIRECTO */}
+                    {jugadoresAMostrar.map((jugador: any) => (
                       <div key={jugador.id} className="flex justify-between items-center bg-slate-950/50 p-1.5 md:p-2 rounded-lg border border-slate-800/50">
                         <div className="flex items-center gap-2">
                           <span className="flex justify-center items-center text-sm w-4 md:w-5 text-center">
-                            {idx === 0 ? '🥇' : 
-                             idx === 1 ? '🥈' : 
-                             idx === 2 ? '🥉' : 
-                             <span className="text-[9px] font-black text-slate-500 bg-slate-900 border border-slate-700 px-1.5 rounded">{idx + 1}</span>}
+                            {jugador.posicion === 1 ? '🥇' : 
+                             jugador.posicion === 2 ? '🥈' : 
+                             jugador.posicion === 3 ? '🥉' : 
+                             <span className="text-[9px] font-black text-slate-500 bg-slate-900 border border-slate-700 px-1.5 rounded">{jugador.posicion}</span>}
                           </span>
                           <div className="flex items-center gap-1.5">
                             <img src={getAvatarUrl(jugador.nombre, jugador.avatar_url)} alt={jugador.nombre} className="w-4 h-4 md:w-5 md:h-5 rounded-full object-cover border border-slate-700 bg-slate-900" />
-                            <span className={`font-black uppercase text-[9px] md:text-[10px] truncate w-[80px] sm:w-[100px] ${idx === 0 ? 'text-amber-400' : 'text-slate-300'}`}>
+                            <span className={`font-black uppercase text-[9px] md:text-[10px] truncate w-[80px] sm:w-[100px] ${jugador.posicion === 1 ? 'text-amber-400' : 'text-slate-300'}`}>
                               {jugador.nombre}
                             </span>
                           </div>
@@ -365,6 +386,21 @@ export default function Posiciones() {
                       </div>
                     ))}
                   </div>
+
+                  {/* 🆕 BOTÓN NUEVO: Solo aparece si hay más de 5 jugadores en esa quiniela */}
+                  {quiniela.ranking.length > 5 && (
+                    <button
+                      onClick={() => toggleExpandir(quiniela.id)}
+                      className="mt-3 pt-2 text-[10px] text-slate-400 hover:text-amber-400 font-bold uppercase tracking-widest transition-colors border-t border-slate-800/50 w-full text-center flex items-center justify-center gap-1"
+                    >
+                      {estaExpandida ? (
+                        <>Mostrar Menos <span className="text-xs">🔼</span></>
+                      ) : (
+                        <>Ver Tabla Completa ({quiniela.ranking.length}) <span className="text-xs">🔽</span></>
+                      )}
+                    </button>
+                  )}
+
                 </div>
               )
             })}

@@ -163,6 +163,21 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
         if (b.puntos !== a.puntos) return b.puntos - a.puntos;
         return a.golesDiff - b.golesDiff;
       })
+
+      // 🔥 CÁLCULO MATEMÁTICO DE EMPATES (Ranking de Competencia)
+      rCalc.forEach((item: any, idx) => {
+        if (idx > 0) {
+          const anterior = rCalc[idx - 1];
+          if (item.puntos === anterior.puntos && item.golesDiff === anterior.golesDiff) {
+            item.posicion = anterior.posicion; // Mismo lugar si empatan perfecto
+          } else {
+            item.posicion = idx + 1; // Brinca al número real de fila
+          }
+        } else {
+          item.posicion = 1;
+        }
+      });
+
       setRankingAdmin(rCalc)
     }
   }
@@ -270,9 +285,9 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
     if (topJugadores.length === 0) {
       texto += `Aún no hay participantes.\n`;
     } else {
-      topJugadores.forEach((r, i) => {
-        let medalla = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '🔹';
-        texto += `${medalla} ${r.nombre.toUpperCase()} - *${r.puntos} pts*\n`;
+      topJugadores.forEach((r) => {
+      let medalla = r.posicion === 1 ? '🥇' : r.posicion === 2 ? '🥈' : r.posicion === 3 ? '🥉' : '🔹';
+      texto += `${medalla} ${r.posicion}. ${r.nombre.toUpperCase()} - *${r.puntos} pts*\n`;
       });
     }
 
@@ -347,7 +362,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
       
       for (let i = 0; i < grupos.length; i++) {
         const grupo = grupos[i];
-        const lugaresTomados = group.length;
+        const lugaresTomados = grupo.length;
         let porcentajeTotalGrupo = 0;
         
         for (let j = 0; j < lugaresTomados; j++) {
@@ -691,8 +706,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                           <tr key={r.id} className="hover:bg-slate-800/50 transition-colors">
                             <td className="p-2 font-bold text-slate-300 uppercase flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
                               <div className="flex items-center gap-1.5 truncate">
-                                <span className={`shrink-0 flex items-center justify-center w-4 h-4 rounded text-[8px] font-black ${i===0?'bg-amber-500 text-amber-950':i===1?'bg-slate-400 text-slate-900':i===2?'bg-amber-700 text-white':'bg-slate-800 text-slate-500'}`}>{i+1}</span>
-                                <span className="truncate max-w-[120px] md:max-w-[200px]">{r.nombre}</span>
+                                <span className={`shrink-0 flex items-center justify-center w-4 h-4 rounded text-[8px] font-black ${r.posicion===1?'bg-amber-500 text-amber-950':r.posicion===2?'bg-slate-400 text-slate-900':r.posicion===3?'bg-amber-700 text-white':'bg-slate-800 text-slate-500'}`}>{r.posicion}</span>                                <span className="truncate max-w-[120px] md:max-w-[200px]">{r.nombre}</span>
                               </div>
                               <div className="flex gap-1 shrink-0">
                                 <button onClick={() => enviarWhatsAppBoleto(r)} className="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-green-400 hover:text-green-300 transition-all" title="WhatsApp">📲</button>
@@ -1144,7 +1158,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
             <tbody>
               {rankingAdmin.map((r, index) => (
                 <tr key={index} className="border-b border-black">
-                  <td className="border-2 border-black p-3 text-center font-black text-lg">{index + 1}</td>
+                  <td className="border-2 border-black p-3 text-center font-black text-lg">{r.posicion}</td>
                   <td className="border-2 border-black p-3 font-bold text-lg">{r.nombre}</td>
                   <td className="border-2 border-black p-3 text-center font-bold text-lg">{r.golesDiff === 999 ? '-' : r.golesDiff}</td>
                   <td className="border-2 border-black p-3 text-center font-black text-xl">{r.puntos}</td>
