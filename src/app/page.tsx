@@ -9,13 +9,16 @@ import AdminPanel from '@/components/AdminPanel'
 import Posiciones from '@/components/Posiciones'
 import MiBilletera from '@/components/MiBilletera'
 import Perfil from '@/components/Perfil'
-import ModuloFinanzas from '@/components/ModuloFinanzas' // 👈 IMPORTAMOS EL NUEVO MÓDULO
+import ModuloFinanzas from '@/components/ModuloFinanzas'
+// 👇 IMPORTAMOS EL NUEVO GESTOR DE USUARIOS (Ajusta la ruta si lo guardaste en admin/)
+import GestorUsuarios from '@/components/GestorUsuarios' 
 
 export default function Home() {
   const [usuarioActivo, setUsuarioActivo] = useState<any>(null)
   const [vista, setVista] = useState<'login' | 'registro'>('login')
-  // 👇 Agregamos 'finanzas' a las opciones posibles
-  const [pestana, setPestana] = useState<'jugar' | 'historial' | 'admin' | 'ranking' | 'billetera' | 'perfil' | 'finanzas'>('jugar')
+  
+  // 👇 Agregamos 'usuarios' a las opciones posibles
+  const [pestana, setPestana] = useState<'jugar' | 'historial' | 'admin' | 'ranking' | 'billetera' | 'perfil' | 'finanzas' | 'usuarios'>('jugar')
   const [cargandoSesion, setCargandoSesion] = useState(true)
 
   // 1. LA MAGIA DE LA MEMORIA + SINCRONIZACIÓN SILENCIOSA
@@ -55,7 +58,7 @@ export default function Home() {
   }, [])
 
   // FUNCIÓN NUEVA: Cambia la pestaña y la guarda en la memoria
-  const cambiarPestana = (nuevaPestana: 'jugar' | 'historial' | 'admin' | 'ranking' | 'billetera' | 'perfil' | 'finanzas') => {
+  const cambiarPestana = (nuevaPestana: 'jugar' | 'historial' | 'admin' | 'ranking' | 'billetera' | 'perfil' | 'finanzas' | 'usuarios') => {
     setPestana(nuevaPestana)
     localStorage.setItem('club_pronosticos_pestana', nuevaPestana)
   }
@@ -190,6 +193,18 @@ export default function Home() {
                 >
                   📊 Finanzas
                 </button>
+
+                {/* 👇 BOTÓN NUEVO DEL CRM DE USUARIOS */}
+                <button 
+                  onClick={() => cambiarPestana('usuarios')}
+                  className={`flex-1 min-w-[100px] py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
+                    pestana === 'usuarios' 
+                    ? 'bg-teal-600 text-white shadow-[0_0_20px_rgba(13,148,136,0.4)]' 
+                    : 'text-teal-500/40 hover:text-teal-400'
+                  }`}
+                >
+                  👥 Usuarios
+                </button>
               </>
             )}
 
@@ -235,9 +250,13 @@ export default function Home() {
               />
             )}
 
-            {/* 👇 RENDERIZADO DEL DASHBOARD FINANCIERO PROTEGIDO */}
             {pestana === 'finanzas' && usuarioActivo.rol === 'admin' && (
               <ModuloFinanzas />
+            )}
+
+            {/* 👇 RENDERIZADO DEL GESTOR DE USUARIOS (CRM) */}
+            {pestana === 'usuarios' && usuarioActivo.rol === 'admin' && (
+              <GestorUsuarios />
             )}
           </div>
           

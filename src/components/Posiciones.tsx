@@ -8,11 +8,10 @@ export default function Posiciones() {
   const [historial, setHistorial] = useState<any[]>([])
   const [cargando, setCargando] = useState(true)
   
-  // 🆕 ESTADO NUEVO: Controla qué quinielas del historial están expandidas
-  const [quinielasExpandidas, setQuinielasExpandidas] = useState<Record<string, boolean>>({})
+  // 🆕 ESTADO MEJORADO: Ahora solo guarda UN ID a la vez (Efecto Acordeón)
+  const [quinielaExpandidaId, setQuinielaExpandidaId] = useState<string | null>(null)
 
-  // ⚙️ CONFIGURACIÓN MONETARIA
-  const VALOR_CREDITO = 30 
+  // ⚙️ CONFIGURACIÓN MONETARIA (Solo Porcentaje, adiós créditos)
   const PORCENTAJE_PREMIO = 0.80 
 
   useEffect(() => {
@@ -97,9 +96,10 @@ export default function Posiciones() {
           }
         });
 
-        const precioTicketCrds = q.precio_ticket || 0
+        // 💰 LÓGICA MONETARIA DIRECTA EN PESOS MXN
+        const precioTicketMXN = q.precio_ticket ?? 30 // Directo en pesos
         const totalBoletos = ranking.length
-        const recaudadoPesos = totalBoletos * precioTicketCrds * VALOR_CREDITO
+        const recaudadoPesos = totalBoletos * precioTicketMXN
         const premioPesos = recaudadoPesos * PORCENTAJE_PREMIO
 
         return { 
@@ -111,12 +111,14 @@ export default function Posiciones() {
         }
       })
 
-      const activas = quinielasProcesadas.filter(q => 
-        q.estado === 'abierta' || (q.estado === 'cerrada' && q.goles_totales_real === null)
-      )
-      const pasadas = quinielasProcesadas.filter(q => 
-        q.estado === 'cerrada' && q.goles_totales_real !== null
-      )
+      // 🕒 ORDENAMIENTO: De izquierda a derecha, la más próxima a cerrar primero
+      const activas = quinielasProcesadas
+        .filter(q => q.estado === 'abierta' || (q.estado === 'cerrada' && q.goles_totales_real === null))
+        .sort((a, b) => new Date(a.fecha_cierre).getTime() - new Date(b.fecha_cierre).getTime())
+
+      const pasadas = quinielasProcesadas
+        .filter(q => q.estado === 'cerrada' && q.goles_totales_real !== null)
+        .sort((a, b) => new Date(b.fecha_cierre).getTime() - new Date(a.fecha_cierre).getTime())
 
       setQuinielasAbiertas(activas)
       setQuinielaActiva(activas.length > 0 ? activas[0] : quinielasProcesadas[0])
@@ -127,12 +129,9 @@ export default function Posiciones() {
     cargarDatos()
   }, [])
 
-  // 🆕 FUNCIÓN NUEVA: Alterna el estado de expansión de una quiniela específica
+  // 🆕 FUNCIÓN MEJORADA: Efecto acordeón (si clickeas la misma, se cierra; si clickeas otra, se abre)
   const toggleExpandir = (id: string) => {
-    setQuinielasExpandidas(prev => ({
-      ...prev,
-      [id]: !prev[id]
-    }))
+    setQuinielaExpandidaId(prevId => prevId === id ? null : id)
   }
 
   if (cargando) return <div className="text-amber-500 animate-pulse text-center mt-10 font-bold uppercase tracking-widest text-xs">Calculando Bolsa y Posiciones...</div>
@@ -206,7 +205,7 @@ export default function Posiciones() {
               <>
                 <span className="block text-[9px] text-amber-500 font-black uppercase tracking-widest mb-0.5">🎁 EVENTO PROMOCIONAL 🎁</span>
                 <span className="text-base md:text-lg font-black text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.3)] block">
-                  {quinielaActiva.tipo_premiacion === 'promo_top2' ? '1 CRD AL 1º Y 2º LUGAR' : '1 CRÉDITO AL GANADOR'}
+                  {quinielaActiva.tipo_premiacion === 'promo_top2' ? '1 BOLETO AL 1º Y 2º LUGAR' : '1 BOLETO AL GANADOR'}
                 </span>
               </>
             ) : (
@@ -333,23 +332,27 @@ export default function Posiciones() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {historial.map(quiniela => {
               const esHistorialPromo = quiniela.tipo_premiacion?.toLowerCase().includes('promo');
-              // 🆕 LÓGICA NUEVA: Verifica si esta jornada en particular está expandida
-              const estaExpandida = quinielasExpandidas[quiniela.id] || false;
-              // 🆕 LÓGICA NUEVA: Decide cuántos jugadores mostrar
+              
+              // 🆕 LÓGICA MEJORADA: Compara si el ID de esta quiniela coincide con el estado único
+              const estaExpandida = quinielaExpandidaId === quiniela.id;
               const jugadoresAMostrar = estaExpandida ? quiniela.ranking : quiniela.ranking.slice(0, 5);
 
               return (
-                <div key={quiniela.id} className="bg-slate-900 border border-slate-800 rounded-xl p-3 md:p-4 shadow-lg relative overflow-hidden flex flex-col">
+                <div 
+                  key={quiniela.id} 
+                  // 🎨 UI MEJORADA: Si está expandida, abarca 2 columnas en pantallas medianas (sm:col-span-2)
+                  className={`bg-slate-900 border rounded-xl p-3 md:p-4 shadow-lg relative overflow-hidden flex flex-col transition-all duration-300 ${estaExpandida ? 'border-amber-500/50 sm:col-span-2 shadow-[0_0_15px_rgba(245,158,11,0.1)]' : 'border-slate-800'}`}
+                >
                   <div className="flex justify-between items-start mb-3 border-b border-slate-800 pb-2">
                     <div>
-                      <h4 className="font-black text-white text-[10px] md:text-xs uppercase italic">{quiniela.nombre_jornada}</h4>
-                      <span className="text-[8px] md:text-[9px] text-slate-500 font-bold uppercase mt-0.5 block">Goles Reales: {quiniela.goles_totales_real}</span>
+                      <h4 className={`font-black text-[10px] md:text-xs uppercase italic ${estaExpandida ? 'text-amber-400' : 'text-white'}`}>{quiniela.nombre_jornada}</h4>
+                      <span className="text-[8px] md:text-[9px] text-slate-500 font-bold uppercase mt-0.5 block">Goles Reales: <span className="text-slate-300">{quiniela.goles_totales_real}</span></span>
                     </div>
                     <div className="text-right">
                       <span className="block text-[8px] md:text-[9px] text-amber-500 font-bold uppercase tracking-widest">Premio</span>
                       {esHistorialPromo ? (
                         <span className="text-[10px] md:text-xs font-black text-amber-400 drop-shadow-md uppercase block mt-0.5">
-                          {quiniela.tipo_premiacion === 'promo_top2' ? '1 CRD (1º Y 2º)' : '1 CRD (1º)'}
+                          {quiniela.tipo_premiacion === 'promo_top2' ? '1 BOLETO (1º Y 2º)' : '1 BOLETO (1º)'}
                         </span>
                       ) : (
                         <span className="text-sm md:text-base font-black text-amber-400 drop-shadow-md">
@@ -359,47 +362,73 @@ export default function Posiciones() {
                     </div>
                   </div>
 
-                  <div className="space-y-1.5 flex-grow">
-                    {/* 🆕 AHORA MAPEAMOS SOBRE 'jugadoresAMostrar' EN LUGAR DEL SLICE DIRECTO */}
+                  <div className="space-y-2 flex-grow">
                     {jugadoresAMostrar.map((jugador: any) => (
-                      <div key={jugador.id} className="flex justify-between items-center bg-slate-950/50 p-1.5 md:p-2 rounded-lg border border-slate-800/50">
-                        <div className="flex items-center gap-2">
-                          <span className="flex justify-center items-center text-sm w-4 md:w-5 text-center">
-                            {jugador.posicion === 1 ? '🥇' : 
-                             jugador.posicion === 2 ? '🥈' : 
-                             jugador.posicion === 3 ? '🥉' : 
-                             <span className="text-[9px] font-black text-slate-500 bg-slate-900 border border-slate-700 px-1.5 rounded">{jugador.posicion}</span>}
-                          </span>
-                          <div className="flex items-center gap-1.5">
-                            <img src={getAvatarUrl(jugador.nombre, jugador.avatar_url)} alt={jugador.nombre} className="w-4 h-4 md:w-5 md:h-5 rounded-full object-cover border border-slate-700 bg-slate-900" />
-                            <span className={`font-black uppercase text-[9px] md:text-[10px] truncate w-[80px] sm:w-[100px] ${jugador.posicion === 1 ? 'text-amber-400' : 'text-slate-300'}`}>
-                              {jugador.nombre}
+                      <div key={jugador.id} className="flex flex-col bg-slate-950/50 p-1.5 md:p-2 rounded-lg border border-slate-800/50 transition-colors">
+                        {/* Cabecera del Jugador */}
+                        <div className="flex justify-between items-center">
+                          <div className="flex items-center gap-2">
+                            <span className="flex justify-center items-center text-sm w-4 md:w-5 text-center">
+                              {jugador.posicion === 1 ? '🥇' : 
+                               jugador.posicion === 2 ? '🥈' : 
+                               jugador.posicion === 3 ? '🥉' : 
+                               <span className="text-[9px] font-black text-slate-500 bg-slate-900 border border-slate-700 px-1.5 rounded">{jugador.posicion}</span>}
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <img src={getAvatarUrl(jugador.nombre, jugador.avatar_url)} alt={jugador.nombre} className="w-4 h-4 md:w-5 md:h-5 rounded-full object-cover border border-slate-700 bg-slate-900" />
+                              <span className={`font-black uppercase text-[9px] md:text-[10px] truncate ${estaExpandida ? 'w-[120px] sm:w-auto' : 'w-[80px] sm:w-[100px]'} ${jugador.posicion === 1 ? 'text-amber-400' : 'text-slate-300'}`}>
+                                {jugador.nombre}
+                              </span>
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center gap-2 text-[8px] md:text-[9px] font-bold text-slate-500">
+                            {!estaExpandida && <span title="Goles Predichos" className="hidden xs:inline-block">G:{jugador.prediccionGoles}</span>}
+                            <span className="bg-slate-800 text-green-400 px-1.5 py-0.5 rounded border border-slate-700 w-9 md:w-10 text-center shadow-inner">
+                              {jugador.puntos}
                             </span>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2 text-[8px] md:text-[9px] font-bold text-slate-500">
-                          <span title="Goles de Desempate" className="hidden xs:inline-block">G:{jugador.prediccionGoles}</span>
-                          <span className="bg-slate-800 text-green-400 px-1.5 py-0.5 rounded border border-slate-700 w-9 md:w-10 text-center shadow-inner">
-                            {jugador.puntos}
-                          </span>
-                        </div>
+
+                        {/* 🆕 RADIOGRAFÍA EXTRA EXPANDIDA: Aciertos, Fallos y Diferencia de Goles */}
+                        {estaExpandida && (
+                          <div className="flex justify-between items-center border-t border-slate-800/50 pt-2 mt-2">
+                            <div className="flex gap-0.5 md:gap-1 flex-wrap">
+                              {quiniela.partidos.map((p: any, i: number) => {
+                                const pronostico = jugador.pronosticos.find((pr: any) => pr.partido_id === p.id)
+                                const estado = jugador.aciertos[p.id]
+                                
+                                let bgClass = "bg-slate-950 border-slate-800 text-slate-600"
+                                if (estado === 'acierto') bgClass = "bg-green-600 border-green-500 text-white"
+                                if (estado === 'fallo') bgClass = "bg-red-950/40 border-red-900 text-red-500"
+                                
+                                return (
+                                  <div key={p.id} className={`w-4 h-4 md:w-5 md:h-5 flex items-center justify-center rounded text-[7px] md:text-[9px] font-black border ${bgClass}`} title={`Partido ${i+1}`}>
+                                    {pronostico ? pronostico.eleccion_usuario : '-'}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                            <div className="text-[8px] md:text-[9px] text-slate-400 font-bold uppercase text-right leading-tight ml-2 shrink-0">
+                              Dif. Goles: <span className="text-amber-500 font-black ml-0.5">{jugador.golesDiff === 999 ? '-' : jugador.golesDiff}</span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
 
-                  {/* 🆕 BOTÓN NUEVO: Solo aparece si hay más de 5 jugadores en esa quiniela */}
-                  {quiniela.ranking.length > 5 && (
-                    <button
-                      onClick={() => toggleExpandir(quiniela.id)}
-                      className="mt-3 pt-2 text-[10px] text-slate-400 hover:text-amber-400 font-bold uppercase tracking-widest transition-colors border-t border-slate-800/50 w-full text-center flex items-center justify-center gap-1"
-                    >
-                      {estaExpandida ? (
-                        <>Mostrar Menos <span className="text-xs">🔼</span></>
-                      ) : (
-                        <>Ver Tabla Completa ({quiniela.ranking.length}) <span className="text-xs">🔽</span></>
-                      )}
-                    </button>
-                  )}
+                  {/* 🆕 BOTÓN MEJORADO: Siempre muestra la opción de expandir para ver radiografías */}
+                  <button
+                    onClick={() => toggleExpandir(quiniela.id)}
+                    className="mt-3 pt-2 text-[9px] md:text-[10px] text-slate-400 hover:text-amber-400 font-bold uppercase tracking-widest transition-colors border-t border-slate-800/50 w-full text-center flex items-center justify-center gap-1"
+                  >
+                    {estaExpandida ? (
+                      <>Ocultar Detalles <span className="text-xs">🔼</span></>
+                    ) : (
+                      <>Ver Radiografías completas ({quiniela.ranking.length}) <span className="text-xs">🔽</span></>
+                    )}
+                  </button>
 
                 </div>
               )

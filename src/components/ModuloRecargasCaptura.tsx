@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
+import { useCajero } from '@/hooks/useCajero'
+import { useCapturaFisica } from '@/hooks/useCapturaFisica'
 
 interface ModuloRecargasCapturaProps {
   vista: 'recargas' | 'captura';
@@ -8,50 +9,25 @@ interface ModuloRecargasCapturaProps {
 }
 
 export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: ModuloRecargasCapturaProps) {
-  // --- CONSTANTES ---
-  const PRECIO_CREDITO = 30; // 👈 El costo de un crédito en pesos
+  const cajero = useCajero(actualizarSaldoGlobal);
+  const captura = useCapturaFisica(actualizarSaldoGlobal);
 
-  // --- ESTADOS VENTAS (Antes Recargas) ---
-  const [usuarios, setUsuarios] = useState<any[]>([])
-  const [busqueda, setBusqueda] = useState('')
-  const [cargando, setCargando] = useState(false)
-  const [historialActivo, setHistorialActivo] = useState<string | null>(null)
-  const [datosHistorial, setDatosHistorial] = useState<any[]>([])
-  
-  // Estado para Modal de Recarga Libre ($)
-  const [recargaLibreAbierta, setRecargaLibreAbierta] = useState<string | null>(null)
-  const [montoRecargaLibre, setMontoRecargaLibre] = useState('')
+  const [recargaLibreAbierta, setRecargaLibreAbierta] = useState<string | null>(null);
+  const [montoRecargaLibre, setMontoRecargaLibre] = useState('');
 
-  // --- ESTADOS CAPTURA FÍSICA ---
-  const [quinielasAbiertas, setQuinielasAbiertas] = useState<any[]>([])
-  const [quiniela, setQuiniela] = useState<any>(null)
-  const [partidos, setPartidos] = useState<any[]>([])
-  const [equipos, setEquipos] = useState<any[]>([])
-  
-  const [capTelefono, setCapTelefono] = useState('')
-  const [capNombre, setCapNombre] = useState('')
-  const [capUsuarioId, setCapUsuarioId] = useState<string | null>(null)
-  const [capSelecciones, setCapSelecciones] = useState<Record<string, string>>({})
-  const [capGoles, setCapGoles] = useState('')
-  const [guardandoCaptura, setGuardandoCaptura] = useState(false)
-  const [linkWaReciente, setLinkWaReciente] = useState<string | null>(null)
-  const [ticketAImprimir, setTicketAImprimir] = useState<any>(null)
+  // 🖨️ Estado para controlar el tipo de impresión dinámica
+  const [formatoImpresion, setFormatoImpresion] = useState<'A4' | 'termica' | null>(null);
 
-  // --- EFECTOS ---
+  // Limpiar el estado de impresión después de que se cierre el diálogo del sistema
   useEffect(() => {
-    cargarEquiposDB()
-    cargarPartidosJornada()
-  }, [])
-
-  // --- FUNCIONES COMUNES ---
-  const cargarEquiposDB = async () => {
-    const { data: eq } = await supabase.from('equipos').select('nombre, logo_url')
-    if (eq) setEquipos(eq)
-  }
+    const handleAfterPrint = () => setFormatoImpresion(null);
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => window.removeEventListener('afterprint', handleAfterPrint);
+  }, []);
 
   const obtenerLogo = (nombreEquipo: string) => {
     if (!nombreEquipo) return null;
-    const equipo = equipos.find(e => e.nombre.toLowerCase().trim() === nombreEquipo.toLowerCase().trim())
+    const equipo = captura.equipos.find(e => e.nombre.toLowerCase().trim() === nombreEquipo.toLowerCase().trim())
     return equipo?.logo_url || null
   }
 
@@ -61,209 +37,16 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
     return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: true}).toUpperCase()}`;
   }
 
-  // --- FUNCIONES VENTAS ---
-  const buscarUsuarios = async () => {
-    if (!busqueda) return
-    setCargando(true)
-    const { data } = await supabase.from('usuarios').select('*').or(`nombre.ilike.%${busqueda}%,telefono.ilike.%${busqueda}%`).limit(5)
-    if (data) setUsuarios(data)
-    setCargando(false)
-  }
-
-  const verHistorial = async (usuarioId: string, forceRefresh = false) => {
-    if (historialActivo === usuarioId && !forceRefresh) { setHistorialActivo(null); return }
-    setHistorialActivo(usuarioId)
-    const { data } = await supabase.from('transacciones_creditos').select('*').eq('usuario_id', usuarioId).order('created_at', { ascending: false }).limit(15)
-    if (data) setDatosHistorial(data)
-  }
-
-  // RECARGA DIRECTA DE CRÉDITOS (+1, +5, +10)
-  const recargarCreditos = async (usuarioId: string, saldoActual: number, cantidad: number) => {
-    const nuevoSaldo = saldoActual + cantidad
-    const { error } = await supabase.from('usuarios').update({ creditos_disponibles: nuevoSaldo }).eq('id', usuarioId)
-    if (!error) {
-      await supabase.from('transacciones_creditos').insert([{ 
-        usuario_id: usuarioId, 
-        cantidad: cantidad, 
-        tipo_movimiento: 'recarga_manual',
-        descripcion: 'Venta en mostrador' 
-      }])
-      if (actualizarSaldoGlobal) actualizarSaldoGlobal(usuarioId, nuevoSaldo)
-      await buscarUsuarios() 
-      if (historialActivo === usuarioId) await verHistorial(usuarioId, true)
-      alert('¡Venta de créditos registrada con éxito!')
-    }
-  }
-
-  // 🔥 NUEVA FUNCIÓN: RECARGA LIBRE EN PESOS (LA BILLETERA INTELIGENTE)
-  const procesarRecargaLibre = async (usuario: any) => {
-    const pesosIngresados = parseFloat(montoRecargaLibre);
-    if (isNaN(pesosIngresados) || pesosIngresados <= 0) {
-      alert("Por favor ingresa una cantidad válida en pesos.");
-      return;
-    }
-
-    // 1. Sumamos lo que traía guardado + lo nuevo que nos da hoy
-    const saldoPesosAnterior = usuario.saldo_pesos || 0;
-    const totalPesosDisponibles = saldoPesosAnterior + pesosIngresados;
-
-    // 2. Calculamos para cuántos créditos completos le alcanza
-    const creditosNuevos = Math.floor(totalPesosDisponibles / PRECIO_CREDITO);
-    
-    // 3. Lo que sobra (el cambio virtual)
-    const nuevoSaldoPesos = totalPesosDisponibles % PRECIO_CREDITO;
-
-    // 4. Saldo total de créditos
-    const saldoCreditosActual = usuario.creditos_disponibles || 0;
-    const nuevoSaldoCreditos = saldoCreditosActual + creditosNuevos;
-
-    try {
-      // Actualizamos al usuario con sus dos nuevas "bolsas"
-      await supabase.from('usuarios').update({ 
-        creditos_disponibles: nuevoSaldoCreditos,
-        saldo_pesos: nuevoSaldoPesos
-      }).eq('id', usuario.id);
-
-      // Si alcanzó para generar al menos 1 crédito, lo registramos en el historial
-      if (creditosNuevos > 0) {
-        await supabase.from('transacciones_creditos').insert([{ 
-          usuario_id: usuario.id, 
-          cantidad: creditosNuevos, 
-          tipo_movimiento: 'recarga_billetera',
-          descripcion: `Conversión Auto: $${pesosIngresados} MXN` 
-        }]);
-      }
-
-      if (actualizarSaldoGlobal) actualizarSaldoGlobal(usuario.id, nuevoSaldoCreditos);
-      
-      alert(`✅ ¡Transacción Exitosa!\n\nSe recibieron: $${pesosIngresados} MXN\nCréditos agregados: +${creditosNuevos}\nSaldo (Cambio) guardado: $${nuevoSaldoPesos} MXN`);
-      
+  const handleProcesarRecarga = async (u: any) => {
+    const exito = await cajero.procesarRecargaLibre(u, montoRecargaLibre);
+    if (exito) {
       setRecargaLibreAbierta(null);
       setMontoRecargaLibre('');
-      await buscarUsuarios(); 
-      if (historialActivo === usuario.id) await verHistorial(usuario.id, true);
-
-    } catch (e: any) {
-      alert("Error procesando el pago: " + e.message);
     }
   }
 
-
-  // --- FUNCIONES CAPTURA ---
-  const cargarPartidosJornada = async () => {
-    const { data: abiertas } = await supabase
-      .from('quinielas')
-      .select('id, nombre_jornada, precio_ticket, fecha_cierre, estado, partidos (id, equipo_local, equipo_visitante, resultado_real)')
-      .eq('estado', 'abierta')
-      .order('fecha_cierre', { ascending: true })
-      
-    if (abiertas && abiertas.length > 0) {
-      setQuinielasAbiertas(abiertas)
-      setQuiniela(abiertas[0])
-      setPartidos(abiertas[0].partidos || [])
-    }
-  }
-
-  const seleccionarQuiniela = (qa: any) => {
-    setQuiniela(qa)
-    setPartidos(qa.partidos || [])
-  }
-
-  const buscarClienteParaCaptura = async (tel: string) => {
-    setLinkWaReciente(null) 
-    setTicketAImprimir(null)
-    setCapTelefono(tel)
-    if (tel && tel.length >= 10) {
-      const { data } = await supabase.from('usuarios').select('id, nombre').eq('telefono', tel).single()
-      if (data) { setCapUsuarioId(data.id); setCapNombre(data.nombre) } 
-      else { setCapUsuarioId(null); setCapNombre('') }
-    } else {
-      setCapUsuarioId(null); setCapNombre('')
-    }
-  }
-
-  const seleccionarOpcionCaptura = (partidoId: string, opcion: string) => {
-    setCapSelecciones({ ...capSelecciones, [partidoId]: opcion })
-  }
-
-  const guardarCapturaFisica = async () => {
-    if (!capTelefono || !capNombre || !capGoles || !quiniela) return alert('Faltan datos.')
-    setGuardandoCaptura(true)
-    
-    try {
-      let uid = capUsuarioId
-      let creditosActuales = 0
-
-      if (!uid) {
-        // 🔥 Si es usuario nuevo, lo creamos asegurando que la columna saldo_pesos empiece en 0
-        const { data: nu } = await supabase.from('usuarios').insert([{ nombre: capNombre, telefono: capTelefono, creditos_disponibles: 0, saldo_pesos: 0 }]).select().single()
-        uid = nu.id
-      } else {
-        const { data: eu } = await supabase.from('usuarios').select('creditos_disponibles').eq('id', uid).single()
-        if (eu) creditosActuales = eu.creditos_disponibles || 0
-      }
-
-      const esGratis = quiniela.precio_ticket === 0
-      if (esGratis) {
-        const { data: tp } = await supabase.from('tickets').select('id').eq('usuario_id', uid).eq('quiniela_id', quiniela.id)
-        if (tp && tp.length > 0) {
-          alert(`⚠️ ALERTA: ${capNombre} ya tiene un boleto registrado para esta jornada gratuita. Solo se permite 1 jugada por persona.`)
-          setGuardandoCaptura(false)
-          return 
-        }
-      }
-
-      const seleccionesFinales = { ...capSelecciones }
-      partidos.forEach(p => { if (!seleccionesFinales[p.id]) seleccionesFinales[p.id] = 'E' })
-      
-      const precio = quiniela.precio_ticket ?? 1 
-      let nuevoSaldo = creditosActuales
-
-      if (precio > 0) {
-        if (creditosActuales >= precio) {
-          nuevoSaldo = creditosActuales - precio
-          await supabase.from('usuarios').update({ creditos_disponibles: nuevoSaldo }).eq('id', uid)
-        } else {
-          const faltante = precio - creditosActuales
-          await supabase.from('transacciones_creditos').insert([{ 
-            usuario_id: uid, cantidad: faltante, tipo_movimiento: 'recarga_manual', descripcion: 'Pago en mostrador (Físico)' 
-          }])
-          nuevoSaldo = 0
-          await supabase.from('usuarios').update({ creditos_disponibles: nuevoSaldo }).eq('id', uid)
-        }
-
-        await supabase.from('transacciones_creditos').insert([{ 
-          usuario_id: uid, cantidad: -precio, tipo_movimiento: 'juego_ticket_fisico', descripcion: `Ticket físico ${quiniela.nombre_jornada}` 
-        }])
-      }
-
-      const { data: tk } = await supabase.from('tickets').insert([{ usuario_id: uid, quiniela_id: quiniela.id, metodo_ingreso: 'fisico', prediccion_goles_total: parseInt(capGoles) }]).select().single()
-      
-      const prons = Object.keys(seleccionesFinales).map(pId => ({ ticket_id: tk.id, partido_id: pId, eleccion_usuario: seleccionesFinales[pId] }))
-      await supabase.from('pronosticos').insert(prons)
-      
-      if (actualizarSaldoGlobal) actualizarSaldoGlobal(uid, nuevoSaldo)
-
-      let seleccionesTexto = '';
-      partidos.forEach(p => {
-        const sel = seleccionesFinales[p.id];
-        const pick = sel === 'L' ? p.equipo_local : sel === 'V' ? p.equipo_visitante : 'Empate';
-        seleccionesTexto += `⚽ ${p.equipo_local} vs ${p.equipo_visitante} 👉 *${pick}*\n`;
-      });
-
-      const msgWa = `🎫 *QUINIELA CIBERTEQUE*\nHola ${capNombre}, tu jugada para *${quiniela.nombre_jornada}* se guardó correctamente.\n\n*Tus pronósticos:*\n${seleccionesTexto}\nDesempate (Goles): *${capGoles}*\n\n🔍 Entra a la plataforma en la sección "Mis Jugadas" para verificar tu boleto. Si notas algún error en la captura, avísanos antes de la hora de cierre para corregirlo.\n\n🍀 ¡Mucha suerte!`;
-      
-      setLinkWaReciente(`https://wa.me/52${capTelefono}?text=${encodeURIComponent(msgWa)}`)
-      
-      setTicketAImprimir({ nombre: capNombre, telefono: capTelefono, selecciones: seleccionesFinales, goles: capGoles })
-      
-      alert('🎟️ ¡Boleto guardado con éxito!')
-      setCapTelefono(''); setCapNombre(''); setCapSelecciones({}); setCapGoles(''); 
-    } catch (e: any) { alert(e.message) } finally { setGuardandoCaptura(false) }
-  }
-
-  const capturaCerradaPorFecha = quiniela && quiniela.fecha_cierre ? new Date() > new Date(quiniela.fecha_cierre.substring(0, 16)) : false;
-  const capturaCerradaPorResultados = (partidos || []).some(p => p.resultado_real !== null);
+  const capturaCerradaPorFecha = captura.quiniela && captura.quiniela.fecha_cierre ? new Date() > new Date(captura.quiniela.fecha_cierre.substring(0, 16)) : false;
+  const capturaCerradaPorResultados = (captura.partidos || []).some(p => p.resultado_real !== null);
   const bloqueoCapturaAdmin = capturaCerradaPorFecha || capturaCerradaPorResultados;
 
   return (
@@ -271,22 +54,23 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
       {/* VISTA: VENTAS */}
       {vista === 'recargas' && (
         <div className="animate-in fade-in duration-300 w-full max-w-2xl mx-auto space-y-4">
-          <div className="flex gap-2">
-           <input 
-             type="text" 
-             placeholder="Buscar cliente (Nombre o WhatsApp)..." 
-             className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-[10px] md:text-xs text-white outline-none focus:border-green-500 transition-all uppercase font-bold tracking-widest placeholder:text-slate-600" 
-             value={busqueda} 
-             onChange={(e) => setBusqueda(e.target.value)} 
-             onKeyDown={(e) => e.key === 'Enter' && buscarUsuarios()} 
-           />
-           <button onClick={buscarUsuarios} className="bg-green-600 hover:bg-green-500 px-5 md:px-8 py-2.5 rounded-xl font-black uppercase text-[10px] md:text-xs tracking-widest transition-all shadow-[0_0_15px_rgba(22,163,74,0.3)]">
-             Buscar
-           </button>
-         </div>
-         
+          <div className="flex gap-2 relative">
+            <input 
+              type="text" 
+              placeholder="Buscar cliente (Nombre o WhatsApp)..." 
+              className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-[10px] md:text-xs text-white outline-none focus:border-green-500 transition-all uppercase font-bold tracking-widest placeholder:text-slate-600" 
+              value={cajero.busqueda} 
+              onChange={(e) => cajero.setBusqueda(e.target.value)} 
+            />
+            {cajero.cargando && <span className="absolute right-4 top-3 text-slate-500 animate-spin">⏳</span>}
+          </div>
+          
           <div className="space-y-3">
-            {(usuarios || []).map(u => (
+            {cajero.usuarios.length === 0 && cajero.busqueda.length > 2 && !cajero.cargando && (
+               <p className="text-center text-slate-500 text-xs py-4 bg-slate-900/50 rounded-lg">No se encontraron clientes.</p>
+            )}
+
+            {(cajero.usuarios || []).map(u => (
               <div key={u.id} className="bg-slate-900/80 p-3 md:p-4 rounded-xl border border-slate-700 hover:border-slate-500 transition-all shadow-lg">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
                   <div>
@@ -307,18 +91,11 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                   </div>
                   
                   <div className="flex flex-wrap gap-1.5 w-full md:w-auto">
-                    <button onClick={() => verHistorial(u.id)} className="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-[9px] md:text-[10px] font-black uppercase transition-all text-slate-300 border border-slate-700 flex-1 md:flex-none">
-                      📜 Historial
-                    </button>
-                    
-                    {/* Botón de Recarga Libre ($) */}
-                    <button onClick={() => setRecargaLibreAbierta(u.id)} className="bg-amber-900 hover:bg-amber-800 border border-amber-600/50 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all shadow-[0_0_10px_rgba(245,158,11,0.2)] flex-1 md:flex-none">
-                      +$ Libre
-                    </button>
-
-                    <button onClick={() => recargarCreditos(u.id, u.creditos_disponibles, 1)} className="bg-green-950 hover:bg-green-900 border border-green-700/50 text-green-400 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all flex-1 md:flex-none">+1</button>
-                    <button onClick={() => recargarCreditos(u.id, u.creditos_disponibles, 5)} className="bg-green-800 hover:bg-green-700 border border-green-600/50 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all flex-1 md:flex-none">+5</button>
-                    <button onClick={() => recargarCreditos(u.id, u.creditos_disponibles, 10)} className="bg-green-600 hover:bg-green-500 border border-green-500/50 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all shadow-[0_0_10px_rgba(22,163,74,0.3)] flex-1 md:flex-none">+10</button>
+                    <button onClick={() => cajero.verHistorial(u.id)} className="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-[9px] md:text-[10px] font-black uppercase transition-all text-slate-300 border border-slate-700 flex-1 md:flex-none">📜 Historial</button>
+                    <button onClick={() => setRecargaLibreAbierta(u.id)} className="bg-amber-900 hover:bg-amber-800 border border-amber-600/50 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all shadow-[0_0_10px_rgba(245,158,11,0.2)] flex-1 md:flex-none">+$ Libre</button>
+                    <button onClick={() => cajero.recargarCreditos(u.id, u.creditos_disponibles, 1)} className="bg-green-950 hover:bg-green-900 border border-green-700/50 text-green-400 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all flex-1 md:flex-none">+1</button>
+                    <button onClick={() => cajero.recargarCreditos(u.id, u.creditos_disponibles, 5)} className="bg-green-800 hover:bg-green-700 border border-green-600/50 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all flex-1 md:flex-none">+5</button>
+                    <button onClick={() => cajero.recargarCreditos(u.id, u.creditos_disponibles, 10)} className="bg-green-600 hover:bg-green-500 border border-green-500/50 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all shadow-[0_0_10px_rgba(22,163,74,0.3)] flex-1 md:flex-none">+10</button>
                   </div>
                 </div>
 
@@ -341,81 +118,97 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                           className="w-full bg-slate-950 border border-amber-900/50 rounded-lg pl-7 pr-3 py-2 text-white outline-none focus:border-amber-500 transition-all font-black text-lg" 
                         />
                       </div>
-                      <button onClick={() => procesarRecargaLibre(u)} className="bg-amber-600 hover:bg-amber-500 text-white font-black px-6 py-2 rounded-lg text-[10px] uppercase tracking-widest transition-all">
+                      <button onClick={() => handleProcesarRecarga(u)} className="bg-amber-600 hover:bg-amber-500 text-white font-black px-6 py-2 rounded-lg text-[10px] uppercase tracking-widest transition-all">
                         Calcular y Cobrar
                       </button>
                     </div>
 
-                    {/* Previsualización del cálculo en tiempo real */}
                     {parseFloat(montoRecargaLibre) > 0 && (
                       <div className="mt-3 flex items-center justify-between bg-slate-900 p-2 rounded-lg border border-slate-800 text-[10px] font-bold uppercase">
-                        <span className="text-slate-400">Recibirá: <span className="text-green-400 font-black text-sm">+{Math.floor(((u.saldo_pesos || 0) + parseFloat(montoRecargaLibre)) / PRECIO_CREDITO)} Crts</span></span>
-                        <span className="text-slate-400">Sobrante a guardar: <span className="text-amber-500 font-black text-sm">${((u.saldo_pesos || 0) + parseFloat(montoRecargaLibre)) % PRECIO_CREDITO}</span></span>
+                        <span className="text-slate-400">Recibirá: <span className="text-green-400 font-black text-sm">+{Math.floor(((u.saldo_pesos || 0) + parseFloat(montoRecargaLibre)) / cajero.PRECIO_CREDITO)} Crts</span></span>
+                        <span className="text-slate-400">Sobrante a guardar: <span className="text-amber-500 font-black text-sm">${((u.saldo_pesos || 0) + parseFloat(montoRecargaLibre)) % cajero.PRECIO_CREDITO}</span></span>
                       </div>
                     )}
                   </div>
                 )}
 
                 {/* HISTORIAL */}
-                {historialActivo === u.id && (
+                {cajero.historialActivo === u.id && (
                   <div className="mt-3 pt-3 border-t border-slate-800 animate-in slide-in-from-top-2">
-                    <div className="max-h-[250px] overflow-y-auto pr-1">
-                      <table className="w-full text-left border-collapse">
-                        <thead>
-                          <tr className="uppercase bg-slate-950/80 text-[8px] md:text-[9px] text-slate-500 tracking-widest sticky top-0">
-                            <th className="p-2 border-b border-slate-800 w-1/4">Fecha</th>
-                            <th className="p-2 border-b border-slate-800 w-2/4">Concepto</th>
-                            <th className="p-2 border-b border-slate-800 text-center w-[12%]">Cant</th>
-                            <th className="p-2 border-b border-slate-800 text-right w-[13%]">Saldo</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-800/50">
-                          {(() => {
-                            let saldoAcumulado = u.creditos_disponibles;
-                            return datosHistorial.map((mov: any) => {
-                              const saldoEnEseMomento = saldoAcumulado;
-                              saldoAcumulado -= mov.cantidad; 
-                              
-                              const conceptoLimpio = mov.descripcion || (mov.tipo_movimiento === 'recarga_manual' ? 'Venta' : mov.tipo_movimiento.replace(/_/g, ' '));
-                              
-                              return (
-                                <tr key={mov.id} className="hover:bg-slate-800/30 transition-colors">
-                                  <td className="p-2 text-[9px] md:text-[10px] text-slate-400 font-mono">{new Date(mov.created_at).toLocaleDateString()}</td>
-                                  <td className="p-2 text-[9px] md:text-[10px] text-slate-300 font-bold uppercase truncate max-w-[120px] md:max-w-[200px]">{conceptoLimpio}</td>
-                                  <td className={`p-2 text-center font-black text-[10px] md:text-xs ${mov.cantidad > 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                    {mov.cantidad > 0 ? '+' : ''}{mov.cantidad}
-                                  </td>
-                                  <td className="p-2 text-right font-black text-[10px] md:text-xs text-blue-400">{saldoEnEseMomento}</td>
-                                </tr>
-                              )
-                            })
-                          })()}
-                        </tbody>
-                      </table>
-                      {datosHistorial.length === 0 && <p className="text-center text-slate-500 text-[10px] uppercase font-bold tracking-widest mt-4 py-4 bg-slate-950/50 rounded-lg">No hay movimientos recientes.</p>}
-                    </div>
+                    {cajero.cargandoHistorial ? (
+                      <p className="text-center text-slate-500 text-[10px] animate-pulse">Cargando movimientos...</p>
+                    ) : (
+                      <div className="max-h-[300px] overflow-y-auto pr-1">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="uppercase bg-slate-950/80 text-[8px] md:text-[9px] text-slate-500 tracking-widest sticky top-0">
+                              <th className="p-2 border-b border-slate-800 w-1/4">Fecha</th>
+                              <th className="p-2 border-b border-slate-800 w-2/4">Concepto</th>
+                              <th className="p-2 border-b border-slate-800 text-center w-[12%]">Cant</th>
+                              <th className="p-2 border-b border-slate-800 text-right w-[13%]">Saldo</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/50">
+                            {(() => {
+                              let saldoAcumulado = u.creditos_disponibles;
+                              return cajero.datosHistorial.map((mov: any) => {
+                                const saldoEnEseMomento = saldoAcumulado;
+                                saldoAcumulado -= mov.cantidad; 
+                                const conceptoLimpio = mov.descripcion || (mov.tipo_movimiento === 'recarga_manual' ? 'Venta' : mov.tipo_movimiento.replace(/_/g, ' '));
+                                return (
+                                  <tr key={mov.id} className="hover:bg-slate-800/30 transition-colors">
+                                    <td className="p-2 text-[9px] md:text-[10px] text-slate-400 font-mono">{new Date(mov.created_at).toLocaleDateString()}</td>
+                                    <td className="p-2 text-[9px] md:text-[10px] text-slate-300 font-bold uppercase truncate max-w-[120px] md:max-w-[200px]" title={conceptoLimpio}>{conceptoLimpio}</td>
+                                    <td className={`p-2 text-center font-black text-[10px] md:text-xs ${mov.cantidad > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                      {mov.cantidad > 0 ? '+' : ''}{mov.cantidad}
+                                    </td>
+                                    <td className="p-2 text-right font-black text-[10px] md:text-xs text-blue-400">{saldoEnEseMomento}</td>
+                                  </tr>
+                                )
+                              })
+                            })()}
+                          </tbody>
+                        </table>
+                        
+                        {cajero.datosHistorial.length === 0 && <p className="text-center text-slate-500 text-[10px] uppercase font-bold tracking-widest mt-4 py-4 bg-slate-950/50 rounded-lg">No hay movimientos recientes.</p>}
+                        
+                        {/* 🌟 BOTÓN CARGAR MÁS HISTORIAL 🌟 */}
+                        {cajero.hayMasHistorial && (
+                          <button onClick={cajero.cargarMasHistorial} className="w-full mt-3 py-2 border border-slate-700 border-dashed rounded-lg text-[10px] text-slate-400 hover:text-white hover:border-slate-500 hover:bg-slate-800 transition-all font-bold uppercase tracking-widest">
+                            ⬇️ Cargar más movimientos...
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
             ))}
+
+            {/* 🌟 BOTÓN CARGAR MÁS CLIENTES 🌟 */}
+            {cajero.hayMasUsuarios && (
+              <button onClick={cajero.cargarMasUsuarios} className="w-full mt-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-[10px] md:text-xs text-slate-400 hover:text-white hover:border-slate-500 hover:bg-slate-800 transition-all font-black uppercase tracking-widest shadow-lg">
+                ⬇️ Cargar más clientes...
+              </button>
+            )}
           </div>
         </div>
       )}
 
-      {/* VISTA: CAPTURA FÍSICA */}
+      {/* VISTA: CAPTURA FÍSICA (INTACTA) */}
       {vista === 'captura' && (
         <div className="animate-in fade-in duration-300 w-full max-w-3xl mx-auto">
-          {quinielasAbiertas.length > 1 && (
+          {captura.quinielasAbiertas.length > 1 && (
             <div className="flex flex-wrap justify-center gap-1.5 mb-4 bg-slate-900/50 p-2 rounded-xl border border-slate-800">
-              {quinielasAbiertas.map(qa => (
-                <button key={qa.id} onClick={() => seleccionarQuiniela(qa)} className={`px-3 py-1.5 rounded-lg text-[10px] md:text-xs font-black uppercase transition-all ${quiniela?.id === qa.id ? 'bg-amber-500 text-slate-900 shadow-[0_0_10px_rgba(245,158,11,0.3)]' : 'bg-slate-950 border border-slate-700 text-slate-500 hover:text-slate-300'}`}>
+              {captura.quinielasAbiertas.map(qa => (
+                <button key={qa.id} onClick={() => captura.seleccionarQuiniela(qa)} className={`px-3 py-1.5 rounded-lg text-[10px] md:text-xs font-black uppercase transition-all ${captura.quiniela?.id === qa.id ? 'bg-amber-500 text-slate-900 shadow-[0_0_10px_rgba(245,158,11,0.3)]' : 'bg-slate-950 border border-slate-700 text-slate-500 hover:text-slate-300'}`}>
                   {qa.nombre_jornada}
                 </button>
               ))}
             </div>
           )}
 
-          {!quiniela ? (
+          {!captura.quiniela ? (
             <p className="text-center text-slate-500 py-10 text-[10px] font-bold uppercase tracking-widest bg-slate-900/50 rounded-xl border border-slate-800">No hay jornada activa para capturar.</p>
           ) : (
             <div className="bg-gradient-to-br from-amber-950/20 to-slate-900 border border-amber-900/40 rounded-2xl p-4 md:p-6 shadow-[0_0_20px_rgba(245,158,11,0.05)] relative overflow-hidden">
@@ -432,38 +225,42 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
               <div className="mb-5 border-b border-amber-900/30 pb-3 flex flex-col md:flex-row md:items-center justify-between gap-2">
                 <div>
                   <h3 className="text-amber-500 font-black uppercase tracking-widest text-sm md:text-base flex items-center gap-2"><span>⚡</span> Captura Física</h3>
-                  <p className="text-[9px] md:text-[10px] text-amber-500/50 uppercase font-bold mt-0.5">{quiniela.nombre_jornada}</p>
+                  <p className="text-[9px] md:text-[10px] text-amber-500/50 uppercase font-bold mt-0.5">{captura.quiniela.nombre_jornada}</p>
                 </div>
               </div>
 
-              {linkWaReciente && (
+              {/* 🖨️ SECCIÓN ACTUALIZADA DE BOTONES DUALES DE IMPRESIÓN */}
+              {captura.linkWaReciente && (
                 <div className="mb-5 bg-green-950/40 border border-green-600/50 p-3 rounded-xl text-center shadow-[0_0_15px_rgba(22,163,74,0.1)] animate-in zoom-in-95">
                   <p className="text-green-400 font-black text-[10px] uppercase tracking-widest mb-2">✅ Captura Guardada</p>
                   <div className="flex flex-col sm:flex-row gap-2 justify-center items-center">
-                    <a href={linkWaReciente} target="_blank" rel="noopener noreferrer" className="bg-green-600 hover:bg-green-500 text-white font-black px-4 py-2 rounded-lg text-[9px] md:text-[10px] uppercase tracking-widest transition-all shadow-md w-full sm:w-auto">
+                    <a href={captura.linkWaReciente} target="_blank" rel="noopener noreferrer" className="bg-green-600 hover:bg-green-500 text-white font-black px-4 py-2 rounded-lg text-[9px] md:text-[10px] uppercase tracking-widest transition-all shadow-md w-full sm:w-auto">
                       📲 Enviar WhatsApp
                     </a>
-                    <button onClick={() => window.print()} className="bg-white hover:bg-slate-200 text-green-950 font-black px-4 py-2 rounded-lg text-[9px] md:text-[10px] uppercase tracking-widest transition-all shadow-md w-full sm:w-auto">
-                      🖨️ Imprimir Recibo
+                    <button onClick={() => { setFormatoImpresion('A4'); setTimeout(() => window.print(), 100); }} className="bg-white hover:bg-slate-200 text-green-950 font-black px-4 py-2 rounded-lg text-[9px] md:text-[10px] uppercase tracking-widest transition-all shadow-md w-full sm:w-auto">
+                      🖨️ Recibo A4
+                    </button>
+                    <button onClick={() => { setFormatoImpresion('termica'); setTimeout(() => window.print(), 100); }} className="bg-slate-800 hover:bg-slate-700 text-white font-black px-4 py-2 rounded-lg text-[9px] md:text-[10px] uppercase tracking-widest transition-all shadow-md border border-slate-600 w-full sm:w-auto">
+                      🧾 Ticket Térmico
                     </button>
                   </div>
-                  <button onClick={() => { setLinkWaReciente(null); setTicketAImprimir(null); }} className="block mx-auto mt-3 text-[9px] text-slate-500 hover:text-slate-300 font-bold uppercase tracking-widest underline">Nueva Captura</button>
+                  <button onClick={() => { captura.setLinkWaReciente(null); captura.setTicketAImprimir(null); setFormatoImpresion(null); }} className="block mx-auto mt-3 text-[9px] text-slate-500 hover:text-slate-300 font-bold uppercase tracking-widest underline">Nueva Captura</button>
                 </div>
               )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5 bg-slate-950/40 p-3 rounded-xl border border-slate-800/50">
                 <div>
                   <label className="text-[9px] md:text-[10px] text-amber-500/80 font-bold uppercase tracking-widest mb-1.5 block">WhatsApp</label>
-                  <input type="text" placeholder="10 dígitos..." value={capTelefono} onChange={(e) => buscarClienteParaCaptura(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-white outline-none focus:border-amber-500 font-mono text-sm transition-all placeholder:text-slate-600" />
+                  <input type="text" placeholder="10 dígitos..." value={captura.capTelefono} onChange={(e) => captura.buscarClienteParaCaptura(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-white outline-none focus:border-amber-500 font-mono text-sm transition-all placeholder:text-slate-600" />
                 </div>
                 <div>
                   <label className="text-[9px] md:text-[10px] text-amber-500/80 font-bold uppercase tracking-widest mb-1.5 block">Nombre del Cliente</label>
-                  <input type="text" placeholder="Ej. Juan Pérez" value={capNombre} onChange={(e) => setCapNombre(e.target.value)} className={`w-full bg-slate-900 border rounded-lg px-3 py-2.5 text-white outline-none font-bold uppercase text-xs transition-all placeholder:text-slate-600 ${capUsuarioId ? 'border-green-900/50 text-green-400' : 'border-slate-700 focus:border-amber-500'}`} disabled={capUsuarioId !== null} />
+                  <input type="text" placeholder="Ej. Juan Pérez" value={captura.capNombre} onChange={(e) => captura.setCapNombre(e.target.value)} className={`w-full bg-slate-900 border rounded-lg px-3 py-2.5 text-white outline-none font-bold uppercase text-xs transition-all placeholder:text-slate-600 ${captura.capUsuarioId ? 'border-green-900/50 text-green-400' : 'border-slate-700 focus:border-amber-500'}`} disabled={captura.capUsuarioId !== null} />
                 </div>
               </div>
               
               <div className="space-y-1.5 mb-5">
-                {(partidos || []).map((p) => {
+                {(captura.partidos || []).map((p) => {
                   const logoL = obtenerLogo(p.equipo_local)
                   const logoV = obtenerLogo(p.equipo_visitante)
                   
@@ -483,7 +280,7 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                       
                       <div className="w-full sm:w-[110px] flex gap-1 shrink-0">
                         {['L', 'E', 'V'].map(opc => (
-                          <button key={opc} onClick={() => seleccionarOpcionCaptura(p.id, opc)} className={`flex-1 py-1.5 rounded text-[10px] md:text-xs font-black border transition-all ${capSelecciones[p.id] === opc ? 'bg-amber-500 border-amber-400 text-slate-900 shadow-inner' : 'bg-slate-900 border-slate-700 text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}>{opc}</button>
+                          <button key={opc} onClick={() => captura.setCapSelecciones({ ...captura.capSelecciones, [p.id]: opc })} className={`flex-1 py-1.5 rounded text-[10px] md:text-xs font-black border transition-all ${captura.capSelecciones[p.id] === opc ? 'bg-amber-500 border-amber-400 text-slate-900 shadow-inner' : 'bg-slate-900 border-slate-700 text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}>{opc}</button>
                         ))}
                       </div>
                     </div>
@@ -494,10 +291,10 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
               <div className="flex flex-col md:flex-row gap-3 items-center justify-between border-t border-amber-900/30 pt-4">
                 <div className="w-full md:w-[150px] bg-slate-950/40 p-2 rounded-xl border border-slate-800 flex items-center gap-2">
                   <label className="text-[8px] md:text-[9px] text-amber-500 font-bold uppercase tracking-widest leading-tight">Total Goles:</label>
-                  <input type="number" placeholder="00" value={capGoles} onChange={(e) => setCapGoles(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-center text-lg font-black text-white focus:border-amber-500 outline-none transition-all" />
+                  <input type="number" placeholder="00" value={captura.capGoles} onChange={(e) => captura.setCapGoles(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-center text-lg font-black text-white focus:border-amber-500 outline-none transition-all" />
                 </div>
-                <button onClick={guardarCapturaFisica} disabled={guardandoCaptura} className={`w-full md:w-auto flex-1 py-3 px-4 rounded-xl font-black uppercase text-[10px] md:text-xs tracking-widest transition-all shadow-lg ${guardandoCaptura ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700' : 'bg-amber-500 hover:bg-amber-400 text-slate-900 shadow-amber-900/20 active:scale-95'}`}>
-                  {guardandoCaptura ? 'Procesando...' : '💾 Guardar Ticket'}
+                <button onClick={captura.guardarCapturaFisica} disabled={captura.guardandoCaptura} className={`w-full md:w-auto flex-1 py-3 px-4 rounded-xl font-black uppercase text-[10px] md:text-xs tracking-widest transition-all shadow-lg ${captura.guardandoCaptura ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700' : 'bg-amber-500 hover:bg-amber-400 text-slate-900 shadow-amber-900/20 active:scale-95'}`}>
+                  {captura.guardandoCaptura ? 'Procesando...' : '💾 Guardar Ticket'}
                 </button>
               </div>
             </div>
@@ -505,47 +302,50 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
         </div>
       )}
 
-      {/* --- ESTILOS DE IMPRESIÓN FULL-PAGE --- */}
-      <style>{`
-        @media print {
-          @page { margin: 0mm; size: letter; }
-          body { background: white; margin: 0; padding: 0; }
-          body * { visibility: hidden !important; }
-          .zona-impresion, .zona-impresion * { visibility: visible !important; }
-          .zona-impresion { 
-            position: absolute !important; 
-            left: 0 !important; 
-            top: 0 !important; 
-            width: 100% !important; 
-            height: 100% !important;
-            margin: 0 !important; 
-            padding: 15px !important; 
-            box-sizing: border-box !important;
-            background-color: white !important;
+      {/* --- ESTILOS DE IMPRESIÓN DINÁMICOS --- */}
+      {formatoImpresion && (
+        <style>{`
+          @media print {
+            /* 🔥 CLAVE: size: auto permite que la impresora térmica corte donde termina el contenido */
+            @page { margin: 0; size: auto; }
+            body { background: white; margin: 0; padding: 0; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            body * { visibility: hidden !important; }
+            .zona-impresion, .zona-impresion * { visibility: visible !important; }
+            .zona-impresion { 
+              position: absolute !important; 
+              left: 0 !important; 
+              top: 0 !important; 
+              width: 100% !important; 
+              margin: 0 !important; 
+              background-color: white !important;
+            }
+            /* Clases específicas para no desperdiciar papel */
+            .impresion-a4 { padding: 15px !important; }
+            .impresion-termica { max-width: 80mm !important; margin: 0 auto !important; padding: 2mm !important; font-family: monospace !important; }
           }
-        }
-      `}</style>
+        `}</style>
+      )}
 
-      {/* TICKET GIGANTE PARA IMPRESIÓN/CAPTURA */}
-      {quiniela && ticketAImprimir && (
-        <div className="hidden print:flex print:flex-col print:items-center print:w-full print:h-full print:bg-white print:text-black zona-impresion z-[99999]">
-          <div className="w-full h-full border-4 border-black rounded-3xl p-6 bg-white flex flex-col justify-between">
+      {/* 1. DISEÑO TICKET A4 (El que simula el boleto físico) */}
+      {captura.quiniela && captura.ticketAImprimir && formatoImpresion === 'A4' && (
+        <div className="hidden print:flex print:flex-col print:items-center print:w-full print:bg-white print:text-black zona-impresion impresion-a4 z-[99999]">
+          <div className="w-full max-w-3xl border-4 border-black rounded-3xl p-6 bg-white flex flex-col mx-auto my-4">
             <div>
               <div className="text-center mb-6">
                 <h1 className="font-black text-4xl uppercase tracking-widest text-blue-900">CIBERTEQUE</h1>
                 <p className="text-lg font-bold uppercase tracking-widest border-b-4 border-blue-900 inline-block pb-1 mt-2 text-blue-900">RECIBO DE JUGADA</p>
-                <div className="mt-4 text-sm font-black uppercase bg-blue-900 text-white py-2 px-4 rounded-lg inline-block">Cierre: {formatearFechaLocal(quiniela.fecha_cierre)}</div>
+                <div className="mt-4 text-sm font-black uppercase bg-blue-900 text-white py-2 px-4 rounded-lg inline-block">Cierre: {formatearFechaLocal(captura.quiniela.fecha_cierre)}</div>
               </div>
-              <h2 className="text-center font-black text-2xl uppercase mb-6 bg-amber-400 py-2 border-y-4 border-black text-black">{quiniela.nombre_jornada}</h2>
+              <h2 className="text-center font-black text-2xl uppercase mb-6 bg-amber-400 py-2 border-y-4 border-black text-black">{captura.quiniela.nombre_jornada}</h2>
               
               <div className="mb-6 space-y-3">
                 <div className="flex justify-between items-end border-b-2 border-black border-dashed pb-2">
                   <span className="font-bold text-lg uppercase">Nombre:</span>
-                  <span className="font-black text-xl uppercase">{ticketAImprimir.nombre}</span>
+                  <span className="font-black text-xl uppercase">{captura.ticketAImprimir.nombre}</span>
                 </div>
                 <div className="flex justify-between items-end border-b-2 border-black border-dashed pb-2">
                   <span className="font-bold text-lg uppercase">WhatsApp:</span>
-                  <span className="font-black text-xl uppercase">{ticketAImprimir.telefono}</span>
+                  <span className="font-black text-xl uppercase">{captura.ticketAImprimir.telefono}</span>
                 </div>
               </div>
               
@@ -560,7 +360,7 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                   </tr>
                 </thead>
                 <tbody>
-                  {(partidos || []).map((p) => {
+                  {(captura.partidos || []).map((p) => {
                     const logoL = obtenerLogo(p.equipo_local)
                     const logoV = obtenerLogo(p.equipo_visitante)
                     return (
@@ -571,9 +371,9 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                             {logoL ? <img src={logoL} alt="" className="w-6 h-6 object-contain" /> : <div className="w-5 h-5 rounded-full border-2 border-black flex items-center justify-center text-[8px]">?</div>}
                           </div>
                         </td>
-                        <td className="border-4 border-black p-1 text-center font-black text-xl text-blue-800">{ticketAImprimir.selecciones[p.id] === 'L' ? 'X' : ''}</td>
-                        <td className="border-4 border-black p-1 text-center font-black text-xl text-blue-800">{ticketAImprimir.selecciones[p.id] === 'E' ? 'X' : ''}</td>
-                        <td className="border-4 border-black p-1 text-center font-black text-xl text-blue-800">{ticketAImprimir.selecciones[p.id] === 'V' ? 'X' : ''}</td>
+                        <td className="border-4 border-black p-1 text-center font-black text-xl text-blue-800">{captura.ticketAImprimir.selecciones[p.id] === 'L' ? 'X' : ''}</td>
+                        <td className="border-4 border-black p-1 text-center font-black text-xl text-blue-800">{captura.ticketAImprimir.selecciones[p.id] === 'E' ? 'X' : ''}</td>
+                        <td className="border-4 border-black p-1 text-center font-black text-xl text-blue-800">{captura.ticketAImprimir.selecciones[p.id] === 'V' ? 'X' : ''}</td>
                         <td className="border-4 border-black p-2 text-left overflow-hidden bg-gray-50">
                           <div className="flex items-center justify-start gap-2">
                             {logoV ? <img src={logoV} alt="" className="w-6 h-6 object-contain" /> : <div className="w-5 h-5 rounded-full border-2 border-black flex items-center justify-center text-[8px]">?</div>}
@@ -588,15 +388,57 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
               
               <div className="border-4 border-black p-4 text-center rounded-2xl bg-gray-100 mt-6 flex justify-between items-center px-6">
                 <span className="font-bold uppercase text-sm">Desempate (Goles):</span>
-                <span className="font-black text-3xl">{ticketAImprimir.goles}</span>
+                <span className="font-black text-3xl">{captura.ticketAImprimir.goles}</span>
               </div>
-              <p className="text-center text-sm font-bold uppercase mt-6 text-blue-900">Costo del Boleto: {quiniela.precio_ticket ?? 1} {(quiniela.precio_ticket ?? 1) === 1 ? 'Crédito' : 'Créditos'}</p>
+              <p className="text-center text-sm font-bold uppercase mt-6 text-blue-900">Costo del Boleto: {captura.quiniela.precio_ticket ?? 1} {(captura.quiniela.precio_ticket ?? 1) === 1 ? 'Crédito' : 'Créditos'}</p>
             </div>
             
             <div className="mt-6 pt-6 border-t-2 border-black border-dashed">
               <p className="text-[9px] text-justify leading-tight font-bold uppercase text-black"><b>REGLAMENTO:</b> 1. PAGO ANTICIPADO: Boleto pagado antes del 1er partido. 2. CORRECCIONES: Revise su jugada, cambios SOLO ANTES de la hora de cierre. Iniciada la jornada participa tal cual. 3. SUSPENDIDOS/APLAZADOS: Si ya inició vale el marcador en ese momento; si no inició, se declara Empate a 0. 4. RESULTADOS: Válidos a los 90 min (sin extras).</p>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* 2. DISEÑO TICKET TÉRMICO (Ahorra papel, minimalista) */}
+      {captura.quiniela && captura.ticketAImprimir && formatoImpresion === 'termica' && (
+        <div className="hidden print:block print:bg-white print:text-black text-black zona-impresion impresion-termica z-[99999]">
+          <div className="text-center font-black text-xl leading-none">CIBERTEQUE</div>
+          <div className="text-center text-[10px] mb-2 uppercase">Pronósticos Deportivos</div>
+          
+          <div className="text-center font-bold text-sm mb-2 uppercase border-y border-dashed border-black py-1">
+            {captura.quiniela.nombre_jornada}
+          </div>
+          
+          <div className="text-xs mb-2 leading-tight">
+            <div><span className="font-bold">Jugador:</span> {captura.ticketAImprimir.nombre}</div>
+            <div><span className="font-bold">Cel:</span> {captura.ticketAImprimir.telefono}</div>
+            <div><span className="font-bold">Fecha:</span> {new Date().toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })}</div>
+          </div>
+          
+          <table className="w-full text-left text-xs mb-2 border-collapse">
+            <thead>
+              <tr className="border-b border-black">
+                <th className="pb-1 font-bold">Partido</th>
+                <th className="pb-1 text-right font-bold">Pick</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(captura.partidos || []).map((p, i) => (
+                <tr key={p.id} className="border-b border-dashed border-gray-400">
+                  <td className="py-1 pr-1 truncate max-w-[50mm]">{i+1}. {p.equipo_local.substring(0,8)} v {p.equipo_visitante.substring(0,8)}</td>
+                  <td className="py-1 text-right font-black text-sm">{captura.ticketAImprimir.selecciones[p.id]}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          
+          <div className="text-center font-black text-sm py-2 border-b border-dashed border-black mb-2">
+            Desempate: {captura.ticketAImprimir.goles} Goles
+          </div>
+          
+          <div className="text-center text-[10px] font-bold">¡Conserva este recibo!</div>
+          <div className="text-center text-[9px] mt-1">ciberteque-quiniela.vercel.app</div>
         </div>
       )}
     </>

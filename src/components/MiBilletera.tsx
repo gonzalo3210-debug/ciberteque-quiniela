@@ -1,62 +1,12 @@
 'use client'
-import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { useBilletera } from '@/hooks/useBilletera'
 
 export default function MiBilletera({ usuarioId }: { usuarioId: string }) {
-  const [saldo, setSaldo] = useState<number>(0)
-  const [saldoPesos, setSaldoPesos] = useState<number>(0) 
-  const [transacciones, setTransacciones] = useState<any[]>([])
-  const [cargando, setCargando] = useState(true)
+  // 🧠 Consumimos la lógica separada
+  const { saldo, saldoPesos, transacciones, cargando, error } = useBilletera(usuarioId)
 
   // ⚙️ CONSTANTE MONETARIA DE CIBERTEQUE
   const VALOR_CREDITO = 30 // $30 MXN por crédito
-
-  useEffect(() => {
-    if (!usuarioId) {
-      setCargando(false)
-      return
-    }
-
-    async function cargarBilletera() {
-      setCargando(true)
-      
-      // 1. Traer el saldo de créditos Y el saldo en pesos
-      const { data: userData } = await supabase
-        .from('usuarios')
-        .select('creditos_disponibles, saldo_pesos')
-        .eq('id', usuarioId)
-        .single()
-        
-      if (userData) {
-        setSaldo(userData.creditos_disponibles || 0)
-        setSaldoPesos(userData.saldo_pesos || 0) 
-      }
-
-      // 2. Traer el historial de movimientos (últimos 30)
-      const { data: txData } = await supabase
-        .from('transacciones_creditos')
-        .select('*')
-        .eq('usuario_id', usuarioId)
-        .order('created_at', { ascending: false })
-        .limit(30)
-
-      if (txData) {
-        setTransacciones(txData)
-      }
-      
-      setCargando(false)
-    }
-
-    cargarBilletera()
-  }, [usuarioId])
-
-  if (cargando) {
-    return <div className="text-amber-500 animate-pulse text-center mt-10 font-bold uppercase tracking-widest text-xs">Cargando Billetera...</div>
-  }
-
-  if (!usuarioId) {
-    return <div className="text-slate-500 italic text-center mt-10 font-bold uppercase text-xs">Inicia sesión para ver tu billetera.</div>
-  }
 
   const interpretarTransaccion = (tipo: string, descripcion: string) => {
     switch (tipo) {
@@ -74,6 +24,40 @@ export default function MiBilletera({ usuarioId }: { usuarioId: string }) {
     return fecha.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
   }
 
+  // 🛑 ESTADO: Sin Usuario
+  if (!usuarioId) {
+    return <div className="text-slate-500 italic text-center mt-10 font-bold uppercase text-xs">Inicia sesión para ver tu billetera.</div>
+  }
+
+  // ❌ ESTADO: Error de red
+  if (error) {
+    return (
+      <div className="w-full max-w-2xl mx-auto mt-10 bg-red-950/30 border border-red-900/50 rounded-2xl p-6 text-center animate-in fade-in">
+        <span className="text-4xl mb-2 block">⚠️</span>
+        <h3 className="text-red-500 font-black uppercase tracking-widest text-sm mb-1">Fallo de Conexión</h3>
+        <p className="text-red-400/80 text-xs font-bold uppercase">{error}</p>
+      </div>
+    )
+  }
+
+  // ⏳ ESTADO: Cargando (Skeleton Loader)
+  if (cargando) {
+    return (
+      <div className="w-full max-w-2xl mx-auto mt-2 space-y-4 animate-pulse">
+        {/* Skeleton Tarjeta Principal */}
+        <div className="bg-slate-900 border border-slate-800 h-40 md:h-48 rounded-3xl w-full"></div>
+        {/* Skeleton Historial */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-3">
+          <div className="h-6 bg-slate-800 rounded w-1/3 mb-4"></div>
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="h-16 bg-slate-800/50 rounded-xl w-full border border-slate-800"></div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  // ✅ ESTADO: Renderizado Exitoso
   return (
     <div className="w-full max-w-2xl mx-auto mt-2 animate-in fade-in duration-500 mb-20 space-y-4">
       

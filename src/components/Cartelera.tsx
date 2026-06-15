@@ -1,185 +1,24 @@
 'use client'
-import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { useState } from 'react'
+import { useCartelera } from '@/hooks/useCartelera'
 
 export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioActivo: any, actualizarSaldo: (nuevoSaldo: number) => void }) {
-  const [quinielasActivas, setQuinielasActivas] = useState<any[]>([])
-  const [quinielaActual, setQuinielaActual] = useState<any>(null)
-  const [partidos, setPartidos] = useState<any[]>([])
-  const [equiposInfo, setEquiposInfo] = useState<any[]>([])
-  const [selecciones, setSelecciones] = useState<Record<string, string>>({})
-  const [cargando, setCargando] = useState(true)
-  const [guardando, setGuardando] = useState(false)
-  const [golesTotales, setGolesTotales] = useState<string>('')
-  
-  const [estaCerrada, setEstaCerrada] = useState(false)
-  const [motivoCierre, setMotivoCierre] = useState('')
+  // 🔥 Consumiendo nuestro Custom Hook (Modularidad Estricta)
+  const {
+    cargando, quinielasActivas, quinielaActual, partidos, selecciones, golesTotales,
+    guardando, estaCerrada, motivoCierre, mostrarReglas, aceptoReglas,
+    esGratis, bloqueadoPorParticipacion, setGolesTotales, setMostrarReglas,
+    setAceptoReglas, cambiarQuinielaVisible, seleccionarOpcion, guardarQuiniela, obtenerLogo
+  } = useCartelera(usuarioActivo, actualizarSaldo)
 
-  // 🔥 ESTADOS PARA REGLAMENTO Y RESTRICCIONES
-  const [mostrarReglas, setMostrarReglas] = useState(false) 
-  const [aceptoReglas, setAceptoReglas] = useState(false) 
-  const [yaParticipo, setYaParticipo] = useState(false) 
-
-  useEffect(() => {
-    async function cargarJornadas() {
-      const { data: qData } = await supabase
-        .from('quinielas')
-        .select(`
-          id, nombre_jornada, precio_ticket, fecha_cierre, tipo_premiacion,
-          partidos (id, equipo_local, equipo_visitante, fecha_hora, resultado_real)
-        `)
-        .eq('estado', 'abierta')
-        .order('fecha_cierre', { ascending: true }) 
-
-      const { data: eData } = await supabase.from('equipos').select('*')
-
-      if (qData && qData.length > 0) {
-        setQuinielasActivas(qData)
-        await cambiarQuinielaVisible(qData[0]) 
-      }
-      if (eData) {
-        setEquiposInfo(eData)
-      }
-      setCargando(false)
-    }
-    cargarJornadas()
-  }, [])
+  // 🔥 NUEVO: Estado para notificaciones elegantes en la UI (Adiós a los alerts)
+  const [mensajeUI, setMensajeUI] = useState({ tipo: '', texto: '' })
 
   const formatearFechaLocal = (fechaDB: string) => {
     if (!fechaDB) return '';
     const fechaCorta = fechaDB.substring(0, 16);
     const d = new Date(fechaCorta);
     return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: true}).toUpperCase()}`;
-  }
-
-  const cambiarQuinielaVisible = async (quiniela: any) => {
-    setQuinielaActual(quiniela)
-    
-    // 🔥 ACOMODAR PARTIDOS POR FECHA Y HORA (Orden Cronológico)
-    const partidosAcomodados = [...(quiniela.partidos || [])].sort((a: any, b: any) => {
-      if (!a.fecha_hora) return 1;
-      if (!b.fecha_hora) return -1;
-      return new Date(a.fecha_hora).getTime() - new Date(b.fecha_hora).getTime();
-    });
-    
-    setPartidos(partidosAcomodados)
-    setSelecciones({}) 
-    setGolesTotales('')
-    setAceptoReglas(false) 
-
-    const fechaCierreCorta = quiniela.fecha_cierre ? quiniela.fecha_cierre.substring(0, 16) : null
-    const fechaCierre = new Date(fechaCierreCorta || quiniela.fecha_cierre)
-    const ahora = new Date()
-    const yaPasoLaHora = ahora > fechaCierre
-    const yaHayResultados = quiniela.partidos.some((p: any) => p.resultado_real !== null)
-
-    if (yaHayResultados) {
-      setEstaCerrada(true)
-      setMotivoCierre('Esta jornada ya cerró porque los resultados oficiales están siendo procesados.')
-    } else if (yaPasoLaHora) {
-      setEstaCerrada(true)
-      setMotivoCierre('El tiempo límite para participar en esta jornada ha terminado.')
-    } else {
-      setEstaCerrada(false)
-      setMotivoCierre('')
-    }
-
-    const { data: ticketsPrevios } = await supabase
-      .from('tickets')
-      .select('id')
-      .eq('usuario_id', usuarioActivo.id)
-      .eq('quiniela_id', quiniela.id)
-
-    setYaParticipo(ticketsPrevios && ticketsPrevios.length > 0 ? true : false)
-  }
-
-  const esGratis = quinielaActual?.precio_ticket === 0;
-  const bloqueadoPorParticipacion = esGratis && yaParticipo;
-
-  const seleccionarOpcion = (partidoId: string, opcion: string) => {
-    if (estaCerrada || bloqueadoPorParticipacion) return 
-    setSelecciones({ ...selecciones, [partidoId]: opcion })
-  }
-
-  const guardarQuiniela = async () => {
-    if (estaCerrada) return alert('La jornada está cerrada.')
-    if (bloqueadoPorParticipacion) return alert('Solo se permite 1 participación por usuario en quinielas gratuitas.')
-    if (!aceptoReglas) return alert('Debes leer y aceptar el reglamento oficial para enviar tu boleto.')
-    if (golesTotales === '') {
-      alert('¡Falta información! Por favor, anota el total de goles para el desempate.')
-      return
-    }
-
-    const costoTicket = quinielaActual?.precio_ticket || 0
-
-    if (costoTicket > 0 && usuarioActivo.creditos_disponibles < costoTicket) {
-      alert('No tienes créditos suficientes. Pasa a mostrador para recargar.')
-      return
-    }
-
-    setGuardando(true)
-
-    const seleccionesFinales = { ...selecciones }
-    partidos.forEach(p => {
-      if (!seleccionesFinales[p.id]) {
-        seleccionesFinales[p.id] = 'E' 
-      }
-    })
-
-    try {
-      const { data: ticketData, error: ticketError } = await supabase
-        .from('tickets')
-        .insert([{ 
-          usuario_id: usuarioActivo.id, 
-          quiniela_id: quinielaActual.id, 
-          metodo_ingreso: 'digital',
-          prediccion_goles_total: parseInt(golesTotales) || 0
-        }])
-        .select().single()
-
-      if (ticketError) throw ticketError
-
-      const pronosticosAGuardar = Object.keys(seleccionesFinales).map(partidoId => ({
-        ticket_id: ticketData.id,
-        partido_id: partidoId,
-        eleccion_usuario: seleccionesFinales[partidoId]
-      }))
-
-      await supabase.from('pronosticos').insert(pronosticosAGuardar)
-
-      if (costoTicket > 0) {
-        const nuevoSaldo = usuarioActivo.creditos_disponibles - costoTicket
-        await supabase.from('usuarios').update({ creditos_disponibles: nuevoSaldo }).eq('id', usuarioActivo.id)
-
-        await supabase.from('transacciones_creditos').insert([{
-          usuario_id: usuarioActivo.id,
-          cantidad: -costoTicket,
-          tipo_movimiento: 'juego_ticket',
-          descripcion: `Ticket ${quinielaActual.nombre_jornada}`
-        }])
-        actualizarSaldo(nuevoSaldo)
-      }
-
-      setSelecciones({}) 
-      setGolesTotales('')
-      setAceptoReglas(false)
-      
-      if (esGratis) setYaParticipo(true)
-
-      alert('¡Jugada guardada con éxito! Los partidos sin marcar se guardaron como Empate.')
-
-    } catch (error) {
-      console.error(error)
-      alert('Error al guardar la jugada.')
-    } finally {
-      setGuardando(false)
-    }
-  }
-
-  const obtenerLogo = (nombreEquipo: string) => {
-    if (!nombreEquipo) return null;
-    const equipo = equiposInfo.find(e => e.nombre.toLowerCase().trim() === nombreEquipo.toLowerCase().trim())
-    return equipo?.logo_url || null
   }
 
   const formatearFechaObj = (fechaStr: string) => {
@@ -192,7 +31,65 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
     } catch { return null; }
   }
 
-  if (cargando) return <div className="text-blue-400 animate-pulse text-center mt-10 font-bold uppercase text-xs">Cargando...</div>
+  const handleGuardar = async () => {
+    setMensajeUI({ tipo: '', texto: '' }) // Limpiamos mensajes previos al intentar guardar
+    const resultado = await guardarQuiniela();
+    
+    if (resultado?.error) {
+      setMensajeUI({ tipo: 'error', texto: resultado.error });
+    } else if (resultado?.success) {
+      setMensajeUI({ tipo: 'exito', texto: resultado.success });
+    }
+  }
+
+  // 🔥 NUEVO: Skeleton Loader (Mejora de UX visual)
+  if (cargando) {
+    return (
+      <div className="w-full max-w-4xl mt-2 mb-20 animate-pulse space-y-4">
+        {/* Skeleton Selector de Jornadas */}
+        <div className="flex justify-center gap-2 mb-4">
+          <div className="h-8 w-24 bg-slate-800 rounded-xl"></div>
+          <div className="h-8 w-24 bg-slate-800 rounded-xl"></div>
+        </div>
+
+        {/* Skeleton Contenedor Principal del Ticket */}
+        <div className="bg-slate-900/50 p-4 md:p-6 rounded-2xl border border-slate-800 shadow-2xl">
+          
+          {/* Skeleton Cabecera */}
+          <div className="flex flex-col items-center mb-6 border-b border-slate-800 pb-4 space-y-3">
+             <div className="h-8 w-3/4 md:w-1/2 bg-slate-800 rounded-lg"></div>
+             <div className="flex gap-2">
+               <div className="h-6 w-20 bg-slate-800 rounded-lg"></div>
+               <div className="h-6 w-32 bg-slate-800 rounded-lg"></div>
+             </div>
+             <div className="h-6 w-40 bg-slate-800 rounded-lg mt-2"></div>
+          </div>
+
+          {/* Skeleton Lista de Partidos (Simulamos 5 partidos) */}
+          <div className="space-y-3">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="bg-slate-800/40 h-[100px] md:h-16 rounded-lg border border-slate-700/50 flex flex-col md:flex-row items-center px-4 py-2 gap-4">
+                
+                {/* Horario Skeleton */}
+                <div className="hidden md:block h-10 w-16 bg-slate-700/50 rounded shrink-0"></div>
+                
+                {/* Equipos Skeleton */}
+                <div className="flex-1 w-full flex justify-between items-center gap-4">
+                   <div className="h-4 w-20 bg-slate-700/50 rounded"></div>
+                   <div className="h-4 w-4 bg-slate-700/50 rounded-full shrink-0"></div>
+                   <div className="h-4 w-20 bg-slate-700/50 rounded"></div>
+                </div>
+                
+                {/* Botones Skeleton */}
+                <div className="w-full md:w-[130px] h-8 md:h-10 bg-slate-700/50 rounded shrink-0 mt-2 md:mt-0"></div>
+              </div>
+            ))}
+          </div>
+
+        </div>
+      </div>
+    )
+  }
   if (!quinielaActual) return <div className="text-slate-500 italic text-center mt-10 text-sm">No hay quinielas abiertas actualmente.</div>
 
   const prem = quinielaActual.tipo_premiacion || 'unico';
@@ -206,7 +103,10 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
           {quinielasActivas.map(q => (
             <button
               key={q.id}
-              onClick={() => cambiarQuinielaVisible(q)}
+              onClick={() => {
+                setMensajeUI({ tipo: '', texto: '' }); // Limpiamos mensaje al cambiar jornada
+                cambiarQuinielaVisible(q);
+              }}
               className={`px-4 py-2 rounded-xl text-[10px] md:text-xs font-black uppercase tracking-wider transition-all ${
                 quinielaActual.id === q.id 
                 ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.4)] scale-105' 
@@ -302,7 +202,10 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
                     {['L', 'E', 'V'].map((opc) => (
                       <button 
                         key={opc}
-                        onClick={() => seleccionarOpcion(partido.id, opc)}
+                        onClick={() => {
+                          setMensajeUI({ tipo: '', texto: '' }); // Limpiar mensaje si el usuario empieza a corregir
+                          seleccionarOpcion(partido.id, opc);
+                        }}
                         disabled={estaCerrada || bloqueadoPorParticipacion}
                         className={`flex-1 py-1.5 md:py-2 rounded text-xs font-black transition-all border shadow-sm ${
                           seleccion === opc 
@@ -328,7 +231,10 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
             type="number"
             placeholder="00"
             value={golesTotales}
-            onChange={(e) => setGolesTotales(e.target.value)}
+            onChange={(e) => {
+              setMensajeUI({ tipo: '', texto: '' }); // Limpiar mensaje al escribir goles
+              setGolesTotales(e.target.value);
+            }}
             disabled={estaCerrada || bloqueadoPorParticipacion}
             className={`w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-3 text-center text-3xl font-black text-white focus:border-blue-500 outline-none transition-all ${(estaCerrada || bloqueadoPorParticipacion) ? 'cursor-not-allowed text-slate-500' : ''}`}
           />
@@ -339,7 +245,10 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
             type="checkbox" 
             id="check-reglas" 
             checked={aceptoReglas} 
-            onChange={(e) => setAceptoReglas(e.target.checked)} 
+            onChange={(e) => {
+              setMensajeUI({ tipo: '', texto: '' }); // Limpiar mensaje al aceptar reglas
+              setAceptoReglas(e.target.checked);
+            }} 
             disabled={estaCerrada || bloqueadoPorParticipacion} 
             className={`mt-0.5 w-3.5 h-3.5 accent-green-600 rounded border-slate-700 bg-slate-900 cursor-pointer ${(estaCerrada || bloqueadoPorParticipacion) ? 'cursor-not-allowed opacity-50' : ''}`} 
           />
@@ -348,9 +257,18 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
           </label>
         </div>
 
+        {/* 🔥 ZONA DE MENSAJES UI */}
+        {mensajeUI.texto && (
+          <div className={`mb-4 mx-auto max-w-sm text-center text-[10px] font-bold uppercase tracking-wider py-2.5 px-4 rounded-xl border animate-in zoom-in-95 ${
+            mensajeUI.tipo === 'error' ? 'bg-red-950/30 border-red-900/50 text-red-400' : 'bg-green-950/30 border-green-900/50 text-green-400'
+          }`}>
+            {mensajeUI.texto}
+          </div>
+        )}
+
         <div className="flex flex-col items-center pt-2 border-t border-slate-800 z-10 relative">
           <button 
-            onClick={guardarQuiniela}
+            onClick={handleGuardar}
             disabled={guardando || estaCerrada || !aceptoReglas || bloqueadoPorParticipacion}
             className={`w-full max-w-[280px] py-3 md:py-4 rounded-xl font-black uppercase text-xs tracking-widest transition-all ${
               bloqueadoPorParticipacion 
@@ -374,7 +292,6 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
               <button onClick={() => setMostrarReglas(false)} className="text-slate-500 hover:text-slate-300 font-bold font-mono text-lg">✕</button>
             </div>
             
-            {/* CONTENEDOR CON SCROLL ULTRA COMPACTO */}
             <div className="space-y-3.5 text-[10px] md:text-xs text-slate-300 font-medium leading-relaxed uppercase tracking-wide max-h-[300px] md:max-h-[380px] overflow-y-auto pr-1">
               <div>
                 <strong className="text-blue-400 block mb-0.5">1️⃣ Cierre y Correcciones:</strong>

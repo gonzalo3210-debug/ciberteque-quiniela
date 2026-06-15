@@ -8,16 +8,22 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
   const [equipos, setEquipos] = useState<any[]>([])
   const [cargando, setCargando] = useState(true)
   
-  // 🔥 NUEVO ESTADO PARA CONTROLAR LAS PESTAÑAS
   const [vistaActual, setVistaActual] = useState<'activas' | 'historial'>('activas')
 
-  useEffect(() => {
-    async function cargarHistorial() {
-      // 1. Traemos los equipos para sacar los logos
+  // 🔥 ESTADOS PARA EL MODAL DE EDICIÓN
+  const [ticketEditando, setTicketEditando] = useState<any>(null)
+  const [nuevasSelecciones, setNuevasSelecciones] = useState<Record<string, string>>({})
+  const [nuevosGoles, setNuevosGoles] = useState<number | ''>('')
+  const [guardandoEdicion, setGuardandoEdicion] = useState(false)
+
+  // 1. Extraemos la función de carga para poder llamarla al guardar ediciones
+  const cargarHistorial = async () => {
+    setCargando(true)
+    try {
       const { data: eqData } = await supabase.from('equipos').select('nombre, logo_url')
       if (eqData) setEquipos(eqData)
 
-      // 2. Traemos todos los tickets del usuario
+      // 🔥 MODIFICACIÓN: Solicitamos el "id" del pronóstico para hacer el UPDATE
       const { data, error } = await supabase
         .from('tickets')
         .select(`
@@ -25,8 +31,9 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
           fecha_creacion,
           puntos_totales,
           prediccion_goles_total,
-          quinielas (id, nombre_jornada, goles_totales_real, estado),
+          quinielas (id, nombre_jornada, goles_totales_real, estado, fecha_cierre),
           pronosticos (
+            id,
             eleccion_usuario,
             partidos (id, equipo_local, equipo_visitante, resultado_real, fecha_hora)
           )
@@ -41,12 +48,17 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
         setGruposActivos(agruparTicketsPorQuiniela(activos))
         setGruposCompletados(agruparTicketsPorQuiniela(completados))
       }
+    } catch (error) {
+      console.error("Error cargando jugadas:", error)
+    } finally {
       setCargando(false)
     }
+  }
+
+  useEffect(() => {
     cargarHistorial()
   }, [usuarioId])
 
-  // LÓGICA DE AGRUPACIÓN (Intacta)
   const agruparTicketsPorQuiniela = (ticketsArray: any[]) => {
     const grupos: Record<string, any> = {};
     
@@ -58,6 +70,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
           nombre_jornada: ticket.quinielas?.nombre_jornada,
           estado: ticket.quinielas?.estado,
           goles_reales: ticket.quinielas?.goles_totales_real,
+          fecha_cierre: ticket.quinielas?.fecha_cierre, // 🔥 NUEVO CAMPO
           partidos: ticket.pronosticos.map((pr: any) => ({
             id: pr.partidos?.id || `${pr.partidos?.equipo_local}-${pr.partidos?.equipo_visitante}`,
             local: pr.partidos?.equipo_local,
@@ -74,9 +87,12 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
       }
       
       const selecciones: Record<string, string> = {};
+      const pronosticosIds: Record<string, string> = {}; 
+      
       ticket.pronosticos.forEach((pr: any) => {
         const pId = pr.partidos?.id || `${pr.partidos?.equipo_local}-${pr.partidos?.equipo_visitante}`;
         selecciones[pId] = pr.eleccion_usuario;
+        pronosticosIds[pId] = pr.id; // 🔥 Guardamos los IDs de los pronósticos
       });
       
       grupos[qId].tickets.push({
@@ -84,16 +100,15 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
         fecha: ticket.fecha_creacion,
         puntos: ticket.puntos_totales,
         goles: ticket.prediccion_goles_total,
-        selecciones
+        selecciones,
+        pronosticosIds 
       });
     });
     
     const listaGrupos = Object.values(grupos);
-
     listaGrupos.forEach((grupo: any) => {
       grupo.tickets.sort((a: any, b: any) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
     });
-
     return listaGrupos;
   }
 
@@ -103,34 +118,75 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
     return equipo?.logo_url || 'https://a.espncdn.com/i/teamlogos/default-soccer-35.png'
   }
 
+  // 🔥 FUNCIONES DE EDICIÓN
+  const abrirModalEdicion = (grupo: any, ticket: any) => {
+    setTicketEditando({
+      ticketId: ticket.id,
+      quinielaNombre: grupo.nombre_jornada,
+      partidos: grupo.partidos,
+      pronosticosIds: ticket.pronosticosIds
+    })
+    setNuevasSelecciones({ ...ticket.selecciones })
+    setNuevosGoles(ticket.goles || 0) 
+  }
+
+  const guardarEdicion = async () => {
+    setGuardandoEdicion(true)
+    try {
+      // 1. Guardamos las selecciones de los partidos 
+      const pronosticosActualizados = ticketEditando.partidos.map((p: any) => ({
+        id: ticketEditando.pronosticosIds[p.id],
+        ticket_id: ticketEditando.ticketId,
+        partido_id: p.id,
+        eleccion_usuario: nuevasSelecciones[p.id]
+      }))
+
+      const { error: errorPronosticos } = await supabase.from('pronosticos').upsert(pronosticosActualizados)
+      if (errorPronosticos) throw errorPronosticos
+
+      // 2. Guardamos el total de goles en el ticket
+      const golesParseados = nuevosGoles === '' ? 0 : Number(nuevosGoles)
+      const { error: errorTicket } = await supabase
+        .from('tickets')
+        .update({ prediccion_goles_total: golesParseados })
+        .eq('id', ticketEditando.ticketId)
+      
+      if (errorTicket) throw errorTicket
+
+      alert('¡Boleto actualizado con éxito!')
+      setTicketEditando(null)
+      await cargarHistorial() 
+
+    } catch (error) {
+      console.error(error)
+      alert('Hubo un error al actualizar el boleto. Intenta de nuevo.')
+    } finally {
+      setGuardandoEdicion(false)
+    }
+  }
+
   if (cargando) return <div className="text-blue-400 animate-pulse text-center mt-10 font-bold uppercase tracking-widest text-xs">Cargando tus jugadas...</div>
 
   if (gruposActivos.length === 0 && gruposCompletados.length === 0) {
     return <div className="text-slate-500 italic text-center mt-10 text-sm">Aún no has realizado ninguna jugada.</div>
   }
 
-  // COMPONENTE REDISEÑADO: MÁS COMPACTO Y ESTILIZADO
   const TarjetaGrupoAgrupado = ({ grupo, esActivo }: { grupo: any, esActivo: boolean }) => {
+    
+    // 🔥 LÓGICA DE BLOQUEO DE EDICIÓN
+    const fechaCierreCorta = grupo.fecha_cierre ? grupo.fecha_cierre.substring(0, 16) : null;
+    const fechaCierreObj = new Date(fechaCierreCorta || grupo.fecha_cierre || 0);
+    const ahora = new Date();
+    const yaPasoLaHora = grupo.fecha_cierre ? (ahora > fechaCierreObj) : false;
+    const yaHayResultados = grupo.partidos.some((p: any) => p.real !== null);
+    
+    // Solo se puede editar si está "En Juego", NO ha pasado la hora, y NO hay resultados reales
+    const sePuedeEditar = esActivo && !yaPasoLaHora && !yaHayResultados;
+
     return (
       <div className={`bg-slate-900 border rounded-xl overflow-hidden shadow-xl transition-all mb-6 ${esActivo ? 'border-amber-600/40 shadow-[0_0_15px_rgba(217,119,6,0.1)]' : 'border-slate-700 opacity-95'}`}>
+        {/* ... (el div del encabezado se queda igual) ... */}
         
-        {/* ENCABEZADO COMPACTO */}
-        <div className="bg-slate-800/80 px-3 sm:px-4 py-2.5 flex flex-wrap justify-between items-center border-b border-slate-700 gap-2">
-          <div>
-            <h4 className={`font-black tracking-widest uppercase text-xs md:text-sm ${esActivo ? 'text-amber-500' : 'text-blue-400'}`}>{grupo.nombre_jornada}</h4>
-            <span className="text-[9px] text-slate-400 font-bold uppercase mt-0.5 block">
-              Boletos comprados: <span className="text-white">{grupo.tickets.length}</span>
-            </span>
-          </div>
-          {grupo.goles_reales !== null && (
-            <div className="text-center bg-slate-950/50 px-3 py-1 rounded-lg border border-slate-700 flex items-center gap-2">
-              <span className="text-[8px] text-slate-500 uppercase font-bold tracking-wider">Marcador Final:</span>
-              <span className="text-xs font-black text-white">{grupo.goles_reales} Goles</span>
-            </div>
-          )}
-        </div>
-        
-        {/* TABLA ULTRA COMPACTA */}
         <div className="overflow-x-auto">
           <table className="w-full text-left whitespace-nowrap">
             <thead className="bg-slate-950/50 text-slate-400 border-b border-slate-700">
@@ -139,16 +195,27 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
                 <th className="px-2 py-2 font-bold uppercase text-[9px] tracking-wider text-center border-r border-slate-800 bg-slate-950 sticky left-0 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.2)]">Real</th>
                 {grupo.tickets.map((t: any, idx: number) => (
                   <th key={t.id} className={`px-2 py-2 font-black uppercase text-[9px] text-center border-r border-slate-800/50 ${esActivo ? 'text-amber-500' : 'text-blue-400'}`}>
-                    J{idx + 1}
+                    <div className="flex flex-col items-center justify-center gap-1">
+                      <span>J{idx + 1}</span>
+                      {/* 🔥 APLICAMOS LA NUEVA VARIABLE AQUÍ */}
+                      {sePuedeEditar && (
+                        <button 
+                          onClick={() => abrirModalEdicion(grupo, t)} 
+                          className="bg-slate-800 hover:bg-amber-600 hover:text-white text-slate-400 border border-slate-700 px-2 py-0.5 rounded text-[8px] transition-all"
+                          title="Editar selecciones"
+                        >
+                          ✏️ Editar
+                        </button>
+                      )}
+                    </div>
                   </th>
                 ))}
               </tr>
             </thead>
+            {/* ... (el resto del código de la tabla sigue igual) ... */}
             <tbody className="divide-y divide-slate-800/50">
               {grupo.partidos.map((p: any, pIdx: number) => (
                 <tr key={pIdx} className="hover:bg-slate-800/40 transition-colors">
-                  
-                  {/* CELDA DE EQUIPOS (MÁS PEQUEÑA) */}
                   <td className="px-2 py-1.5">
                     <div className="flex items-center justify-between text-[9px] sm:text-[10px] font-bold uppercase text-slate-300">
                       <div className="flex items-center gap-1 w-[45%] justify-end">
@@ -163,7 +230,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
                     </div>
                   </td>
                   
-                  {/* CELDA RESULTADO OFICIAL (CÍRCULOS MÁS CHICOS) */}
                   <td className="px-1 py-1.5 text-center border-r border-slate-800 font-black bg-slate-950/40 sticky left-0 z-10">
                     {p.real ? (
                       <span className={`inline-block w-5 h-5 text-[9px] leading-5 rounded-full shadow-inner ${p.real==='L'?'bg-blue-900 text-blue-300':p.real==='E'?'bg-slate-700 text-slate-300':'bg-red-900 text-red-300'}`}>{p.real}</span>
@@ -172,7 +238,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
                     )}
                   </td>
 
-                  {/* CELDAS PRONÓSTICOS DEL JUGADOR */}
                   {grupo.tickets.map((t: any) => {
                     const pick = t.selecciones[p.id];
                     let color = 'bg-slate-800 text-slate-300';
@@ -197,7 +262,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
               ))}
             </tbody>
             
-            {/* PIE DE TABLA COMPACTO */}
             <tfoot className="bg-slate-950 border-t-2 border-slate-700">
               <tr>
                 <td colSpan={2} className="px-2 py-2 text-right font-bold uppercase text-[8px] md:text-[9px] text-slate-500 border-r border-slate-800">
@@ -231,7 +295,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
   return (
     <div className="w-full max-w-4xl mt-4 animate-in fade-in duration-500 mb-20 flex flex-col items-center">
       
-      {/* 🚀 NUEVO SISTEMA DE PESTAÑAS */}
       <div className="flex bg-slate-900/80 p-1.5 rounded-xl border border-slate-800 shadow-inner mb-6 w-full max-w-sm">
         <button 
           onClick={() => setVistaActual('activas')} 
@@ -255,7 +318,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
         </button>
       </div>
 
-      {/* CONTENEDOR DE JUGADAS SEGÚN LA PESTAÑA */}
       <div className="w-full">
         {vistaActual === 'activas' ? (
           <div>
@@ -279,6 +341,88 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
           </div>
         )}
       </div>
+
+      {/* 🚀 MODAL DE EDICIÓN FLOTANTE CON CAMPO DE GOLES */}
+      {ticketEditando && (
+        <div className="fixed inset-0 z-[100] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-amber-600/50 max-w-md w-full p-4 md:p-6 rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+            
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3 mb-4 shrink-0">
+              <div>
+                <h3 className="text-sm md:text-base font-black text-white uppercase tracking-tight flex items-center gap-2">
+                  <span>✏️</span> Editando Boleto
+                </h3>
+                <p className="text-[9px] text-amber-500 font-bold uppercase mt-1">{ticketEditando.quinielaNombre}</p>
+              </div>
+              <button onClick={() => setTicketEditando(null)} className="text-slate-500 hover:text-slate-300 font-bold font-mono text-xl">✕</button>
+            </div>
+
+            <div className="overflow-y-auto pr-1 space-y-2.5 mb-4 flex-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-slate-900 [&::-webkit-scrollbar-thumb]:bg-slate-700 [&::-webkit-scrollbar-thumb]:rounded-full">
+              {ticketEditando.partidos.map((p: any) => {
+                const seleccionActual = nuevasSelecciones[p.id]
+                return (
+                  <div key={p.id} className="bg-slate-950 border border-slate-800 p-2 md:p-3 rounded-lg flex flex-col gap-2">
+                    <div className="flex justify-between items-center text-[10px] md:text-xs font-bold uppercase text-slate-300 w-full">
+                      <div className="flex items-center gap-1.5 w-[45%] justify-end">
+                        <span className="truncate text-right">{p.local}</span>
+                        <img src={obtenerLogo(p.local)} alt="" className="w-4 h-4 object-contain" />
+                      </div>
+                      <span className="text-[9px] text-slate-600 px-1">VS</span>
+                      <div className="flex items-center gap-1.5 w-[45%] justify-start">
+                        <img src={obtenerLogo(p.visitante)} alt="" className="w-4 h-4 object-contain" />
+                        <span className="truncate text-left">{p.visitante}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-1.5 w-full mt-1">
+                      {['L', 'E', 'V'].map(opc => (
+                        <button
+                          key={opc}
+                          onClick={() => setNuevasSelecciones({ ...nuevasSelecciones, [p.id]: opc })}
+                          className={`flex-1 py-1.5 rounded text-[10px] md:text-xs font-black transition-all border ${
+                            seleccionActual === opc 
+                            ? 'bg-amber-600 border-amber-500 text-white shadow-[0_0_10px_rgba(217,119,6,0.3)] scale-105' 
+                            : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300 hover:bg-slate-700'
+                          }`}
+                        >
+                          {opc}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* SECCIÓN: Total de Goles (Desempate) */}
+            <div className="bg-slate-950 border border-slate-800 p-3 rounded-lg mb-4 shrink-0 flex justify-between items-center">
+              <div>
+                <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest">Total de Goles</h4>
+                <p className="text-[9px] text-slate-500 uppercase mt-0.5">Para desempate en la jornada</p>
+              </div>
+              <input 
+                type="number" 
+                min="0"
+                value={nuevosGoles}
+                onChange={(e) => setNuevosGoles(e.target.value === '' ? '' : parseInt(e.target.value))}
+                className="w-16 bg-slate-900 border border-amber-600/50 text-white font-black text-center py-2 rounded-lg text-sm focus:outline-none focus:border-amber-500 transition-colors"
+              />
+            </div>
+
+            <button 
+              onClick={guardarEdicion}
+              disabled={guardandoEdicion}
+              className={`w-full font-black py-3 rounded-xl uppercase tracking-widest text-xs transition-all shrink-0 ${
+                guardandoEdicion 
+                ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
+                : 'bg-amber-600 hover:bg-amber-500 text-white shadow-[0_0_15px_rgba(217,119,6,0.2)]'
+              }`}
+            >
+              {guardandoEdicion ? 'Guardando...' : '💾 Guardar Cambios'}
+            </button>
+          </div>
+        </div>
+      )}
 
     </div>
   )
