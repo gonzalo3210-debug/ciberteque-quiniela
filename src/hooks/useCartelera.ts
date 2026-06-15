@@ -7,10 +7,13 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
   const [partidos, setPartidos] = useState<any[]>([])
   const [equiposInfo, setEquiposInfo] = useState<any[]>([])
   const [selecciones, setSelecciones] = useState<Record<string, string>>({})
+  
+  // Estados de UX
   const [cargando, setCargando] = useState(true)
   const [guardando, setGuardando] = useState(false)
-  const [golesTotales, setGolesTotales] = useState<string>('')
+  const [errorCarga, setErrorCarga] = useState<string | null>(null)
   
+  const [golesTotales, setGolesTotales] = useState<string>('')
   const [estaCerrada, setEstaCerrada] = useState(false)
   const [motivoCierre, setMotivoCierre] = useState('')
 
@@ -18,49 +21,62 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
   const [aceptoReglas, setAceptoReglas] = useState(false) 
   const [yaParticipo, setYaParticipo] = useState(false) 
 
-  // 🔥 Candado de seguridad sincrónico para evitar el doble cobro (Race Condition)
+  // Estados para la Radiografía
+  const [radiografia, setRadiografia] = useState<any[]>([])
+  const [cargandoRadiografia, setCargandoRadiografia] = useState(false)
+  const [golesRealesEnVivo, setGolesRealesEnVivo] = useState<number | null>(null) // 🔥 NUEVO: Goles totales en juego
+
   const peticionEnCurso = useRef(false)
 
-  // 1️⃣ CARGA INICIAL DE DATOS
   useEffect(() => {
     async function cargarJornadas() {
       try {
         setCargando(true)
+        setErrorCarga(null)
+
+        // 🔥 MEJORA: Traemos goles_totales_real de la quiniela y goles_local/visitante de los partidos
         const { data: qData, error: qError } = await supabase
           .from('quinielas')
           .select(`
-            id, nombre_jornada, precio_ticket, fecha_cierre, tipo_premiacion,
-            partidos (id, equipo_local, equipo_visitante, fecha_hora, resultado_real)
+            id, nombre_jornada, precio_ticket, fecha_cierre, tipo_premiacion, goles_totales_real,
+            partidos (id, equipo_local, equipo_visitante, fecha_hora, resultado_real, goles_local, goles_visitante)
           `)
           .eq('estado', 'abierta')
-          .order('fecha_cierre', { ascending: true }) 
 
         if (qError) throw qError;
 
         const { data: eData, error: eError } = await supabase.from('equipos').select('*')
-        
         if (eError) throw eError;
 
+        if (eData) setEquiposInfo(eData)
+
         if (qData && qData.length > 0) {
-          setQuinielasActivas(qData)
-          await cambiarQuinielaVisible(qData[0]) 
+          const ahora = new Date().getTime();
+          const disponibles = qData.filter(q => new Date(q.fecha_cierre).getTime() > ahora);
+          const bloqueadas = qData.filter(q => new Date(q.fecha_cierre).getTime() <= ahora);
+
+          disponibles.sort((a, b) => new Date(a.fecha_cierre).getTime() - new Date(b.fecha_cierre).getTime());
+          bloqueadas.sort((a, b) => new Date(b.fecha_cierre).getTime() - new Date(a.fecha_cierre).getTime());
+
+          const quinielasOrdenadas = [...disponibles, ...bloqueadas];
+          setQuinielasActivas(quinielasOrdenadas);
+          
+          const quinielaPorDefecto = disponibles.length > 0 ? disponibles[0] : quinielasOrdenadas[0];
+          await cambiarQuinielaVisible(quinielaPorDefecto, true); 
         }
-        if (eData) {
-          setEquiposInfo(eData)
-        }
-      } catch (error) {
+      } catch (error: any) {
         console.error("Error al cargar datos:", error);
+        setErrorCarga("No pudimos cargar la cartelera. Revisa tu conexión a internet.");
       } finally {
         setCargando(false)
       }
     }
     
-    if (usuarioActivo) {
+    if (usuarioActivo?.id) { 
         cargarJornadas()
     }
-  }, [usuarioActivo])
+  }, [usuarioActivo?.id])
 
-  // 2️⃣ 🔥 HITO 2: SUSCRIPCIÓN EN TIEMPO REAL (SOLO CIERRE DE JORNADA)
   useEffect(() => {
     if (!quinielaActual) return;
 
@@ -75,10 +91,10 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
           filter: `id=eq.${quinielaActual.id}`
         },
         (payload: any) => {
-          // Si el administrador cambia el estado a algo diferente de 'abierta'
           if (payload.new.estado !== 'abierta') {
             setEstaCerrada(true);
-            setMotivoCierre('¡La jornada acaba de ser cerrada por el administrador! Ya no se aceptan más boletos.');
+            setMotivoCierre('¡La jornada acaba de ser cerrada por el administrador!');
+            cargarRadiografia(quinielaActual, partidos);
           }
         }
       )
@@ -87,10 +103,85 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
     return () => {
       supabase.removeChannel(canalTiempoReal);
     };
-  }, [quinielaActual?.id]);
+  }, [quinielaActual?.id, partidos]);
 
+  // 🔥 MEJORA: Construye la tabla, calcula los goles en vivo y ordena por Puntos y luego por Diferencia
+  const cargarRadiografia = async (quinielaData: any, partidosActuales: any[]) => {
+    setCargandoRadiografia(true)
+    try {
+      const { data: ticketsData, error } = await supabase
+        .from('tickets')
+        .select(`
+          id,
+          prediccion_goles_total,
+          usuarios (nombre, avatar_url),
+          pronosticos (partido_id, eleccion_usuario)
+        `)
+        .eq('quiniela_id', quinielaData.id)
 
-  const cambiarQuinielaVisible = async (quiniela: any) => {
+      if (error) throw error;
+
+      // 1. Calcular Goles Reales Actuales
+      let golesRealesCalculados = 0;
+      let hayGolesRegistrados = false;
+
+      partidosActuales.forEach(p => {
+        if (p.goles_local !== null && p.goles_visitante !== null) {
+          golesRealesCalculados += p.goles_local + p.goles_visitante;
+          hayGolesRegistrados = true;
+        }
+      });
+
+      // Si la base de datos ya tiene el global oficial, lo usamos. Si no, usamos el sumatorio en vivo.
+      const golesOficiales = quinielaData.goles_totales_real !== null 
+        ? quinielaData.goles_totales_real 
+        : (hayGolesRegistrados ? golesRealesCalculados : -1);
+
+      setGolesRealesEnVivo(golesOficiales !== -1 ? golesOficiales : null);
+
+      if (ticketsData) {
+        const ranking = ticketsData.map(ticket => {
+          let aciertos = 0
+          const picks: Record<string, string> = {}
+
+          ticket.pronosticos.forEach((p: any) => {
+            picks[p.partido_id] = p.eleccion_usuario
+            const partido = partidosActuales.find(pt => pt.id === p.partido_id)
+            if (partido && partido.resultado_real && partido.resultado_real === p.eleccion_usuario) {
+              aciertos++
+            }
+          })
+
+          const prediccionUsuario = ticket.prediccion_goles_total || 0;
+          const golesDiff = golesOficiales !== -1 ? Math.abs(prediccionUsuario - golesOficiales) : 999;
+
+          return {
+            id: ticket.id,
+            nombre: ticket.usuarios?.nombre || 'Jugador',
+            avatar_url: ticket.usuarios?.avatar_url,
+            goles: prediccionUsuario,
+            golesDiff,
+            aciertos,
+            picks
+          }
+        })
+
+        // 2. Ordenamiento Perfecto: Puntos de mayor a menor, Diferencia de menor a mayor
+        ranking.sort((a, b) => {
+          if (b.aciertos !== a.aciertos) return b.aciertos - a.aciertos;
+          return a.golesDiff - b.golesDiff;
+        })
+
+        setRadiografia(ranking)
+      }
+    } catch (err) {
+      console.error("Error al cargar la radiografía:", err)
+    } finally {
+      setCargandoRadiografia(false)
+    }
+  }
+
+  const cambiarQuinielaVisible = async (quiniela: any, cargaInicial = false) => {
     setQuinielaActual(quiniela)
     
     const partidosAcomodados = [...(quiniela.partidos || [])].sort((a: any, b: any) => {
@@ -108,21 +199,26 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
     const fechaCierre = new Date(fechaCierreCorta || quiniela.fecha_cierre)
     const ahora = new Date()
     const yaPasoLaHora = ahora > fechaCierre
-    // Verificamos si en la carga inicial ya traía resultados (como seguro extra)
     const yaHayResultados = quiniela.partidos.some((p: any) => p.resultado_real !== null)
+
+    const estaCerradaCalculada = yaHayResultados || yaPasoLaHora;
 
     if (yaHayResultados) {
       setEstaCerrada(true)
-      setMotivoCierre('Esta jornada ya cerró porque los resultados oficiales están siendo procesados.')
+      setMotivoCierre('Esta jornada está cerrada y en curso. Sigue los resultados en vivo:')
     } else if (yaPasoLaHora) {
       setEstaCerrada(true)
-      setMotivoCierre('El tiempo límite para participar en esta jornada ha terminado.')
+      setMotivoCierre('La jornada ya cerró. Revisa los pronósticos del resto:')
     } else {
       setEstaCerrada(false)
       setMotivoCierre('')
     }
 
-    if (usuarioActivo) {
+    if (estaCerradaCalculada) {
+      await cargarRadiografia(quiniela, partidosAcomodados)
+    }
+
+    if (usuarioActivo?.id) {
         const { data: ticketsPrevios } = await supabase
         .from('tickets')
         .select('id')
@@ -142,7 +238,6 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
   }
 
   const guardarQuiniela = async () => {
-    // BLOQUEO INSTANTÁNEO (Protección contra doble clic)
     if (peticionEnCurso.current) {
         return { error: 'Tu jugada ya se está procesando, espera un momento...' }
     }
@@ -155,10 +250,9 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
     const costoTicket = quinielaActual?.precio_ticket || 0
 
     if (costoTicket > 0 && usuarioActivo.creditos_disponibles < costoTicket) {
-      return { error: 'No tienes créditos suficientes. Pasa a mostrador para recargar.' }
+      return { error: 'No tienes saldo suficiente. Pasa a mostrador para recargar.' }
     }
 
-    // ACTIVAMOS LOS CANDADOS ANTES DE PROCESAR
     peticionEnCurso.current = true
     setGuardando(true)
 
@@ -217,7 +311,6 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
       console.error(error)
       return { error: 'Error al guardar la jugada en la base de datos.' }
     } finally {
-      // LIBERAMOS LOS CANDADOS SIEMPRE AL FINALIZAR
       peticionEnCurso.current = false
       setGuardando(false)
     }
@@ -231,6 +324,7 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
 
   return {
     cargando,
+    errorCarga,
     quinielasActivas,
     quinielaActual,
     partidos,
@@ -244,6 +338,9 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
     yaParticipo,
     esGratis,
     bloqueadoPorParticipacion,
+    radiografia,
+    cargandoRadiografia,
+    golesRealesEnVivo, // 🔥 Exportado para que lo lea la tabla visual
     setGolesTotales,
     setMostrarReglas,
     setAceptoReglas,
