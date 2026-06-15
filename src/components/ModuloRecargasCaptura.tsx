@@ -12,13 +12,13 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
   const cajero = useCajero(actualizarSaldoGlobal);
   const captura = useCapturaFisica(actualizarSaldoGlobal);
 
-  const [recargaLibreAbierta, setRecargaLibreAbierta] = useState<string | null>(null);
-  const [montoRecargaLibre, setMontoRecargaLibre] = useState('');
+  // 🆕 ESTADO UNIFICADO: Maneja si está abierta la recarga o el retiro
+  const [modalOperacion, setModalOperacion] = useState<{id: string, tipo: 'recarga' | 'retiro'} | null>(null);
+  const [montoOperacion, setMontoOperacion] = useState('');
 
   // 🖨️ Estado para controlar el tipo de impresión dinámica
   const [formatoImpresion, setFormatoImpresion] = useState<'A4' | 'termica' | null>(null);
 
-  // Limpiar el estado de impresión después de que se cierre el diálogo del sistema
   useEffect(() => {
     const handleAfterPrint = () => setFormatoImpresion(null);
     window.addEventListener('afterprint', handleAfterPrint);
@@ -37,11 +37,17 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
     return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: true}).toUpperCase()}`;
   }
 
-  const handleProcesarRecarga = async (u: any) => {
-    const exito = await cajero.procesarRecargaLibre(u, montoRecargaLibre);
+  const handleProcesarOperacion = async (u: any) => {
+    let exito = false;
+    if (modalOperacion?.tipo === 'recarga') {
+      exito = await cajero.procesarRecargaLibre(u, montoOperacion);
+    } else if (modalOperacion?.tipo === 'retiro') {
+      exito = await cajero.procesarRetiro(u, montoOperacion);
+    }
+    
     if (exito) {
-      setRecargaLibreAbierta(null);
-      setMontoRecargaLibre('');
+      setModalOperacion(null);
+      setMontoOperacion('');
     }
   }
 
@@ -51,7 +57,7 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
 
   return (
     <>
-      {/* VISTA: VENTAS */}
+      {/* VISTA: VENTAS Y RETIROS */}
       {vista === 'recargas' && (
         <div className="animate-in fade-in duration-300 w-full max-w-2xl mx-auto space-y-4">
           <div className="flex gap-2 relative">
@@ -70,122 +76,115 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                <p className="text-center text-slate-500 text-xs py-4 bg-slate-900/50 rounded-lg">No se encontraron clientes.</p>
             )}
 
-            {(cajero.usuarios || []).map(u => (
-              <div key={u.id} className="bg-slate-900/80 p-3 md:p-4 rounded-xl border border-slate-700 hover:border-slate-500 transition-all shadow-lg">
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
-                  <div>
-                    <p className="font-black text-white text-xs md:text-sm uppercase tracking-tight">{u.nombre}</p>
-                    <div className="flex flex-wrap items-center gap-3 mt-1">
-                      <p className="text-[10px] text-slate-400 font-mono font-bold bg-slate-950 px-2 py-0.5 rounded border border-slate-800">{u.telefono}</p>
-                      
-                      <div className="flex items-center gap-1">
-                        <span className="text-[9px] uppercase text-slate-500 font-bold">Créditos:</span>
-                        <span className="text-green-400 font-black text-sm drop-shadow-[0_0_5px_rgba(74,222,128,0.2)]">{u.creditos_disponibles}</span>
-                      </div>
+            {(cajero.usuarios || []).map(u => {
+              const saldoTotal = Number(u.creditos_disponibles || 0) + Number(u.saldo_pesos || 0);
 
-                      <div className="flex items-center gap-1 border-l border-slate-700 pl-3">
-                        <span className="text-[9px] uppercase text-slate-500 font-bold">Saldo:</span>
-                        <span className="text-amber-500 font-black text-sm">${u.saldo_pesos || 0}</span>
+              return (
+                <div key={u.id} className="bg-slate-900/80 p-3 md:p-4 rounded-xl border border-slate-700 hover:border-slate-500 transition-all shadow-lg">
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+                    <div>
+                      <p className="font-black text-white text-xs md:text-sm uppercase tracking-tight">{u.nombre}</p>
+                      <div className="flex flex-wrap items-center gap-3 mt-1">
+                        <p className="text-[10px] text-slate-400 font-mono font-bold bg-slate-950 px-2 py-0.5 rounded border border-slate-800">{u.telefono}</p>
+                        
+                        {/* 💰 VISTA DE BILLETERA UNIFICADA */}
+                        <div className="flex items-center gap-1.5 border-l border-slate-700 pl-3">
+                          <span className="text-[9px] uppercase text-slate-500 font-bold">Billetera:</span>
+                          <span className="text-amber-400 font-black text-sm drop-shadow-[0_0_5px_rgba(251,191,36,0.2)]">
+                            ${saldoTotal.toLocaleString('es-MX', {minimumFractionDigits: 2})} <span className="text-[9px] text-amber-600">MXN</span>
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                  
-                  <div className="flex flex-wrap gap-1.5 w-full md:w-auto">
-                    <button onClick={() => cajero.verHistorial(u.id)} className="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-[9px] md:text-[10px] font-black uppercase transition-all text-slate-300 border border-slate-700 flex-1 md:flex-none">📜 Historial</button>
-                    <button onClick={() => setRecargaLibreAbierta(u.id)} className="bg-amber-900 hover:bg-amber-800 border border-amber-600/50 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all shadow-[0_0_10px_rgba(245,158,11,0.2)] flex-1 md:flex-none">+$ Libre</button>
-                    <button onClick={() => cajero.recargarCreditos(u.id, u.creditos_disponibles, 1)} className="bg-green-950 hover:bg-green-900 border border-green-700/50 text-green-400 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all flex-1 md:flex-none">+1</button>
-                    <button onClick={() => cajero.recargarCreditos(u.id, u.creditos_disponibles, 5)} className="bg-green-800 hover:bg-green-700 border border-green-600/50 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all flex-1 md:flex-none">+5</button>
-                    <button onClick={() => cajero.recargarCreditos(u.id, u.creditos_disponibles, 10)} className="bg-green-600 hover:bg-green-500 border border-green-500/50 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all shadow-[0_0_10px_rgba(22,163,74,0.3)] flex-1 md:flex-none">+10</button>
-                  </div>
-                </div>
-
-                {/* MODAL FLOTANTE: Recarga Libre ($) */}
-                {recargaLibreAbierta === u.id && (
-                  <div className="mt-3 p-4 bg-amber-950/20 border border-amber-900/50 rounded-xl animate-in fade-in zoom-in-95">
-                    <div className="flex justify-between items-center mb-2">
-                      <label className="text-[10px] text-amber-500 font-bold uppercase tracking-widest block">¿Cuánto dinero te entregó el cliente?</label>
-                      <button onClick={() => setRecargaLibreAbierta(null)} className="text-slate-500 hover:text-white font-mono text-sm">✕</button>
                     </div>
                     
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <div className="relative flex-1">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
-                        <input 
-                          type="number" 
-                          value={montoRecargaLibre} 
-                          onChange={(e) => setMontoRecargaLibre(e.target.value)} 
-                          placeholder="Ej. 100" 
-                          className="w-full bg-slate-950 border border-amber-900/50 rounded-lg pl-7 pr-3 py-2 text-white outline-none focus:border-amber-500 transition-all font-black text-lg" 
-                        />
-                      </div>
-                      <button onClick={() => handleProcesarRecarga(u)} className="bg-amber-600 hover:bg-amber-500 text-white font-black px-6 py-2 rounded-lg text-[10px] uppercase tracking-widest transition-all">
-                        Calcular y Cobrar
-                      </button>
+                    <div className="flex flex-wrap gap-2 w-full md:w-auto">
+                      <button onClick={() => cajero.verHistorial(u.id)} className="bg-slate-800 hover:bg-slate-700 px-3 py-2 rounded-lg text-[10px] font-black uppercase transition-all text-slate-300 border border-slate-700 flex-1 md:flex-none shadow-md">📜 Historial</button>
+                      <button onClick={() => {setModalOperacion({id: u.id, tipo: 'recarga'}); setMontoOperacion('');}} className="bg-green-900 hover:bg-green-800 border border-green-600/50 text-white px-3 py-2 rounded-lg text-[10px] font-black uppercase transition-all shadow-[0_0_10px_rgba(22,163,74,0.2)] flex-1 md:flex-none">💰 Ingresar $</button>
+                      <button onClick={() => {setModalOperacion({id: u.id, tipo: 'retiro'}); setMontoOperacion('');}} className="bg-red-950 hover:bg-red-900 border border-red-800/50 text-red-300 px-3 py-2 rounded-lg text-[10px] font-black uppercase transition-all shadow-md flex-1 md:flex-none">💸 Retirar $</button>
                     </div>
-
-                    {parseFloat(montoRecargaLibre) > 0 && (
-                      <div className="mt-3 flex items-center justify-between bg-slate-900 p-2 rounded-lg border border-slate-800 text-[10px] font-bold uppercase">
-                        <span className="text-slate-400">Recibirá: <span className="text-green-400 font-black text-sm">+{Math.floor(((u.saldo_pesos || 0) + parseFloat(montoRecargaLibre)) / cajero.PRECIO_CREDITO)} Crts</span></span>
-                        <span className="text-slate-400">Sobrante a guardar: <span className="text-amber-500 font-black text-sm">${((u.saldo_pesos || 0) + parseFloat(montoRecargaLibre)) % cajero.PRECIO_CREDITO}</span></span>
-                      </div>
-                    )}
                   </div>
-                )}
 
-                {/* HISTORIAL */}
-                {cajero.historialActivo === u.id && (
-                  <div className="mt-3 pt-3 border-t border-slate-800 animate-in slide-in-from-top-2">
-                    {cajero.cargandoHistorial ? (
-                      <p className="text-center text-slate-500 text-[10px] animate-pulse">Cargando movimientos...</p>
-                    ) : (
-                      <div className="max-h-[300px] overflow-y-auto pr-1">
-                        <table className="w-full text-left border-collapse">
-                          <thead>
-                            <tr className="uppercase bg-slate-950/80 text-[8px] md:text-[9px] text-slate-500 tracking-widest sticky top-0">
-                              <th className="p-2 border-b border-slate-800 w-1/4">Fecha</th>
-                              <th className="p-2 border-b border-slate-800 w-2/4">Concepto</th>
-                              <th className="p-2 border-b border-slate-800 text-center w-[12%]">Cant</th>
-                              <th className="p-2 border-b border-slate-800 text-right w-[13%]">Saldo</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-800/50">
-                            {(() => {
-                              let saldoAcumulado = u.creditos_disponibles;
-                              return cajero.datosHistorial.map((mov: any) => {
-                                const saldoEnEseMomento = saldoAcumulado;
-                                saldoAcumulado -= mov.cantidad; 
-                                const conceptoLimpio = mov.descripcion || (mov.tipo_movimiento === 'recarga_manual' ? 'Venta' : mov.tipo_movimiento.replace(/_/g, ' '));
-                                return (
-                                  <tr key={mov.id} className="hover:bg-slate-800/30 transition-colors">
-                                    <td className="p-2 text-[9px] md:text-[10px] text-slate-400 font-mono">{new Date(mov.created_at).toLocaleDateString()}</td>
-                                    <td className="p-2 text-[9px] md:text-[10px] text-slate-300 font-bold uppercase truncate max-w-[120px] md:max-w-[200px]" title={conceptoLimpio}>{conceptoLimpio}</td>
-                                    <td className={`p-2 text-center font-black text-[10px] md:text-xs ${mov.cantidad > 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                      {mov.cantidad > 0 ? '+' : ''}{mov.cantidad}
-                                    </td>
-                                    <td className="p-2 text-right font-black text-[10px] md:text-xs text-blue-400">{saldoEnEseMomento}</td>
-                                  </tr>
-                                )
-                              })
-                            })()}
-                          </tbody>
-                        </table>
-                        
-                        {cajero.datosHistorial.length === 0 && <p className="text-center text-slate-500 text-[10px] uppercase font-bold tracking-widest mt-4 py-4 bg-slate-950/50 rounded-lg">No hay movimientos recientes.</p>}
-                        
-                        {/* 🌟 BOTÓN CARGAR MÁS HISTORIAL 🌟 */}
-                        {cajero.hayMasHistorial && (
-                          <button onClick={cajero.cargarMasHistorial} className="w-full mt-3 py-2 border border-slate-700 border-dashed rounded-lg text-[10px] text-slate-400 hover:text-white hover:border-slate-500 hover:bg-slate-800 transition-all font-bold uppercase tracking-widest">
-                            ⬇️ Cargar más movimientos...
-                          </button>
-                        )}
+                  {/* MODAL FLOTANTE DUAL: Ingreso / Retiro */}
+                  {modalOperacion?.id === u.id && (
+                    <div className={`mt-4 p-4 border rounded-xl animate-in fade-in zoom-in-95 ${modalOperacion.tipo === 'recarga' ? 'bg-green-950/20 border-green-900/50' : 'bg-red-950/20 border-red-900/50'}`}>
+                      <div className="flex justify-between items-center mb-3">
+                        <label className={`text-[10px] font-black uppercase tracking-widest block ${modalOperacion.tipo === 'recarga' ? 'text-green-500' : 'text-red-500'}`}>
+                          {modalOperacion.tipo === 'recarga' ? '¿Cuánto dinero te entregó el cliente?' : '¿Cuánto dinero vas a retirar?'}
+                        </label>
+                        <button onClick={() => setModalOperacion(null)} className="text-slate-500 hover:text-white font-mono text-sm">✕</button>
                       </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
+                      
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <div className="relative flex-1">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-lg">$</span>
+                          <input 
+                            type="number" 
+                            value={montoOperacion} 
+                            onChange={(e) => setMontoOperacion(e.target.value)} 
+                            placeholder="Ej. 100" 
+                            className={`w-full bg-slate-950 border rounded-lg pl-8 pr-3 py-2.5 text-white outline-none transition-all font-black text-xl shadow-inner ${modalOperacion.tipo === 'recarga' ? 'border-green-900/50 focus:border-green-500' : 'border-red-900/50 focus:border-red-500'}`} 
+                          />
+                        </div>
+                        <button onClick={() => handleProcesarOperacion(u)} className={`text-white font-black px-6 py-2.5 rounded-lg text-[10px] uppercase tracking-widest transition-all shadow-lg ${modalOperacion.tipo === 'recarga' ? 'bg-green-600 hover:bg-green-500' : 'bg-red-600 hover:bg-red-500'}`}>
+                          {modalOperacion.tipo === 'recarga' ? 'Ingresar y Cobrar' : 'Confirmar Retiro'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
-            {/* 🌟 BOTÓN CARGAR MÁS CLIENTES 🌟 */}
+                  {/* HISTORIAL UNIFICADO EN PESOS */}
+                  {cajero.historialActivo === u.id && (
+                    <div className="mt-4 pt-3 border-t border-slate-800 animate-in slide-in-from-top-2">
+                      {cajero.cargandoHistorial ? (
+                        <p className="text-center text-slate-500 text-[10px] animate-pulse">Cargando movimientos...</p>
+                      ) : (
+                        <div className="max-h-[300px] overflow-y-auto pr-1">
+                          <table className="w-full text-left border-collapse">
+                            <thead>
+                              <tr className="uppercase bg-slate-950/80 text-[8px] md:text-[9px] text-slate-500 tracking-widest sticky top-0">
+                                <th className="p-2 border-b border-slate-800 w-1/4">Fecha</th>
+                                <th className="p-2 border-b border-slate-800 w-2/4">Concepto</th>
+                                <th className="p-2 border-b border-slate-800 text-center w-[12%]">Cant</th>
+                                <th className="p-2 border-b border-slate-800 text-right w-[13%]">Saldo</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-800/50">
+                              {(() => {
+                                let saldoAcumulado = saldoTotal; // Partimos del saldo actual en pesos
+                                return cajero.datosHistorial.map((mov: any) => {
+                                  const saldoEnEseMomento = saldoAcumulado;
+                                  saldoAcumulado -= mov.cantidad; 
+                                  const conceptoLimpio = mov.descripcion || (mov.tipo_movimiento === 'recarga_manual' ? 'Ingreso' : mov.tipo_movimiento.replace(/_/g, ' '));
+                                  return (
+                                    <tr key={mov.id} className="hover:bg-slate-800/30 transition-colors">
+                                      <td className="p-2 text-[9px] md:text-[10px] text-slate-400 font-mono">{new Date(mov.created_at).toLocaleDateString()}</td>
+                                      <td className="p-2 text-[9px] md:text-[10px] text-slate-300 font-bold uppercase truncate max-w-[120px] md:max-w-[200px]" title={conceptoLimpio}>{conceptoLimpio}</td>
+                                      <td className={`p-2 text-center font-black text-[10px] md:text-xs ${mov.cantidad > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                        {mov.cantidad > 0 ? '+' : '-'}${Math.abs(mov.cantidad).toLocaleString('es-MX', {minimumFractionDigits:0})}
+                                      </td>
+                                      <td className="p-2 text-right font-black text-[10px] md:text-xs text-amber-400">${saldoEnEseMomento.toLocaleString('es-MX', {minimumFractionDigits:0})}</td>
+                                    </tr>
+                                  )
+                                })
+                              })()}
+                            </tbody>
+                          </table>
+                          
+                          {cajero.datosHistorial.length === 0 && <p className="text-center text-slate-500 text-[10px] uppercase font-bold tracking-widest mt-4 py-4 bg-slate-950/50 rounded-lg">No hay movimientos recientes.</p>}
+                          
+                          {cajero.hayMasHistorial && (
+                            <button onClick={cajero.cargarMasHistorial} className="w-full mt-3 py-2 border border-slate-700 border-dashed rounded-lg text-[10px] text-slate-400 hover:text-white hover:border-slate-500 hover:bg-slate-800 transition-all font-bold uppercase tracking-widest">
+                              ⬇️ Cargar más movimientos...
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+
             {cajero.hayMasUsuarios && (
               <button onClick={cajero.cargarMasUsuarios} className="w-full mt-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-[10px] md:text-xs text-slate-400 hover:text-white hover:border-slate-500 hover:bg-slate-800 transition-all font-black uppercase tracking-widest shadow-lg">
                 ⬇️ Cargar más clientes...
@@ -306,7 +305,6 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
       {formatoImpresion && (
         <style>{`
           @media print {
-            /* 🔥 CLAVE: size: auto permite que la impresora térmica corte donde termina el contenido */
             @page { margin: 0; size: auto; }
             body { background: white; margin: 0; padding: 0; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
             body * { visibility: hidden !important; }
@@ -319,14 +317,13 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
               margin: 0 !important; 
               background-color: white !important;
             }
-            /* Clases específicas para no desperdiciar papel */
             .impresion-a4 { padding: 15px !important; }
             .impresion-termica { max-width: 80mm !important; margin: 0 auto !important; padding: 2mm !important; font-family: monospace !important; }
           }
         `}</style>
       )}
 
-      {/* 1. DISEÑO TICKET A4 (El que simula el boleto físico) */}
+      {/* 1. DISEÑO TICKET A4 */}
       {captura.quiniela && captura.ticketAImprimir && formatoImpresion === 'A4' && (
         <div className="hidden print:flex print:flex-col print:items-center print:w-full print:bg-white print:text-black zona-impresion impresion-a4 z-[99999]">
           <div className="w-full max-w-3xl border-4 border-black rounded-3xl p-6 bg-white flex flex-col mx-auto my-4">
@@ -390,7 +387,7 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                 <span className="font-bold uppercase text-sm">Desempate (Goles):</span>
                 <span className="font-black text-3xl">{captura.ticketAImprimir.goles}</span>
               </div>
-              <p className="text-center text-sm font-bold uppercase mt-6 text-blue-900">Costo del Boleto: {captura.quiniela.precio_ticket ?? 1} {(captura.quiniela.precio_ticket ?? 1) === 1 ? 'Crédito' : 'Créditos'}</p>
+              <p className="text-center text-sm font-bold uppercase mt-6 text-blue-900">Costo del Boleto: ${captura.quiniela.precio_ticket ?? 30} MXN</p>
             </div>
             
             <div className="mt-6 pt-6 border-t-2 border-black border-dashed">
@@ -400,7 +397,7 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
         </div>
       )}
 
-      {/* 2. DISEÑO TICKET TÉRMICO (Ahorra papel, minimalista) */}
+      {/* 2. DISEÑO TICKET TÉRMICO */}
       {captura.quiniela && captura.ticketAImprimir && formatoImpresion === 'termica' && (
         <div className="hidden print:block print:bg-white print:text-black text-black zona-impresion impresion-termica z-[99999]">
           <div className="text-center font-black text-xl leading-none">CIBERTEQUE</div>

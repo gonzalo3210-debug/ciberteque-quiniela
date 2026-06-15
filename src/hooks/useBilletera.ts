@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export function useBilletera(usuarioId: string) {
-  const [saldo, setSaldo] = useState<number>(0)
-  const [saldoPesos, setSaldoPesos] = useState<number>(0) 
+  // 🧠 ESTADO UNIFICADO: Un solo total en pesos
+  const [saldoTotalPesos, setSaldoTotalPesos] = useState<number>(0) 
   const [transacciones, setTransacciones] = useState<any[]>([])
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -19,7 +19,7 @@ export function useBilletera(usuarioId: string) {
       setError(null) // Reiniciamos el error en cada intento
       
       try {
-        // 1. Traer el saldo de créditos Y el saldo en pesos
+        // 1. Traer ambos campos de la BD
         const { data: userData, error: userError } = await supabase
           .from('usuarios')
           .select('creditos_disponibles, saldo_pesos')
@@ -29,8 +29,9 @@ export function useBilletera(usuarioId: string) {
         if (userError) throw userError
 
         if (userData) {
-          setSaldo(userData.creditos_disponibles || 0)
-          setSaldoPesos(userData.saldo_pesos || 0) 
+          // 💰 SUMA DIRECTA: Consolidamos el dinero de ambos campos
+          const totalUnificado = Number(userData.creditos_disponibles || 0) + Number(userData.saldo_pesos || 0)
+          setSaldoTotalPesos(totalUnificado)
         }
 
         // 2. Traer el historial de movimientos (últimos 30)
@@ -57,5 +58,6 @@ export function useBilletera(usuarioId: string) {
     cargarBilletera()
   }, [usuarioId])
 
-  return { saldo, saldoPesos, transacciones, cargando, error }
+  // Retornamos el saldo unificado
+  return { saldoTotalPesos, transacciones, cargando, error }
 }

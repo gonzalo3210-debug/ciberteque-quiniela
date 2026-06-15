@@ -2,11 +2,8 @@
 import { useBilletera } from '@/hooks/useBilletera'
 
 export default function MiBilletera({ usuarioId }: { usuarioId: string }) {
-  // 🧠 Consumimos la lógica separada
-  const { saldo, saldoPesos, transacciones, cargando, error } = useBilletera(usuarioId)
-
-  // ⚙️ CONSTANTE MONETARIA DE CIBERTEQUE
-  const VALOR_CREDITO = 30 // $30 MXN por crédito
+  // 🧠 Consumimos la lógica separada con el saldo unificado
+  const { saldoTotalPesos, transacciones, cargando, error } = useBilletera(usuarioId)
 
   const interpretarTransaccion = (tipo: string, descripcion: string) => {
     switch (tipo) {
@@ -61,38 +58,28 @@ export default function MiBilletera({ usuarioId }: { usuarioId: string }) {
   return (
     <div className="w-full max-w-2xl mx-auto mt-2 animate-in fade-in duration-500 mb-20 space-y-4">
       
-      {/* TARJETA DE SALDO PRINCIPAL COMPACTA */}
-      <div className="bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 p-5 md:p-6 rounded-3xl shadow-[0_0_20px_rgba(0,0,0,0.4)] relative overflow-hidden">
+      {/* TARJETA DE SALDO PRINCIPAL UNIFICADA (SOLO PESOS MXN) */}
+      <div className="bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 p-6 md:p-8 rounded-3xl shadow-[0_0_20px_rgba(0,0,0,0.4)] relative overflow-hidden flex flex-col items-center justify-center">
         <div className="absolute -right-8 -top-8 p-4 opacity-5 text-8xl select-none">💳</div>
+        <div className="absolute inset-0 bg-amber-500/5"></div>
         
-        <h2 className="text-center text-[10px] md:text-xs font-black text-slate-400 uppercase tracking-widest mb-1 relative z-10">
+        <h2 className="text-center text-[10px] md:text-xs font-black text-slate-400 uppercase tracking-widest mb-2 relative z-10">
           Mi Saldo Disponible
         </h2>
         
-        <div className="flex flex-col items-center justify-center relative z-10">
-          {/* Créditos */}
-          <div className="flex items-baseline gap-1.5 md:gap-2">
-            <span className="text-4xl md:text-5xl font-black text-green-400 drop-shadow-[0_0_10px_rgba(74,222,128,0.2)]">
-              {saldo}
-            </span>
-            <span className="text-sm md:text-base text-green-600 font-bold uppercase tracking-widest">
-              Créditos
-            </span>
-          </div>
-          
-          <div className="flex flex-wrap justify-center gap-2 mt-3">
-            {/* Saldo a Favor en Pesos (El Cambio) */}
-            <div className="bg-amber-950/30 px-5 py-2 rounded-full border border-amber-900/50 shadow-inner flex items-center gap-2">
-              <span className="text-[10px] md:text-[11px] text-amber-500/80 font-bold uppercase">Saldo a Favor (Cambio):</span>
-              <span className="text-sm md:text-base font-black text-amber-400">${saldoPesos.toFixed(2)} <span className="text-[9px] text-amber-600">MXN</span></span>
-            </div>
-          </div>
+        <div className="relative z-10 flex items-baseline gap-2">
+          <span className="text-5xl md:text-6xl font-black text-amber-500 drop-shadow-[0_0_15px_rgba(245,158,11,0.2)] tracking-tighter">
+            ${saldoTotalPesos.toLocaleString('es-MX', {minimumFractionDigits: 2})}
+          </span>
+          <span className="text-sm md:text-lg text-amber-600 font-black uppercase tracking-widest">
+            MXN
+          </span>
         </div>
       </div>
 
       {/* HISTORIAL DE MOVIMIENTOS COMPACTO */}
       <div className="bg-slate-900/80 rounded-2xl border border-slate-800 shadow-xl overflow-hidden">
-        <div className="bg-slate-950 p-3 border-b border-slate-800">
+        <div className="bg-slate-950 p-4 border-b border-slate-800">
           <h3 className="text-[10px] md:text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
             <span>📋</span> Historial de Movimientos
           </h3>
@@ -107,20 +94,21 @@ export default function MiBilletera({ usuarioId }: { usuarioId: string }) {
             transacciones.map((tx) => {
               const info = interpretarTransaccion(tx.tipo_movimiento, tx.descripcion)
               const esSuma = tx.cantidad > 0
+              const montoAbsoluto = Math.abs(tx.cantidad).toLocaleString('es-MX', {minimumFractionDigits: 2})
               
               return (
-                <div key={tx.id} className={`flex items-center justify-between p-2.5 md:p-3 rounded-xl border transition-colors ${info.bg}`}>
-                  <div className="flex items-center gap-2.5 md:gap-3">
-                    <div className="text-xl md:text-2xl opacity-90">{info.icono}</div>
+                <div key={tx.id} className={`flex items-center justify-between p-3 rounded-xl border transition-colors ${info.bg}`}>
+                  <div className="flex items-center gap-3 md:gap-4">
+                    <div className="text-2xl md:text-3xl opacity-90">{info.icono}</div>
                     <div>
-                      <p className={`font-black text-[10px] md:text-xs uppercase tracking-tight ${info.color}`}>
+                      <p className={`font-black text-[10px] md:text-sm uppercase tracking-tight ${info.color}`}>
                         {info.titulo}
                       </p>
-                      <p className="text-[8px] md:text-[9px] text-slate-500 font-bold uppercase mt-0.5">
+                      <p className="text-[8px] md:text-[10px] text-slate-500 font-bold uppercase mt-0.5">
                         {formatearFecha(tx.created_at)}
                       </p>
                       {tx.descripcion && tx.tipo_movimiento !== 'recarga_manual' && (
-                        <p className="text-[8px] md:text-[9px] text-slate-400/80 italic mt-0.5 max-w-[140px] md:max-w-xs truncate">
+                        <p className="text-[8px] md:text-[10px] text-slate-400/80 italic mt-0.5 max-w-[140px] md:max-w-xs truncate">
                           {tx.descripcion}
                         </p>
                       )}
@@ -128,11 +116,11 @@ export default function MiBilletera({ usuarioId }: { usuarioId: string }) {
                   </div>
                   
                   <div className="text-right flex flex-col items-end">
-                    <span className={`text-base md:text-lg font-black ${esSuma ? 'text-green-400' : 'text-red-400'}`}>
-                      {esSuma ? '+' : ''}{tx.cantidad}
+                    <span className={`text-lg md:text-xl font-black ${esSuma ? 'text-green-400' : 'text-red-400'}`}>
+                      {esSuma ? '+' : '-'}${montoAbsoluto}
                     </span>
-                    <span className="text-[8px] text-slate-500 font-bold uppercase">
-                      {Math.abs(tx.cantidad) === 1 ? 'crédito' : 'créditos'}
+                    <span className="text-[8px] md:text-[9px] text-slate-500 font-bold uppercase tracking-widest">
+                      MXN
                     </span>
                   </div>
                 </div>

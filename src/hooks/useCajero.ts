@@ -3,7 +3,6 @@ import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
 
 export function useCajero(actualizarSaldoGlobal?: (id: string, nuevo: number) => void) {
-  const PRECIO_CREDITO = 30;
   const LIMIT_USUARIOS = 5;
   const LIMIT_HISTORIAL = 10;
 
@@ -112,28 +111,7 @@ export function useCajero(actualizarSaldoGlobal?: (id: string, nuevo: number) =>
     }
   };
 
-  const recargarCreditos = async (usuarioId: string, saldoActual: number, cantidad: number) => {
-    const loadingId = toast.loading('Procesando venta...');
-    try {
-      const nuevoSaldo = saldoActual + cantidad;
-      const { error } = await supabase.from('usuarios').update({ creditos_disponibles: nuevoSaldo }).eq('id', usuarioId);
-      if (error) throw error;
-
-      await supabase.from('transacciones_creditos').insert([{ 
-        usuario_id: usuarioId, cantidad: cantidad, tipo_movimiento: 'recarga_manual', descripcion: 'Venta en mostrador' 
-      }]);
-
-      if (actualizarSaldoGlobal) actualizarSaldoGlobal(usuarioId, nuevoSaldo);
-      
-      await buscarUsuariosDB(busqueda, 0, true); 
-      if (historialActivo === usuarioId) await verHistorial(usuarioId, true);
-      
-      toast.success('¡Venta registrada con éxito!', { id: loadingId });
-    } catch (e: any) {
-      toast.error('Error al recargar', { id: loadingId });
-    }
-  };
-
+  // 💰 LÓGICA MEJORADA: Ingreso Directo en Pesos
   const procesarRecargaLibre = async (usuario: any, monto: string) => {
     const pesosIngresados = parseFloat(monto);
     if (isNaN(pesosIngresados) || pesosIngresados <= 0) {
@@ -141,50 +119,57 @@ export function useCajero(actualizarSaldoGlobal?: (id: string, nuevo: number) =>
       return false;
     }
 
-    const loadingId = toast.loading('Calculando conversión...');
+    const loadingId = toast.loading('Procesando ingreso...');
     try {
-      const saldoPesosAnterior = usuario.saldo_pesos || 0;
-      const totalPesosDisponibles = saldoPesosAnterior + pesosIngresados;
-      const creditosNuevos = Math.floor(totalPesosDisponibles / PRECIO_CREDITO);
-      const nuevoSaldoPesos = totalPesosDisponibles % PRECIO_CREDITO;
-      const nuevoSaldoCreditos = (usuario.creditos_disponibles || 0) + creditosNuevos;
+      // Magia: Convertimos sus créditos viejos (si tiene) a pesos para limpiar su cuenta
+      const totalActual = Number(usuario.creditos_disponibles || 0) + Number(usuario.saldo_pesos || 0);
+      const nuevoTotal = totalActual + pesosIngresados;
 
-      await supabase.from('usuarios').update({ creditos_disponibles: nuevoSaldoCreditos, saldo_pesos: nuevoSaldoPesos }).eq('id', usuario.id);
+      await supabase.from('usuarios').update({ creditos_disponibles: 0, saldo_pesos: nuevoTotal }).eq('id', usuario.id);
 
-      if (creditosNuevos > 0) {
-        await supabase.from('transacciones_creditos').insert([{ 
-          usuario_id: usuario.id, cantidad: creditosNuevos, tipo_movimiento: 'recarga_billetera', descripcion: `Conversión Auto: $${pesosIngresados} MXN` 
-        }]);
-      }
+      await supabase.from('transacciones_creditos').insert([{ 
+        usuario_id: usuario.id, cantidad: pesosIngresados, tipo_movimiento: 'recarga_manual', descripcion: `Ingreso Mostrador` 
+      }]);
 
-      if (actualizarSaldoGlobal) actualizarSaldoGlobal(usuario.id, nuevoSaldoCreditos);
+      if (actualizarSaldoGlobal) actualizarSaldoGlobal(usuario.id, nuevoTotal);
       
       await buscarUsuariosDB(busqueda, 0, true); 
       if (historialActivo === usuario.id) await verHistorial(usuario.id, true);
 
-      toast.success(`Recibido: $${pesosIngresados} MXN`, { id: loadingId });
+      toast.success(`Ingreso de $${pesosIngresados} MXN exitoso`, { id: loadingId });
       return true;
     } catch (e: any) {
-      toast.error("Error procesando el pago", { id: loadingId });
+      toast.error("Error procesando el ingreso", { id: loadingId });
       return false;
     }
   };
 
+  // 💸 NUEVA LÓGICA: Retiro de Efectivo
   const procesarRetiro = async (usuario: any, monto: string) => {
     const cantidadRetiro = parseFloat(monto);
-    if (isNaN(cantidadRetiro) || cantidadRetiro <= 0 || cantidadRetiro > (usuario.saldo_pesos || 0)) {
-      toast.error("Monto inválido o insuficiente.");
+    const totalActual = Number(usuario.creditos_disponibles || 0) + Number(usuario.saldo_pesos || 0);
+
+    if (isNaN(cantidadRetiro) || cantidadRetiro <= 0 || cantidadRetiro > totalActual) {
+      toast.error("Monto inválido o saldo insuficiente.");
       return false;
     }
+    
     const loadingId = toast.loading('Procesando retiro...');
     try {
-      const nuevoSaldoPesos = (usuario.saldo_pesos || 0) - cantidadRetiro;
-      await supabase.from('usuarios').update({ saldo_pesos: nuevoSaldoPesos }).eq('id', usuario.id);
+      const nuevoTotal = totalActual - cantidadRetiro;
+      
+      await supabase.from('usuarios').update({ creditos_disponibles: 0, saldo_pesos: nuevoTotal }).eq('id', usuario.id);
+      
       await supabase.from('transacciones_creditos').insert([{ 
-        usuario_id: usuario.id, cantidad: 0, tipo_movimiento: 'retiro_efectivo', descripcion: `Retiro: -$${cantidadRetiro} MXN` 
+        usuario_id: usuario.id, cantidad: -cantidadRetiro, tipo_movimiento: 'retiro_efectivo', descripcion: `Retiro Mostrador` 
       }]);
+      
+      if (actualizarSaldoGlobal) actualizarSaldoGlobal(usuario.id, nuevoTotal);
+      
       await buscarUsuariosDB(busqueda, 0, true);
-      toast.success('Retiro exitoso', { id: loadingId });
+      if (historialActivo === usuario.id) await verHistorial(usuario.id, true);
+      
+      toast.success(`Retiro de $${cantidadRetiro} MXN exitoso`, { id: loadingId });
       return true;
     } catch {
       toast.error("Error en el retiro", { id: loadingId });
@@ -193,9 +178,8 @@ export function useCajero(actualizarSaldoGlobal?: (id: string, nuevo: number) =>
   };
 
   return { 
-    PRECIO_CREDITO, 
     usuarios, busqueda, setBusqueda, cargando, hayMasUsuarios, cargarMasUsuarios,
     historialActivo, datosHistorial, cargandoHistorial, hayMasHistorial, cargarMasHistorial, verHistorial, 
-    recargarCreditos, procesarRecargaLibre, procesarRetiro 
+    procesarRecargaLibre, procesarRetiro 
   };
 }
