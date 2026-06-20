@@ -13,54 +13,52 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
   const [errorCarga, setErrorCarga] = useState<string | null>(null)
   
   const [golesTotales, setGolesTotales] = useState<string>('')
-  const [estaCerrada, setEstaCerrada] = useState(false)
-  const [motivoCierre, setMotivoCierre] = useState('')
-
+  
   const [mostrarReglas, setMostrarReglas] = useState(false) 
   const [aceptoReglas, setAceptoReglas] = useState(false) 
   const [yaParticipo, setYaParticipo] = useState(false) 
 
-  const [radiografia, setRadiografia] = useState<any[]>([])
-  const [cargandoRadiografia, setCargandoRadiografia] = useState(false)
-  const [golesRealesEnVivo, setGolesRealesEnVivo] = useState<number | null>(null)
-
   const peticionEnCurso = useRef(false)
 
   useEffect(() => {
-    async function cargarJornadas() {
+    async function cargarJornadasAbiertas() {
       try {
         setCargando(true)
         setErrorCarga(null)
 
-        // 🔥 AQUÍ AGREGAMOS es_final
         const { data: qData, error: qError } = await supabase
           .from('quinielas')
           .select(`
-            id, nombre_jornada, precio_ticket, fecha_cierre, tipo_premiacion, goles_totales_real,
-            partidos (id, equipo_local, equipo_visitante, fecha_hora, resultado_real, goles_local, goles_visitante, es_final)
+            id, nombre_jornada, precio_ticket, fecha_cierre, tipo_premiacion,
+            partidos (id, equipo_local, equipo_visitante, fecha_hora)
           `)
           .eq('estado', 'abierta')
+          .order('fecha_cierre', { ascending: true })
 
         if (qError) throw qError;
 
         const { data: eData, error: eError } = await supabase.from('equipos').select('*')
         if (eError) throw eError;
-
         if (eData) setEquiposInfo(eData)
 
         if (qData && qData.length > 0) {
+          // 🔥 FILTRO ESTRICTO DE TIEMPO: Eliminamos las que ya caducaron aunque digan "abierta" en BD
           const ahora = new Date().getTime();
-          const disponibles = qData.filter(q => new Date(q.fecha_cierre).getTime() > ahora);
-          const bloqueadas = qData.filter(q => new Date(q.fecha_cierre).getTime() <= ahora);
+          const jornadasDisponibles = qData.filter(q => {
+            const cierre = new Date(q.fecha_cierre ? q.fecha_cierre.substring(0, 16) : q.fecha_cierre).getTime();
+            return cierre > ahora;
+          });
 
-          disponibles.sort((a, b) => new Date(a.fecha_cierre).getTime() - new Date(b.fecha_cierre).getTime());
-          bloqueadas.sort((a, b) => new Date(b.fecha_cierre).getTime() - new Date(a.fecha_cierre).getTime());
-
-          const quinielasOrdenadas = [...disponibles, ...bloqueadas];
-          setQuinielasActivas(quinielasOrdenadas);
-          
-          const quinielaPorDefecto = disponibles.length > 0 ? disponibles[0] : quinielasOrdenadas[0];
-          await cambiarQuinielaVisible(quinielaPorDefecto, true); 
+          if (jornadasDisponibles.length > 0) {
+            setQuinielasActivas(jornadasDisponibles);
+            await cambiarQuinielaVisible(jornadasDisponibles[0]); 
+          } else {
+            setQuinielasActivas([]);
+            setQuinielaActual(null);
+          }
+        } else {
+          setQuinielasActivas([]);
+          setQuinielaActual(null);
         }
       } catch (error: any) {
         console.error("Error al cargar datos:", error);
@@ -71,10 +69,11 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
     }
     
     if (usuarioActivo?.id) { 
-        cargarJornadas()
+        cargarJornadasAbiertas()
     }
   }, [usuarioActivo?.id])
 
+  // 🔥 SUSCRIPCIÓN INTELIGENTE: Si el admin la cierra, desaparece automáticamente de la vista
   useEffect(() => {
     if (!quinielaActual) return;
 
@@ -82,100 +81,26 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
       .channel(`monitoreo-cierre-${quinielaActual.id}`)
       .on(
         'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'quinielas',
-          filter: `id=eq.${quinielaActual.id}`
-        },
+        { event: 'UPDATE', schema: 'public', table: 'quinielas', filter: `id=eq.${quinielaActual.id}` },
         (payload: any) => {
           if (payload.new.estado !== 'abierta') {
-            setEstaCerrada(true);
-            setMotivoCierre('¡La jornada acaba de ser cerrada por el administrador!');
-            cargarRadiografia(quinielaActual, partidos);
+            setQuinielasActivas(prev => {
+                const filtradas = prev.filter(q => q.id !== payload.new.id);
+                if (quinielaActual.id === payload.new.id) {
+                    if (filtradas.length > 0) cambiarQuinielaVisible(filtradas[0]);
+                    else setQuinielaActual(null);
+                }
+                return filtradas;
+            });
           }
         }
       )
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(canalTiempoReal);
-    };
-  }, [quinielaActual?.id, partidos]);
+    return () => { supabase.removeChannel(canalTiempoReal); };
+  }, [quinielaActual?.id]);
 
-  const cargarRadiografia = async (quinielaData: any, partidosActuales: any[]) => {
-    setCargandoRadiografia(true)
-    try {
-      const { data: ticketsData, error } = await supabase
-        .from('tickets')
-        .select(`
-          id,
-          prediccion_goles_total,
-          usuarios (nombre, avatar_url),
-          pronosticos (partido_id, eleccion_usuario)
-        `)
-        .eq('quiniela_id', quinielaData.id)
-
-      if (error) throw error;
-
-      let golesRealesCalculados = 0;
-      let hayGolesRegistrados = false;
-
-      partidosActuales.forEach(p => {
-        if (p.goles_local !== null && p.goles_visitante !== null) {
-          golesRealesCalculados += p.goles_local + p.goles_visitante;
-          hayGolesRegistrados = true;
-        }
-      });
-
-      const golesOficiales = quinielaData.goles_totales_real !== null 
-        ? quinielaData.goles_totales_real 
-        : (hayGolesRegistrados ? golesRealesCalculados : -1);
-
-      setGolesRealesEnVivo(golesOficiales !== -1 ? golesOficiales : null);
-
-      if (ticketsData) {
-        const ranking = ticketsData.map(ticket => {
-          let aciertos = 0
-          const picks: Record<string, string> = {}
-
-          ticket.pronosticos.forEach((p: any) => {
-            picks[p.partido_id] = p.eleccion_usuario
-            const partido = partidosActuales.find(pt => pt.id === p.partido_id)
-            if (partido && partido.resultado_real && partido.resultado_real === p.eleccion_usuario) {
-              aciertos++
-            }
-          })
-
-          const prediccionUsuario = ticket.prediccion_goles_total || 0;
-          const golesDiff = golesOficiales !== -1 ? Math.abs(prediccionUsuario - golesOficiales) : 999;
-
-          return {
-            id: ticket.id,
-            nombre: ticket.usuarios?.nombre || 'Jugador',
-            avatar_url: ticket.usuarios?.avatar_url,
-            goles: prediccionUsuario,
-            golesDiff,
-            aciertos,
-            picks
-          }
-        })
-
-        ranking.sort((a, b) => {
-          if (b.aciertos !== a.aciertos) return b.aciertos - a.aciertos;
-          return a.golesDiff - b.golesDiff;
-        })
-
-        setRadiografia(ranking)
-      }
-    } catch (err) {
-      console.error("Error al cargar la radiografía:", err)
-    } finally {
-      setCargandoRadiografia(false)
-    }
-  }
-
-  const cambiarQuinielaVisible = async (quiniela: any, cargaInicial = false) => {
+  const cambiarQuinielaVisible = async (quiniela: any) => {
     setQuinielaActual(quiniela)
     
     const partidosAcomodados = [...(quiniela.partidos || [])].sort((a: any, b: any) => {
@@ -188,29 +113,6 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
     setSelecciones({}) 
     setGolesTotales('')
     setAceptoReglas(false) 
-
-    const fechaCierreCorta = quiniela.fecha_cierre ? quiniela.fecha_cierre.substring(0, 16) : null
-    const fechaCierre = new Date(fechaCierreCorta || quiniela.fecha_cierre)
-    const ahora = new Date()
-    const yaPasoLaHora = ahora > fechaCierre
-    const yaHayResultados = quiniela.partidos.some((p: any) => p.resultado_real !== null)
-
-    const estaCerradaCalculada = yaHayResultados || yaPasoLaHora;
-
-    if (yaHayResultados) {
-      setEstaCerrada(true)
-      setMotivoCierre('Esta jornada está cerrada y en curso. Sigue los resultados en vivo:')
-    } else if (yaPasoLaHora) {
-      setEstaCerrada(true)
-      setMotivoCierre('La jornada ya cerró. Revisa los pronósticos del resto:')
-    } else {
-      setEstaCerrada(false)
-      setMotivoCierre('')
-    }
-
-    if (estaCerradaCalculada) {
-      await cargarRadiografia(quiniela, partidosAcomodados)
-    }
 
     if (usuarioActivo?.id) {
         const { data: ticketsPrevios } = await supabase
@@ -227,39 +129,35 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
   const bloqueadoPorParticipacion = esGratis && yaParticipo;
 
   const seleccionarOpcion = (partidoId: string, opcion: string) => {
-    if (estaCerrada || bloqueadoPorParticipacion) return 
+    if (bloqueadoPorParticipacion) return 
     setSelecciones({ ...selecciones, [partidoId]: opcion })
   }
 
   const guardarQuiniela = async () => {
-    if (peticionEnCurso.current) {
-        return { error: 'Tu jugada ya se está procesando, espera un momento...' }
+    if (peticionEnCurso.current) return { error: 'Tu jugada ya se está procesando...' }
+    
+    // 🔥 VERIFICACIÓN FINAL: Justo antes de guardar, comprobamos el tiempo real de nuevo
+    const cierre = new Date(quinielaActual.fecha_cierre ? quinielaActual.fecha_cierre.substring(0, 16) : quinielaActual.fecha_cierre).getTime();
+    if (new Date().getTime() > cierre) {
+        return { error: '¡El tiempo límite acaba de expirar! La jornada ya no admite jugadas.' }
     }
 
-    if (estaCerrada) return { error: 'La jornada está cerrada.' }
-    if (bloqueadoPorParticipacion) return { error: 'Solo se permite 1 participación por usuario en quinielas gratuitas.' }
-    if (!aceptoReglas) return { error: 'Debes leer y aceptar el reglamento oficial para enviar tu boleto.' }
-    if (golesTotales === '') return { error: '¡Falta información! Por favor, anota el total de goles para el desempate.' }
+    if (bloqueadoPorParticipacion) return { error: 'Solo se permite 1 participación por usuario.' }
+    if (!aceptoReglas) return { error: 'Debes aceptar el reglamento.' }
+    if (golesTotales === '') return { error: 'Por favor, anota el total de goles.' }
 
     const costoTicket = quinielaActual?.precio_ticket || 0
-
-    const saldoCreditos = Number(usuarioActivo.creditos_disponibles || 0)
-    const saldoPesos = Number(usuarioActivo.saldo_pesos || 0)
-    const poderAdquisitivoTotal = saldoCreditos + saldoPesos
+    const poderAdquisitivoTotal = Number(usuarioActivo.creditos_disponibles || 0) + Number(usuarioActivo.saldo_pesos || 0)
 
     if (costoTicket > 0 && poderAdquisitivoTotal < costoTicket) {
-      return { error: 'No tienes saldo suficiente en tu billetera. Pasa a mostrador para recargar.' }
+      return { error: 'No tienes saldo suficiente. Recarga en mostrador.' }
     }
 
     peticionEnCurso.current = true
     setGuardando(true)
 
     const seleccionesFinales = { ...selecciones }
-    partidos.forEach(p => {
-      if (!seleccionesFinales[p.id]) {
-        seleccionesFinales[p.id] = 'E' 
-      }
-    })
+    partidos.forEach(p => { if (!seleccionesFinales[p.id]) seleccionesFinales[p.id] = 'E' })
 
     try {
       const { data: ticketData, error: ticketError } = await supabase
@@ -275,9 +173,7 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
       if (ticketError) throw ticketError
 
       const pronosticosAGuardar = Object.keys(seleccionesFinales).map(partidoId => ({
-        ticket_id: ticketData.id,
-        partido_id: partidoId,
-        eleccion_usuario: seleccionesFinales[partidoId]
+        ticket_id: ticketData.id, partido_id: partidoId, eleccion_usuario: seleccionesFinales[partidoId]
       }))
 
       const { error: pronoError } = await supabase.from('pronosticos').insert(pronosticosAGuardar)
@@ -285,33 +181,21 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
 
       if (costoTicket > 0) {
         let costoPendiente = costoTicket;
-        let nuevoCreditos = saldoCreditos;
-        let nuevoSaldoPesos = saldoPesos;
+        let nuevoCreditos = Number(usuarioActivo.creditos_disponibles || 0);
+        let nuevoSaldoPesos = Number(usuarioActivo.saldo_pesos || 0);
 
         if (nuevoCreditos >= costoPendiente) {
           nuevoCreditos -= costoPendiente;
-          costoPendiente = 0;
         } else {
           costoPendiente -= nuevoCreditos;
           nuevoCreditos = 0;
           nuevoSaldoPesos -= costoPendiente;
         }
 
-        const { error: updateError } = await supabase
-          .from('usuarios')
-          .update({ 
-            creditos_disponibles: nuevoCreditos, 
-            saldo_pesos: nuevoSaldoPesos 
-          })
-          .eq('id', usuarioActivo.id)
-
-        if (updateError) throw updateError
-
+        await supabase.from('usuarios').update({ creditos_disponibles: nuevoCreditos, saldo_pesos: nuevoSaldoPesos }).eq('id', usuarioActivo.id)
+        
         await supabase.from('transacciones_creditos').insert([{
-          usuario_id: usuarioActivo.id,
-          cantidad: -costoTicket, 
-          tipo_movimiento: 'juego_ticket',
-          descripcion: `Ticket ${quinielaActual.nombre_jornada}`
+          usuario_id: usuarioActivo.id, cantidad: -costoTicket, tipo_movimiento: 'juego_ticket', descripcion: `Ticket ${quinielaActual.nombre_jornada}`
         }])
         
         actualizarSaldo(nuevoCreditos + nuevoSaldoPesos)
@@ -320,14 +204,12 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
       setSelecciones({}) 
       setGolesTotales('')
       setAceptoReglas(false)
-      
       if (esGratis) setYaParticipo(true)
 
-      return { success: '¡Jugada guardada con éxito! Los partidos sin marcar se guardaron como Empate.' }
-
+      return { success: '¡Jugada guardada con éxito!' }
     } catch (error) {
       console.error(error)
-      return { error: 'Error al guardar la jugada en la base de datos.' }
+      return { error: 'Error al guardar la jugada.' }
     } finally {
       peticionEnCurso.current = false
       setGuardando(false)
@@ -341,30 +223,6 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
   }
 
   return {
-    cargando,
-    errorCarga,
-    quinielasActivas,
-    quinielaActual,
-    partidos,
-    selecciones,
-    golesTotales,
-    guardando,
-    estaCerrada,
-    motivoCierre,
-    mostrarReglas,
-    aceptoReglas,
-    yaParticipo,
-    esGratis,
-    bloqueadoPorParticipacion,
-    radiografia,
-    cargandoRadiografia,
-    golesRealesEnVivo,
-    setGolesTotales,
-    setMostrarReglas,
-    setAceptoReglas,
-    cambiarQuinielaVisible,
-    seleccionarOpcion,
-    guardarQuiniela,
-    obtenerLogo
+    cargando, errorCarga, quinielasActivas, quinielaActual, partidos, selecciones, golesTotales, guardando, mostrarReglas, aceptoReglas, yaParticipo, esGratis, bloqueadoPorParticipacion, setGolesTotales, setMostrarReglas, setAceptoReglas, cambiarQuinielaVisible, seleccionarOpcion, guardarQuiniela, obtenerLogo
   }
 }
