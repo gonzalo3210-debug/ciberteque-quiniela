@@ -2,18 +2,20 @@
 import { useState, useMemo } from 'react'
 import { useGestorUsuarios } from '@/hooks/useGestorUsuarios'
 
+type SortField = 'saldo' | 'juegan' | 'inversion' | 'promos' | null;
+
 export default function GestorUsuarios() {
   const { usuarios, cargando, actualizarUsuario, resetearNIP } = useGestorUsuarios()
   
   const [busqueda, setBusqueda] = useState('')
-  const [filtroActivo, setFiltroActivo] = useState<'saldo' | 'juegan' | 'inversion' | 'promos'>('saldo')
+  const [ordenActivo, setOrdenActivo] = useState<SortField>('saldo')
 
   const [editandoUser, setEditandoUser] = useState<any>(null)
   const [resetNipUser, setResetNipUser] = useState<any>(null)
   const [nuevoNip, setNuevoNip] = useState('')
   const [procesando, setProcesando] = useState(false)
 
-  // 🧠 Lógica de Filtrado y Búsqueda
+  // 🧠 Lógica de Filtrado y Búsqueda Dinámica
   const usuariosMostrados = useMemo(() => {
     let filtrados = [...usuarios]
 
@@ -22,17 +24,21 @@ export default function GestorUsuarios() {
       filtrados = filtrados.filter(u => u.nombre.toLowerCase().includes(b) || u.telefono.includes(b))
     }
 
-    // 2. Aplicar Ordenamiento con las nuevas métricas
-    switch (filtroActivo) {
-      case 'saldo': filtrados.sort((a, b) => (b.creditos_disponibles || 0) - (a.creditos_disponibles || 0)); break;
+    // 🔥 Ordenamiento actualizado para usar la suma de la billetera
+    switch (ordenActivo) {
+      case 'saldo': filtrados.sort((a, b) => (b.billeteraActual || 0) - (a.billeteraActual || 0)); break;
       case 'juegan': filtrados.sort((a, b) => b.ticketsJugados - a.ticketsJugados); break;
       case 'inversion': filtrados.sort((a, b) => b.dineroIngresadoAprox - a.dineroIngresadoAprox); break;
       case 'promos': filtrados.sort((a, b) => b.premiosGanadosCreditos - a.premiosGanadosCreditos); break;
-      default: filtrados.sort((a, b) => (b.creditos_disponibles || 0) - (a.creditos_disponibles || 0)); break;
+      default: filtrados.sort((a, b) => (b.billeteraActual || 0) - (a.billeteraActual || 0)); break;
     }
 
     return filtrados
-  }, [usuarios, busqueda, filtroActivo])
+  }, [usuarios, busqueda, ordenActivo])
+
+  const manejarOrden = (columna: SortField) => {
+    setOrdenActivo(columna);
+  }
 
   const guardarEdicion = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -62,36 +68,11 @@ export default function GestorUsuarios() {
   return (
     <div className="w-full max-w-6xl mx-auto mt-2 animate-in fade-in duration-500 mb-20 space-y-4">
       
-      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-xl">
-        <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-4">
-          <h2 className="text-xl font-black text-white uppercase tracking-widest flex items-center gap-2">
-            <span>👥</span> Base de Jugadores <span className="text-xs text-slate-500 font-bold bg-slate-950 px-2 py-1 rounded">Total: {usuarios.length}</span>
-          </h2>
-          <input 
-            type="text" 
-            placeholder="🔍 Buscar por nombre o WhatsApp..." 
-            value={busqueda}
-            onChange={(e) => setBusqueda(e.target.value)}
-            className="w-full md:w-72 bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
-          />
-        </div>
-
-        <div className="flex flex-wrap gap-2 justify-center md:justify-start">
-          {[
-            { id: 'saldo', label: '💰 Más Saldo' },
-            { id: 'juegan', label: '🎟️ Más Juegan' },
-            { id: 'inversion', label: '💵 Mayor Inversión' }, // Renombrado
-            { id: 'promos', label: '🎁 Ganadores Promos' } // Renombrado
-          ].map(f => (
-            <button 
-              key={f.id}
-              onClick={() => setFiltroActivo(f.id as any)}
-              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${filtroActivo === f.id ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-950 border border-slate-800 text-slate-500 hover:text-slate-300'}`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
+      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-xl flex justify-between items-center">
+        <h2 className="text-xl font-black text-white uppercase tracking-widest flex items-center gap-2">
+          <span>👥</span> Base de Jugadores 
+        </h2>
+        <span className="text-xs text-slate-500 font-bold bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800">Total: {usuarios.length}</span>
       </div>
 
       <div className="bg-slate-900/80 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
@@ -99,44 +80,84 @@ export default function GestorUsuarios() {
           <table className="w-full text-left whitespace-nowrap">
             <thead className="bg-slate-950 border-b border-slate-800 text-[10px] uppercase text-slate-400 tracking-widest">
               <tr>
-                <th className="p-3">Jugador</th>
-                <th className={`p-3 text-center transition-colors ${filtroActivo === 'saldo' ? 'text-blue-400 bg-slate-900' : ''}`}>
-                  💰 Billetera Actual
+                <th className="p-3 w-64">
+                  <div className="flex flex-col gap-2">
+                    <span className="ml-1 text-slate-300 font-black">Jugador / Búsqueda</span>
+                    <input 
+                      type="text" 
+                      placeholder="🔍 Buscar nombre o WA..." 
+                      value={busqueda}
+                      onChange={(e) => setBusqueda(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-md px-2 py-1.5 text-xs text-white focus:outline-none focus:border-green-500 placeholder:text-slate-600 transition-colors"
+                    />
+                  </div>
                 </th>
-                <th className={`p-3 text-center transition-colors ${filtroActivo === 'juegan' ? 'text-blue-400 bg-slate-900' : ''}`}>
-                  🎟️ Boletos Jugados
+                <th 
+                  onClick={() => manejarOrden('saldo')} 
+                  className={`p-3 text-center cursor-pointer hover:bg-slate-800/50 transition-colors align-bottom pb-4 ${ordenActivo === 'saldo' ? 'text-green-400 bg-slate-900' : ''}`}
+                  title="Ordenar por billetera"
+                >
+                  <div className="flex flex-col items-center justify-end h-full gap-1">
+                    <span>💰 Billetera (MXN)</span>
+                    {ordenActivo === 'saldo' && <span className="text-[8px] text-green-500">▼ MÁS A MENOS</span>}
+                  </div>
                 </th>
-                <th className={`p-3 text-center transition-colors ${filtroActivo === 'inversion' ? 'text-blue-400 bg-slate-900' : ''}`}>
-                  💵 Dinero Ingresado
+                <th 
+                  onClick={() => manejarOrden('juegan')} 
+                  className={`p-3 text-center cursor-pointer hover:bg-slate-800/50 transition-colors align-bottom pb-4 ${ordenActivo === 'juegan' ? 'text-green-400 bg-slate-900' : ''}`}
+                  title="Ordenar por actividad"
+                >
+                  <div className="flex flex-col items-center justify-end h-full gap-1">
+                    <span>🎟️ Boletos Jugados</span>
+                    {ordenActivo === 'juegan' && <span className="text-[8px] text-green-500">▼ MÁS A MENOS</span>}
+                  </div>
                 </th>
-                <th className={`p-3 text-center transition-colors ${filtroActivo === 'promos' ? 'text-blue-400 bg-slate-900' : ''}`}>
-                  🎁 Premios Promocionales
+                <th 
+                  onClick={() => manejarOrden('inversion')} 
+                  className={`p-3 text-center cursor-pointer hover:bg-slate-800/50 transition-colors align-bottom pb-4 ${ordenActivo === 'inversion' ? 'text-green-400 bg-slate-900' : ''}`}
+                  title="Ordenar por inversión"
+                >
+                  <div className="flex flex-col items-center justify-end h-full gap-1">
+                    <span>💵 Dinero Ingresado</span>
+                    {ordenActivo === 'inversion' && <span className="text-[8px] text-green-500">▼ MÁS A MENOS</span>}
+                  </div>
                 </th>
-                <th className="p-3 text-right">Ajustes</th>
+                <th 
+                  onClick={() => manejarOrden('promos')} 
+                  className={`p-3 text-center cursor-pointer hover:bg-slate-800/50 transition-colors align-bottom pb-4 ${ordenActivo === 'promos' ? 'text-green-400 bg-slate-900' : ''}`}
+                  title="Ordenar por premios"
+                >
+                  <div className="flex flex-col items-center justify-end h-full gap-1">
+                    <span>🎁 Promocionales</span>
+                    {ordenActivo === 'promos' && <span className="text-[8px] text-green-500">▼ MÁS A MENOS</span>}
+                  </div>
+                </th>
+                <th className="p-3 text-right align-bottom pb-4">Ajustes</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
               {usuariosMostrados.map(u => (
                 <tr key={u.id} className="hover:bg-slate-800/30 transition-colors">
                   <td className="p-3">
-                    <div className="font-black text-white text-xs uppercase">{u.nombre}</div>
-                    <div className="text-[10px] text-slate-500 font-mono mt-0.5 font-bold">📱 {u.telefono}</div>
+                    <div className="font-black text-white text-xs uppercase pl-1">{u.nombre}</div>
+                    <div className="text-[10px] text-slate-500 font-mono mt-0.5 font-bold pl-1">📱 {u.telefono}</div>
                   </td>
-                  <td className={`p-3 text-center ${filtroActivo === 'saldo' ? 'bg-slate-900/30' : ''}`}>
-                    <span className="font-black text-lg text-green-400">{u.creditos_disponibles || 0} <span className="text-[10px] text-green-600 uppercase">Crd</span></span>
-                    <span className="text-[9px] text-amber-500 block font-bold uppercase mt-0.5">Saldo: ${u.saldo_pesos?.toFixed(2) || '0.00'}</span>
+                  <td className={`p-3 text-center ${ordenActivo === 'saldo' ? 'bg-slate-900/30' : ''}`}>
+                    <span className="font-black text-lg text-green-400 drop-shadow-md">
+                      ${(u.billeteraActual || 0).toFixed(2)} <span className="text-[10px] text-green-600">MXN</span>
+                    </span>
                   </td>
-                  <td className={`p-3 text-center ${filtroActivo === 'juegan' ? 'bg-slate-900/30' : ''}`}>
+                  <td className={`p-3 text-center ${ordenActivo === 'juegan' ? 'bg-slate-900/30' : ''}`}>
                     <span className="font-bold text-slate-300 text-base">{u.ticketsJugados}</span>
                     <span className="text-[9px] text-slate-500 block uppercase">Tickets</span>
                   </td>
-                  <td className={`p-3 text-center ${filtroActivo === 'inversion' ? 'bg-slate-900/30' : ''}`}>
+                  <td className={`p-3 text-center ${ordenActivo === 'inversion' ? 'bg-slate-900/30' : ''}`}>
                     <span className="font-black text-amber-400 text-base drop-shadow-md">
-                      ${u.dineroIngresadoAprox} <span className="text-[10px] text-amber-600">MXN</span>
+                      ${(u.dineroIngresadoAprox || 0).toFixed(2)} <span className="text-[10px] text-amber-600">MXN</span>
                     </span>
-                    <span className="text-[9px] text-slate-500 block font-bold">Aprox. en caja</span>
+                    <span className="text-[9px] text-slate-500 block font-bold">Total Ingresado</span>
                   </td>
-                  <td className={`p-3 text-center ${filtroActivo === 'promos' ? 'bg-slate-900/30' : ''}`}>
+                  <td className={`p-3 text-center ${ordenActivo === 'promos' ? 'bg-slate-900/30' : ''}`}>
                     <span className="font-black text-purple-400 text-base">{u.premiosGanadosCreditos}</span>
                     <span className="text-[9px] text-purple-600/80 block uppercase font-bold">Créditos Ganados</span>
                   </td>
@@ -151,7 +172,7 @@ export default function GestorUsuarios() {
             </tbody>
           </table>
           {usuariosMostrados.length === 0 && (
-            <div className="p-8 text-center text-slate-500 font-bold uppercase tracking-widest text-xs">No se encontraron usuarios.</div>
+            <div className="p-8 text-center text-slate-500 font-bold uppercase tracking-widest text-xs">No se encontraron usuarios con esos datos.</div>
           )}
         </div>
       </div>

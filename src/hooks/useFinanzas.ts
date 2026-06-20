@@ -2,8 +2,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 
 export function useFinanzas() {
-  const VALOR_CREDITO = 30;
-
   const [cargando, setCargando] = useState(true);
   const [mensajeError, setMensajeError] = useState<string | null>(null);
   const [jornadas, setJornadas] = useState<any[]>([]);
@@ -46,7 +44,9 @@ export function useFinanzas() {
       if (recargas) {
         recargas.forEach(r => totalRecargasCreditos += (Number(r.cantidad) || 0));
       }
-      const ingresoBrutoCalc = (totalRecargasCreditos * VALOR_CREDITO) + totalPesos;
+      
+      // 🔥 Ahora el cálculo es 1 a 1 (Pesos puros)
+      const ingresoBrutoCalc = totalRecargasCreditos + totalPesos;
 
       // 3. UTILIDAD Y RENDIMIENTO (Desde Quinielas)
       const { data: quinielasDB, error: errQuinielas } = await supabase
@@ -70,8 +70,10 @@ export function useFinanzas() {
           if (errTickets) throw new Error(`Error en los boletos de ${q.nombre_jornada}: ${errTickets.message}`);
 
           const boletosVendidos = tData ? tData.length : 0;
-          const precio = q.precio_ticket ?? 1;
-          const recaudacionPesos = boletosVendidos * precio * VALOR_CREDITO;
+          
+          // 🔥 Eliminamos el * 30. Se usa el precio exacto (ej. 30, 50, 100 pesos)
+          const precio = q.precio_ticket ?? 0;
+          const recaudacionPesos = boletosVendidos * precio;
           
           let utilidad = 0;
           let premio = 0;
@@ -100,7 +102,7 @@ export function useFinanzas() {
       setMetricas({
         ingresoBruto: ingresoBrutoCalc,
         utilidadNeta: utilidadTotal,
-        pasivosCreditos: totalCreditos * VALOR_CREDITO,
+        pasivosCreditos: totalCreditos, // 1 a 1 en pesos
         saldoRetenido: totalPesos,
         premiosEntregados: premiosPagados
       });
@@ -113,7 +115,6 @@ export function useFinanzas() {
     }
   }, []);
 
-  // Cargar al montar el hook
   useEffect(() => {
     cargarDatosFinancieros();
   }, [cargarDatosFinancieros]);

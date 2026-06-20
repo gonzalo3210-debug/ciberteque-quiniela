@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState, Fragment } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export default function Posiciones() {
@@ -8,10 +8,12 @@ export default function Posiciones() {
   const [historial, setHistorial] = useState<any[]>([])
   const [cargando, setCargando] = useState(true)
   
-  // 🆕 ESTADO MEJORADO: Ahora solo guarda UN ID a la vez (Efecto Acordeón)
+  // Efecto Acordeón para Salón de la Fama
   const [quinielaExpandidaId, setQuinielaExpandidaId] = useState<string | null>(null)
+  
+  // Efecto Acordeón para ver los partidos en vivo de un jugador
+  const [jugadorExpandidoId, setJugadorExpandidoId] = useState<string | null>(null)
 
-  // ⚙️ CONFIGURACIÓN MONETARIA (Solo Porcentaje, adiós créditos)
   const PORCENTAJE_PREMIO = 0.80 
 
   useEffect(() => {
@@ -96,8 +98,7 @@ export default function Posiciones() {
           }
         });
 
-        // 💰 LÓGICA MONETARIA DIRECTA EN PESOS MXN
-        const precioTicketMXN = q.precio_ticket ?? 30 // Directo en pesos
+        const precioTicketMXN = q.precio_ticket ?? 30 
         const totalBoletos = ranking.length
         const recaudadoPesos = totalBoletos * precioTicketMXN
         const premioPesos = recaudadoPesos * PORCENTAJE_PREMIO
@@ -111,7 +112,6 @@ export default function Posiciones() {
         }
       })
 
-      // 🕒 ORDENAMIENTO: De izquierda a derecha, la más próxima a cerrar primero
       const activas = quinielasProcesadas
         .filter(q => q.estado === 'abierta' || (q.estado === 'cerrada' && q.goles_totales_real === null))
         .sort((a, b) => new Date(a.fecha_cierre).getTime() - new Date(b.fecha_cierre).getTime())
@@ -129,22 +129,42 @@ export default function Posiciones() {
     cargarDatos()
   }, [])
 
-  // 🆕 FUNCIÓN MEJORADA: Efecto acordeón (si clickeas la misma, se cierra; si clickeas otra, se abre)
-  const toggleExpandir = (id: string) => {
+  const toggleExpandirHistorial = (id: string) => {
     setQuinielaExpandidaId(prevId => prevId === id ? null : id)
   }
 
-  if (cargando) return <div className="text-amber-500 animate-pulse text-center mt-10 font-bold uppercase tracking-widest text-xs">Calculando Bolsa y Posiciones...</div>
+  const toggleExpandirJugador = (id: string) => {
+    setJugadorExpandidoId(prevId => prevId === id ? null : id)
+  }
+
+  // SKELETON LOADER
+  if (cargando) {
+    return (
+      <div className="w-full max-w-4xl mt-6 animate-pulse space-y-4 px-2">
+        <div className="flex justify-center gap-2 mb-4">
+          <div className="h-8 bg-slate-800 rounded-lg w-24"></div>
+          <div className="h-8 bg-slate-800 rounded-lg w-24"></div>
+        </div>
+        <div className="h-44 bg-slate-800 rounded-2xl w-full"></div>
+        <div className="h-64 bg-slate-800/80 rounded-xl w-full border border-slate-800"></div>
+      </div>
+    )
+  }
+
   if (!quinielaActiva) return <div className="text-slate-500 italic text-center mt-10 text-sm">No hay datos de quinielas disponibles.</div>
 
   const totalJugadores = quinielaActiva.ranking.length
-  const partidosTerminados = quinielaActiva.partidos.filter((p: any) => p.resultado_real).length
+  const partidosTerminados = quinielaActiva.partidos.filter((p: any) => p.es_final).length
   
   const fechaCierreCorta = quinielaActiva.fecha_cierre ? quinielaActiva.fecha_cierre.substring(0, 16) : null
   const fechaCierre = new Date(fechaCierreCorta || quinielaActiva.fecha_cierre)
   const yaPasoCierre = new Date() >= fechaCierre
   
   const mostrarPicks = quinielaActiva.estado === 'cerrada' || yaPasoCierre
+
+  // 🔥 NUEVO: Formateo de fecha y hora bonita para el candado
+  const opcionesFecha: Intl.DateTimeFormatOptions = { day: '2-digit', month: 'short', hour: '2-digit', minute:'2-digit' };
+  const fechaTextoVisible = fechaCierre.toLocaleDateString('es-MX', opcionesFecha).replace(',', ' a las');
 
   const getAvatarUrl = (nombre: string, url: string | null) => {
     if (url) return url;
@@ -163,7 +183,10 @@ export default function Posiciones() {
             {quinielasAbiertas.map(qa => (
               <button 
                 key={qa.id} 
-                onClick={() => setQuinielaActiva(qa)} 
+                onClick={() => {
+                  setQuinielaActiva(qa);
+                  setJugadorExpandidoId(null);
+                }} 
                 className={`px-3 py-1.5 rounded-lg text-[10px] md:text-xs font-black uppercase transition-all ${
                   quinielaActiva?.id === qa.id 
                     ? 'bg-amber-500 text-slate-900 shadow-md scale-105' 
@@ -223,11 +246,11 @@ export default function Posiciones() {
 
         {!mostrarPicks && (
           <div className="mb-3 text-center border border-amber-900/50 bg-amber-950/20 text-amber-500/80 text-[10px] py-1.5 rounded-lg font-bold uppercase tracking-widest">
-            🔒 Radiografía oculta hasta las {fechaCierre.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+            🔒 Radiografía oculta hasta el {fechaTextoVisible}
           </div>
         )}
 
-        {/* TABLA DE POSICIONES ULTRA COMPACTA */}
+        {/* TABLA DE POSICIONES INTERACTIVA */}
         <div className="bg-slate-900/80 rounded-xl border border-slate-800 shadow-2xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -243,74 +266,153 @@ export default function Posiciones() {
               <tbody className="divide-y divide-slate-800/40">
                 {quinielaActiva.ranking.map((jugador: any) => {
                   const esLider = jugador.posicion === 1 && totalJugadores > 1 && jugador.puntos > 0
+                  const estaExpandido = jugadorExpandidoId === jugador.id
+
                   return (
-                    <tr key={jugador.id} className={`transition-colors hover:bg-slate-800/30 ${esLider ? 'bg-gradient-to-r from-amber-900/15 to-transparent' : ''}`}>
-                      
-                      <td className="p-2 text-center">
-                        {jugador.posicion === 1 && partidosTerminados > 0 ? <span className="text-lg drop-shadow-md block">🥇</span> : 
-                         jugador.posicion === 2 && partidosTerminados > 0 ? <span className="text-base block">🥈</span> : 
-                         jugador.posicion === 3 && partidosTerminados > 0 ? <span className="text-base block">🥉</span> : 
-                         <span className="text-[10px] font-black text-slate-500 bg-slate-950 border border-slate-800 px-1.5 py-0.5 rounded">{jugador.posicion}</span>}
-                      </td>
-                      
-                      <td className="p-2">
-                        <div className="flex items-center gap-2">
-                          <div className={`relative shrink-0 rounded-full border-2 ${esLider ? 'border-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.3)]' : 'border-slate-700'}`}>
-                            <img src={getAvatarUrl(jugador.nombre, jugador.avatar_url)} alt={jugador.nombre} className="w-6 h-6 md:w-7 md:h-7 rounded-full object-cover bg-slate-900" />
-                          </div>
-                          <div>
-                            <span className={`font-black uppercase text-[10px] md:text-xs block tracking-tight truncate max-w-[100px] md:max-w-[150px] ${esLider ? 'text-amber-400' : 'text-slate-200'}`}>
-                              {jugador.nombre} {esLider && <span className="ml-0.5 text-[9px]">👑</span>}
-                            </span>
-                            <div className="block md:hidden text-[8px] font-bold text-slate-500 mt-0.5 uppercase tracking-wide">
-                              Dif: {quinielaActiva.goles_totales_real !== null ? jugador.golesDiff : '?'}
+                    <Fragment key={jugador.id}>
+                      {/* FILA PRINCIPAL DEL JUGADOR */}
+                      <tr 
+                        onClick={() => mostrarPicks && toggleExpandirJugador(jugador.id)}
+                        className={`transition-colors hover:bg-slate-800/50 ${mostrarPicks ? 'cursor-pointer' : ''} ${esLider ? 'bg-gradient-to-r from-amber-900/15 to-transparent' : ''} ${estaExpandido ? 'bg-slate-800/30' : ''}`}
+                      >
+                        <td className="p-2 text-center">
+                          {jugador.posicion === 1 && partidosTerminados > 0 ? <span className="text-lg drop-shadow-md block">🥇</span> : 
+                           jugador.posicion === 2 && partidosTerminados > 0 ? <span className="text-base block">🥈</span> : 
+                           jugador.posicion === 3 && partidosTerminados > 0 ? <span className="text-base block">🥉</span> : 
+                           <span className="text-[10px] font-black text-slate-500 bg-slate-950 border border-slate-800 px-1.5 py-0.5 rounded">{jugador.posicion}</span>}
+                        </td>
+                        
+                        <td className="p-2">
+                          <div className="flex items-center gap-2">
+                            <div className={`relative shrink-0 rounded-full border-2 ${esLider ? 'border-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.3)]' : 'border-slate-700'}`}>
+                              <img src={getAvatarUrl(jugador.nombre, jugador.avatar_url)} alt={jugador.nombre} className="w-6 h-6 md:w-7 md:h-7 rounded-full object-cover bg-slate-900" />
+                            </div>
+                            <div>
+                              <span className={`font-black uppercase text-[10px] md:text-xs block tracking-tight truncate max-w-[100px] md:max-w-[150px] ${esLider ? 'text-amber-400' : 'text-slate-200'}`}>
+                                {jugador.nombre} {esLider && <span className="ml-0.5 text-[9px]">👑</span>}
+                              </span>
+                              {/* 🔥 CORRECCIÓN: Filtrar Dif en móviles si no se deben mostrar picks */}
+                              {mostrarPicks && (
+                                <div className="block md:hidden text-[8px] font-bold text-slate-500 mt-0.5 uppercase tracking-wide">
+                                  Dif: {quinielaActiva.goles_totales_real !== null ? jugador.golesDiff : '?'}
+                                </div>
+                              )}
                             </div>
                           </div>
-                        </div>
-                      </td>
-                      
-                      <td className="p-2 text-center">
-                        <span className={`text-sm md:text-base font-black ${esLider ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(245,158,11,0.3)]' : 'text-green-400 drop-shadow-[0_0_4px_rgba(74,222,128,0.15)]'}`}>
-                          {jugador.puntos}
-                        </span>
-                      </td>
-                      
-                      <td className="p-2 text-center">
-                        <span className="text-[10px] md:text-xs font-mono font-bold text-slate-300 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">
-                          {mostrarPicks ? jugador.prediccionGoles : '🔒'}
-                        </span>
-                        {quinielaActiva.goles_totales_real !== null && <span className="hidden md:inline-block text-[8px] font-bold text-amber-500 ml-1">Dif:{jugador.golesDiff}</span>}
-                      </td>
-                      
-                      <td className="p-2 text-right pr-3">
-                        <div className="flex gap-0.5 md:gap-1 justify-end flex-wrap w-full max-w-[180px] ml-auto">
-                          {quinielaActiva.partidos.map((p: any, i: number) => {
-                            const pronostico = jugador.pronosticos.find((pr: any) => pr.partido_id === p.id)
-                            const estado = jugador.aciertos[p.id]
-                            
-                            if (!mostrarPicks) {
+                        </td>
+                        
+                        <td className="p-2 text-center">
+                          <span className={`text-sm md:text-base font-black ${esLider ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(245,158,11,0.3)]' : 'text-green-400 drop-shadow-[0_0_4px_rgba(74,222,128,0.15)]'}`}>
+                            {jugador.puntos}
+                          </span>
+                        </td>
+                        
+                        <td className="p-2 text-center">
+                          <span className="text-[10px] md:text-xs font-mono font-bold text-slate-300 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">
+                            {mostrarPicks ? jugador.prediccionGoles : '🔒'}
+                          </span>
+                          {/* 🔥 CORRECCIÓN: Filtrar Dif en desktop si no se deben mostrar picks */}
+                          {mostrarPicks && quinielaActiva.goles_totales_real !== null && (
+                            <span className="hidden md:inline-block text-[8px] font-bold text-amber-500 ml-1">Dif:{jugador.golesDiff}</span>
+                          )}
+                        </td>
+                        
+                        <td className="p-2 text-right pr-3">
+                          <div className="flex gap-0.5 md:gap-1 justify-end flex-wrap w-full max-w-[180px] ml-auto items-center">
+                            {quinielaActiva.partidos.map((p: any, i: number) => {
+                              const pronostico = jugador.pronosticos.find((pr: any) => pr.partido_id === p.id)
+                              const estado = jugador.aciertos[p.id]
+                              
+                              // 🔥 NUEVO: Detectar si este partido está EN VIVO para el cuadrito
+                              const tieneGoles = p.goles_local !== null && p.goles_visitante !== null
+                              const enVivo = tieneGoles && !p.es_final
+                              
+                              if (!mostrarPicks) {
+                                return (
+                                  <div key={p.id} className="w-4 h-4 md:w-5 md:h-5 flex items-center justify-center rounded text-[7px] md:text-[8px] bg-slate-950 border border-slate-800 text-slate-600" title={`Partido ${i+1} Oculto`}>
+                                    🔒
+                                  </div>
+                                )
+                              }
+
+                              let bgClass = "bg-slate-950 border-slate-800 text-slate-600"
+                              if (estado === 'acierto') bgClass = "bg-green-600 border-green-500 text-white"
+                              if (estado === 'fallo') bgClass = "bg-red-950/40 border-red-900 text-red-500"
+                              if (estado === 'pendiente' && pronostico) bgClass = "bg-slate-800 border-slate-600 text-slate-300"
+                              
+                              // 🔥 NUEVO: Agregar anillo parpadeante si está en vivo
+                              const enVivoClass = enVivo ? "ring-1 ring-red-500 animate-pulse shadow-[0_0_5px_rgba(239,68,68,0.5)]" : ""
+                              
                               return (
-                                <div key={p.id} className="w-4 h-4 md:w-5 md:h-5 flex items-center justify-center rounded text-[7px] md:text-[8px] bg-slate-950 border border-slate-800 text-slate-600" title={`Partido ${i+1} Oculto`}>
-                                  🔒
+                                <div key={p.id} className={`w-4 h-4 md:w-5 md:h-5 flex items-center justify-center rounded text-[7px] md:text-[9px] font-black border ${bgClass} ${enVivoClass}`} title={`Partido ${i+1}${enVivo ? ' (EN VIVO)' : ''}`}>
+                                  {pronostico ? pronostico.eleccion_usuario : '-'}
                                 </div>
                               )
-                            }
+                            })}
+                            {mostrarPicks && (
+                              <span className="text-[10px] ml-1 text-slate-500">{estaExpandido ? '🔼' : '🔽'}</span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
 
-                            let bgClass = "bg-slate-950 border-slate-800 text-slate-600"
-                            if (estado === 'acierto') bgClass = "bg-green-600 border-green-500 text-white"
-                            if (estado === 'fallo') bgClass = "bg-red-950/40 border-red-900 text-red-500"
-                            if (estado === 'pendiente' && pronostico) bgClass = "bg-slate-800 border-slate-600 text-slate-300"
-                            
-                            return (
-                              <div key={p.id} className={`w-4 h-4 md:w-5 md:h-5 flex items-center justify-center rounded text-[7px] md:text-[9px] font-black border ${bgClass}`} title={`Partido ${i+1}`}>
-                                {pronostico ? pronostico.eleccion_usuario : '-'}
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </td>
+                      {/* 🔥 FILA EXPANDIDA: MARCADORES EN VIVO */}
+                      {estaExpandido && mostrarPicks && (
+                        <tr className="bg-slate-900 border-b border-slate-800 shadow-inner">
+                          <td colSpan={5} className="p-3 md:p-4">
+                            <h4 className="text-[9px] md:text-[10px] font-black uppercase text-amber-500 tracking-widest mb-3 flex items-center gap-2">
+                              <span>📡</span> Desglose en Vivo - {jugador.nombre}
+                            </h4>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                              {quinielaActiva.partidos.map((p: any, i: number) => {
+                                const pronostico = jugador.pronosticos.find((pr: any) => pr.partido_id === p.id)
+                                const estado = jugador.aciertos[p.id]
+                                const tieneGoles = p.goles_local !== null && p.goles_visitante !== null
+                                const enVivo = tieneGoles && !p.es_final
 
-                    </tr>
+                                let badgeColor = "bg-slate-800 text-slate-400 border-slate-700"
+                                if (estado === 'acierto') badgeColor = "bg-green-950/40 text-green-400 border-green-900/50"
+                                if (estado === 'fallo') badgeColor = "bg-red-950/30 text-red-400 border-red-900/40"
+
+                                return (
+                                  <div key={p.id} className={`flex flex-col p-2.5 rounded-lg border ${badgeColor} relative overflow-hidden`}>
+                                    
+                                    <div className="flex justify-between items-start mb-2">
+                                      <span className="text-[8px] font-black text-slate-500 uppercase bg-slate-950 px-1 rounded">P{i+1}</span>
+                                      {enVivo && <span className="text-[8px] font-black uppercase text-red-500 animate-pulse flex items-center gap-1"><span className="w-1.5 h-1.5 bg-red-500 rounded-full"></span>En Vivo</span>}
+                                      {p.es_final && <span className="text-[8px] font-black uppercase text-green-500">✅ Final</span>}
+                                      {!tieneGoles && <span className="text-[8px] font-bold uppercase text-slate-500">⏱️ Pendiente</span>}
+                                    </div>
+
+                                    <div className="flex justify-between items-center mb-2">
+                                      <span className="text-[9px] font-bold uppercase text-slate-300 w-[35%] truncate">{p.equipo_local}</span>
+                                      
+                                      <div className="bg-slate-950 border border-slate-800 px-2 py-0.5 rounded text-center min-w-[40px]">
+                                        {tieneGoles ? (
+                                          <span className="text-xs font-black text-white">{p.goles_local} - {p.goles_visitante}</span>
+                                        ) : (
+                                          <span className="text-[9px] font-bold text-slate-600">VS</span>
+                                        )}
+                                      </div>
+
+                                      <span className="text-[9px] font-bold uppercase text-slate-300 w-[35%] truncate text-right">{p.equipo_visitante}</span>
+                                    </div>
+
+                                    <div className="flex justify-between items-center mt-auto pt-1.5 border-t border-slate-800/30">
+                                      <span className="text-[8px] font-bold uppercase text-slate-500">Elección: <span className="text-white font-black">{pronostico ? pronostico.eleccion_usuario : 'N/A'}</span></span>
+                                      
+                                      {estado === 'acierto' && <span className="text-[9px] font-black text-green-400 uppercase tracking-widest">+1 Pts</span>}
+                                      {estado === 'fallo' && <span className="text-[9px] font-black text-red-500 uppercase tracking-widest">Fallo</span>}
+                                    </div>
+                                    
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   )
                 })}
               </tbody>
@@ -332,15 +434,12 @@ export default function Posiciones() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {historial.map(quiniela => {
               const esHistorialPromo = quiniela.tipo_premiacion?.toLowerCase().includes('promo');
-              
-              // 🆕 LÓGICA MEJORADA: Compara si el ID de esta quiniela coincide con el estado único
               const estaExpandida = quinielaExpandidaId === quiniela.id;
               const jugadoresAMostrar = estaExpandida ? quiniela.ranking : quiniela.ranking.slice(0, 5);
 
               return (
                 <div 
                   key={quiniela.id} 
-                  // 🎨 UI MEJORADA: Si está expandida, abarca 2 columnas en pantallas medianas (sm:col-span-2)
                   className={`bg-slate-900 border rounded-xl p-3 md:p-4 shadow-lg relative overflow-hidden flex flex-col transition-all duration-300 ${estaExpandida ? 'border-amber-500/50 sm:col-span-2 shadow-[0_0_15px_rgba(245,158,11,0.1)]' : 'border-slate-800'}`}
                 >
                   <div className="flex justify-between items-start mb-3 border-b border-slate-800 pb-2">
@@ -365,7 +464,6 @@ export default function Posiciones() {
                   <div className="space-y-2 flex-grow">
                     {jugadoresAMostrar.map((jugador: any) => (
                       <div key={jugador.id} className="flex flex-col bg-slate-950/50 p-1.5 md:p-2 rounded-lg border border-slate-800/50 transition-colors">
-                        {/* Cabecera del Jugador */}
                         <div className="flex justify-between items-center">
                           <div className="flex items-center gap-2">
                             <span className="flex justify-center items-center text-sm w-4 md:w-5 text-center">
@@ -390,7 +488,6 @@ export default function Posiciones() {
                           </div>
                         </div>
 
-                        {/* 🆕 RADIOGRAFÍA EXTRA EXPANDIDA: Aciertos, Fallos y Diferencia de Goles */}
                         {estaExpandida && (
                           <div className="flex justify-between items-center border-t border-slate-800/50 pt-2 mt-2">
                             <div className="flex gap-0.5 md:gap-1 flex-wrap">
@@ -418,9 +515,8 @@ export default function Posiciones() {
                     ))}
                   </div>
 
-                  {/* 🆕 BOTÓN MEJORADO: Siempre muestra la opción de expandir para ver radiografías */}
                   <button
-                    onClick={() => toggleExpandir(quiniela.id)}
+                    onClick={() => toggleExpandirHistorial(quiniela.id)}
                     className="mt-3 pt-2 text-[9px] md:text-[10px] text-slate-400 hover:text-amber-400 font-bold uppercase tracking-widest transition-colors border-t border-slate-800/50 w-full text-center flex items-center justify-center gap-1"
                   >
                     {estaExpandida ? (

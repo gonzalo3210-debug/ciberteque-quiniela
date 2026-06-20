@@ -1,5 +1,6 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { supabase } from '@/lib/supabase'
 import { useCajero } from '@/hooks/useCajero'
 import { useCapturaFisica } from '@/hooks/useCapturaFisica'
 
@@ -18,6 +19,12 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
 
   // 🖨️ Estado para controlar el tipo de impresión dinámica
   const [formatoImpresion, setFormatoImpresion] = useState<'A4' | 'termica' | null>(null);
+
+  // 🚀 ESTADOS AUTOCOMPLETADO (Captura Física)
+  const [sugerenciasClientes, setSugerenciasClientes] = useState<any[]>([]);
+  const [mostrarSugerencias, setMostrarSugerencias] = useState(false);
+  const [buscandoCliente, setBuscandoCliente] = useState(false);
+  const autocompleteTimer = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const handleAfterPrint = () => setFormatoImpresion(null);
@@ -51,13 +58,79 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
     }
   }
 
-  const capturaCerradaPorFecha = captura.quiniela && captura.quiniela.fecha_cierre ? new Date() > new Date(captura.quiniela.fecha_cierre.substring(0, 16)) : false;
-  const capturaCerradaPorResultados = (captura.partidos || []).some(p => p.resultado_real !== null);
-  const bloqueoCapturaAdmin = capturaCerradaPorFecha || capturaCerradaPorResultados;
+  // 🔥 Filtro y Auto-selección Segura de Jornadas Abiertas
+  const quinielasCapturables = captura.quinielasAbiertas.filter(qa => {
+    const yaPasoFecha = qa.fecha_cierre ? new Date() > new Date(qa.fecha_cierre.substring(0, 16)) : false;
+    const yaHayResultados = (qa.partidos || []).some((p: any) => p.resultado_real !== null);
+    return !yaPasoFecha && !yaHayResultados;
+  });
+
+  useEffect(() => {
+    if (vista === 'captura' && quinielasCapturables.length > 0) {
+      const actualValida = captura.quiniela && quinielasCapturables.some(q => q.id === captura.quiniela.id);
+      if (!actualValida) captura.seleccionarQuiniela(quinielasCapturables[0]);
+    }
+  }, [vista, captura.quiniela?.id, quinielasCapturables.length]);
+
+  // 🧠 Lógica Robusta de Autocompletado Dual
+  const manejarAutocompletado = (valor: string, campo: 'telefono' | 'nombre') => {
+    if (campo === 'telefono') {
+      captura.setCapTelefono(valor);
+      captura.setCapUsuarioId(null);
+    } else {
+      captura.setCapNombre(valor);
+      captura.setCapUsuarioId(null);
+    }
+
+    if (valor.trim().length < 2) {
+      setSugerenciasClientes([]);
+      setMostrarSugerencias(false);
+      setBuscandoCliente(false);
+      if (autocompleteTimer.current) clearTimeout(autocompleteTimer.current);
+      return;
+    }
+
+    setBuscandoCliente(true);
+    setMostrarSugerencias(true);
+
+    if (autocompleteTimer.current) clearTimeout(autocompleteTimer.current);
+
+    autocompleteTimer.current = setTimeout(async () => {
+      const { data } = await supabase
+        .from('usuarios')
+        .select('id, nombre, telefono')
+        .or(`nombre.ilike.%${valor}%,telefono.ilike.%${valor}%`)
+        .limit(6);
+
+      if (data && data.length > 0) {
+        setSugerenciasClientes(data);
+      } else {
+        setSugerenciasClientes([]);
+        setMostrarSugerencias(false);
+      }
+      setBuscandoCliente(false);
+    }, 400); // Debounce de 400ms
+  };
+
+  const aplicarSugerencia = (cliente: any) => {
+    captura.setCapUsuarioId(cliente.id);
+    captura.setCapNombre(cliente.nombre);
+    captura.setCapTelefono(cliente.telefono || '');
+    setMostrarSugerencias(false);
+    setSugerenciasClientes([]);
+  };
+
+  const limpiarCliente = () => {
+    captura.setCapUsuarioId(null);
+    captura.setCapNombre('');
+    captura.setCapTelefono('');
+    setMostrarSugerencias(false);
+    setSugerenciasClientes([]);
+  };
 
   return (
     <>
-      {/* VISTA: VENTAS Y RETIROS */}
+      {/* VISTA: VENTAS Y RETIROS (Restaurada al diseño unificado original) */}
       {vista === 'recargas' && (
         <div className="animate-in fade-in duration-300 w-full max-w-2xl mx-auto space-y-4">
           <div className="flex gap-2 relative">
@@ -150,7 +223,7 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                             </thead>
                             <tbody className="divide-y divide-slate-800/50">
                               {(() => {
-                                let saldoAcumulado = saldoTotal; // Partimos del saldo actual en pesos
+                                let saldoAcumulado = saldoTotal; 
                                 return cajero.datosHistorial.map((mov: any) => {
                                   const saldoEnEseMomento = saldoAcumulado;
                                   saldoAcumulado -= mov.cantidad; 
@@ -194,12 +267,13 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
         </div>
       )}
 
-      {/* VISTA: CAPTURA FÍSICA (INTACTA) */}
+      {/* VISTA: CAPTURA FÍSICA */}
       {vista === 'captura' && (
         <div className="animate-in fade-in duration-300 w-full max-w-3xl mx-auto">
-          {captura.quinielasAbiertas.length > 1 && (
+          
+          {(quinielasCapturables.length > 1 || (quinielasCapturables.length === 1 && captura.quiniela?.id !== quinielasCapturables[0].id)) && (
             <div className="flex flex-wrap justify-center gap-1.5 mb-4 bg-slate-900/50 p-2 rounded-xl border border-slate-800">
-              {captura.quinielasAbiertas.map(qa => (
+              {quinielasCapturables.map(qa => (
                 <button key={qa.id} onClick={() => captura.seleccionarQuiniela(qa)} className={`px-3 py-1.5 rounded-lg text-[10px] md:text-xs font-black uppercase transition-all ${captura.quiniela?.id === qa.id ? 'bg-amber-500 text-slate-900 shadow-[0_0_10px_rgba(245,158,11,0.3)]' : 'bg-slate-950 border border-slate-700 text-slate-500 hover:text-slate-300'}`}>
                   {qa.nombre_jornada}
                 </button>
@@ -207,19 +281,12 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
             </div>
           )}
 
-          {!captura.quiniela ? (
-            <p className="text-center text-slate-500 py-10 text-[10px] font-bold uppercase tracking-widest bg-slate-900/50 rounded-xl border border-slate-800">No hay jornada activa para capturar.</p>
+          {quinielasCapturables.length === 0 ? (
+            <p className="text-center text-slate-500 py-10 text-[10px] font-bold uppercase tracking-widest bg-slate-900/50 rounded-xl border border-slate-800">No hay jornadas disponibles para captura.</p>
+          ) : !captura.quiniela || (captura.quiniela && !quinielasCapturables.some(q => q.id === captura.quiniela.id)) ? (
+            <p className="text-center text-amber-500 py-10 text-[10px] font-bold uppercase tracking-widest bg-slate-900/50 rounded-xl border border-amber-900/50 shadow-inner">Cargando jornada próxima...</p>
           ) : (
             <div className="bg-gradient-to-br from-amber-950/20 to-slate-900 border border-amber-900/40 rounded-2xl p-4 md:p-6 shadow-[0_0_20px_rgba(245,158,11,0.05)] relative overflow-hidden">
-              {bloqueoCapturaAdmin && (
-                <div className="absolute inset-0 z-50 bg-slate-950/90 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center border border-red-900/50 rounded-2xl">
-                  <span className="text-5xl mb-3">🛑</span>
-                  <h2 className="text-xl font-black text-red-500 uppercase tracking-widest mb-1">Captura Bloqueada</h2>
-                  <p className="text-slate-400 font-bold text-[10px] uppercase">
-                    {capturaCerradaPorResultados ? 'Ya se ingresaron resultados reales.' : 'La fecha de cierre ha expirado.'}
-                  </p>
-                </div>
-              )}
               
               <div className="mb-5 border-b border-amber-900/30 pb-3 flex flex-col md:flex-row md:items-center justify-between gap-2">
                 <div>
@@ -228,7 +295,6 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                 </div>
               </div>
 
-              {/* 🖨️ SECCIÓN ACTUALIZADA DE BOTONES DUALES DE IMPRESIÓN */}
               {captura.linkWaReciente && (
                 <div className="mb-5 bg-green-950/40 border border-green-600/50 p-3 rounded-xl text-center shadow-[0_0_15px_rgba(22,163,74,0.1)] animate-in zoom-in-95">
                   <p className="text-green-400 font-black text-[10px] uppercase tracking-widest mb-2">✅ Captura Guardada</p>
@@ -247,15 +313,58 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                 </div>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5 bg-slate-950/40 p-3 rounded-xl border border-slate-800/50">
-                <div>
+              {/* 🚀 BÚSQUEDA AUTOCOMPLETADO (NOMBRE O WHATSAPP) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5 bg-slate-950/40 p-3 rounded-xl border border-slate-800/50 relative">
+                <div className="relative">
                   <label className="text-[9px] md:text-[10px] text-amber-500/80 font-bold uppercase tracking-widest mb-1.5 block">WhatsApp</label>
-                  <input type="text" placeholder="10 dígitos..." value={captura.capTelefono} onChange={(e) => captura.buscarClienteParaCaptura(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-white outline-none focus:border-amber-500 font-mono text-sm transition-all placeholder:text-slate-600" />
+                  <input 
+                    type="text" 
+                    placeholder="10 dígitos..." 
+                    value={captura.capTelefono} 
+                    onChange={(e) => manejarAutocompletado(e.target.value, 'telefono')} 
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-white outline-none focus:border-amber-500 font-mono text-sm transition-all placeholder:text-slate-600" 
+                  />
                 </div>
-                <div>
-                  <label className="text-[9px] md:text-[10px] text-amber-500/80 font-bold uppercase tracking-widest mb-1.5 block">Nombre del Cliente</label>
-                  <input type="text" placeholder="Ej. Juan Pérez" value={captura.capNombre} onChange={(e) => captura.setCapNombre(e.target.value)} className={`w-full bg-slate-900 border rounded-lg px-3 py-2.5 text-white outline-none font-bold uppercase text-xs transition-all placeholder:text-slate-600 ${captura.capUsuarioId ? 'border-green-900/50 text-green-400' : 'border-slate-700 focus:border-amber-500'}`} disabled={captura.capUsuarioId !== null} />
+                <div className="relative">
+                  <div className="flex justify-between items-center mb-1.5">
+                    <label className="text-[9px] md:text-[10px] text-amber-500/80 font-bold uppercase tracking-widest">Nombre del Cliente</label>
+                    {captura.capUsuarioId && (
+                      <button onClick={limpiarCliente} className="text-[9px] text-red-400 hover:text-red-300 uppercase font-black transition-colors">
+                        ✕ Limpiar
+                      </button>
+                    )}
+                  </div>
+                  <input 
+                    type="text" 
+                    placeholder="Ej. Juan Pérez" 
+                    value={captura.capNombre} 
+                    onChange={(e) => manejarAutocompletado(e.target.value, 'nombre')} 
+                    className={`w-full bg-slate-900 border rounded-lg px-3 py-2.5 text-white outline-none font-bold uppercase text-xs transition-all placeholder:text-slate-600 ${captura.capUsuarioId ? 'border-green-500/50 text-green-400 bg-green-950/20' : 'border-slate-700 focus:border-amber-500'}`} 
+                  />
                 </div>
+
+                {/* MODAL DE SUGERENCIAS FLOTANTE */}
+                {mostrarSugerencias && sugerenciasClientes.length > 0 && (
+                  <div className="absolute top-[100%] left-0 w-full bg-slate-800 border border-slate-600 rounded-lg mt-1 z-50 shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2">
+                    {sugerenciasClientes.map(cliente => (
+                      <div 
+                        key={cliente.id} 
+                        onClick={() => aplicarSugerencia(cliente)}
+                        className="px-4 py-2.5 hover:bg-amber-600 cursor-pointer flex justify-between items-center border-b border-slate-700/50 last:border-0 group transition-colors"
+                      >
+                        <span className="font-bold text-xs uppercase text-slate-300 group-hover:text-white">{cliente.nombre}</span>
+                        <span className="font-mono text-[10px] text-amber-500/80 group-hover:text-amber-100">{cliente.telefono}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* INDICADOR DE CARGA AUTOCOMPLETADO */}
+                {buscandoCliente && (
+                  <div className="absolute top-[100%] left-0 w-full bg-slate-800 border border-slate-600 rounded-lg mt-1 z-50 p-3 text-center shadow-2xl">
+                    <span className="text-amber-500 text-[10px] uppercase font-bold tracking-widest animate-pulse">Buscando...</span>
+                  </div>
+                )}
               </div>
               
               <div className="space-y-1.5 mb-5">
@@ -301,32 +410,31 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
         </div>
       )}
 
-      {/* --- ESTILOS DE IMPRESIÓN DINÁMICOS --- */}
-      {formatoImpresion && (
-        <style>{`
-          @media print {
-            @page { margin: 0; size: auto; }
-            body { background: white; margin: 0; padding: 0; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-            body * { visibility: hidden !important; }
-            .zona-impresion, .zona-impresion * { visibility: visible !important; }
-            .zona-impresion { 
-              position: absolute !important; 
-              left: 0 !important; 
-              top: 0 !important; 
-              width: 100% !important; 
-              margin: 0 !important; 
-              background-color: white !important;
-            }
-            .impresion-a4 { padding: 15px !important; }
-            .impresion-termica { max-width: 80mm !important; margin: 0 auto !important; padding: 2mm !important; font-family: monospace !important; }
+      {/* --- ESTILOS DE IMPRESIÓN FULL-PAGE --- */}
+      <style>{`
+        @media print {
+          @page { margin: 0mm; size: letter; }
+          body { background: white; margin: 0; padding: 0; }
+          body * { visibility: hidden !important; }
+          .zona-impresion, .zona-impresion * { visibility: visible !important; }
+          .zona-impresion { 
+            position: absolute !important; 
+            left: 0 !important; 
+            top: 0 !important; 
+            width: 100% !important; 
+            height: 100% !important;
+            margin: 0 !important; 
+            padding: 15px !important; 
+            box-sizing: border-box !important;
+            background-color: white !important;
           }
-        `}</style>
-      )}
+        }
+      `}</style>
 
-      {/* 1. DISEÑO TICKET A4 */}
-      {captura.quiniela && captura.ticketAImprimir && formatoImpresion === 'A4' && (
-        <div className="hidden print:flex print:flex-col print:items-center print:w-full print:bg-white print:text-black zona-impresion impresion-a4 z-[99999]">
-          <div className="w-full max-w-3xl border-4 border-black rounded-3xl p-6 bg-white flex flex-col mx-auto my-4">
+      {/* TICKET GIGANTE PARA IMPRESIÓN/CAPTURA */}
+      {captura.quiniela && captura.ticketAImprimir && (
+        <div className="hidden print:flex print:flex-col print:items-center print:w-full print:h-full print:bg-white print:text-black zona-impresion z-[99999]">
+          <div className="w-full h-full border-4 border-black rounded-3xl p-6 bg-white flex flex-col justify-between">
             <div>
               <div className="text-center mb-6">
                 <h1 className="font-black text-4xl uppercase tracking-widest text-blue-900">CIBERTEQUE</h1>
@@ -387,55 +495,13 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                 <span className="font-bold uppercase text-sm">Desempate (Goles):</span>
                 <span className="font-black text-3xl">{captura.ticketAImprimir.goles}</span>
               </div>
-              <p className="text-center text-sm font-bold uppercase mt-6 text-blue-900">Costo del Boleto: ${captura.quiniela.precio_ticket ?? 30} MXN</p>
+              <p className="text-center text-sm font-bold uppercase mt-6 text-blue-900">Costo del Boleto: {captura.quiniela.precio_ticket ?? 1} {(captura.quiniela.precio_ticket ?? 1) === 1 ? 'Crédito' : 'Créditos'}</p>
             </div>
             
             <div className="mt-6 pt-6 border-t-2 border-black border-dashed">
               <p className="text-[9px] text-justify leading-tight font-bold uppercase text-black"><b>REGLAMENTO:</b> 1. PAGO ANTICIPADO: Boleto pagado antes del 1er partido. 2. CORRECCIONES: Revise su jugada, cambios SOLO ANTES de la hora de cierre. Iniciada la jornada participa tal cual. 3. SUSPENDIDOS/APLAZADOS: Si ya inició vale el marcador en ese momento; si no inició, se declara Empate a 0. 4. RESULTADOS: Válidos a los 90 min (sin extras).</p>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* 2. DISEÑO TICKET TÉRMICO */}
-      {captura.quiniela && captura.ticketAImprimir && formatoImpresion === 'termica' && (
-        <div className="hidden print:block print:bg-white print:text-black text-black zona-impresion impresion-termica z-[99999]">
-          <div className="text-center font-black text-xl leading-none">CIBERTEQUE</div>
-          <div className="text-center text-[10px] mb-2 uppercase">Pronósticos Deportivos</div>
-          
-          <div className="text-center font-bold text-sm mb-2 uppercase border-y border-dashed border-black py-1">
-            {captura.quiniela.nombre_jornada}
-          </div>
-          
-          <div className="text-xs mb-2 leading-tight">
-            <div><span className="font-bold">Jugador:</span> {captura.ticketAImprimir.nombre}</div>
-            <div><span className="font-bold">Cel:</span> {captura.ticketAImprimir.telefono}</div>
-            <div><span className="font-bold">Fecha:</span> {new Date().toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })}</div>
-          </div>
-          
-          <table className="w-full text-left text-xs mb-2 border-collapse">
-            <thead>
-              <tr className="border-b border-black">
-                <th className="pb-1 font-bold">Partido</th>
-                <th className="pb-1 text-right font-bold">Pick</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(captura.partidos || []).map((p, i) => (
-                <tr key={p.id} className="border-b border-dashed border-gray-400">
-                  <td className="py-1 pr-1 truncate max-w-[50mm]">{i+1}. {p.equipo_local.substring(0,8)} v {p.equipo_visitante.substring(0,8)}</td>
-                  <td className="py-1 text-right font-black text-sm">{captura.ticketAImprimir.selecciones[p.id]}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          
-          <div className="text-center font-black text-sm py-2 border-b border-dashed border-black mb-2">
-            Desempate: {captura.ticketAImprimir.goles} Goles
-          </div>
-          
-          <div className="text-center text-[10px] font-bold">¡Conserva este recibo!</div>
-          <div className="text-center text-[9px] mt-1">ciberteque-quiniela.vercel.app</div>
         </div>
       )}
     </>

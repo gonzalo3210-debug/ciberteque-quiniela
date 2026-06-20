@@ -16,14 +16,13 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
   const [nuevosGoles, setNuevosGoles] = useState<number | ''>('')
   const [guardandoEdicion, setGuardandoEdicion] = useState(false)
 
-  // 1. Extraemos la función de carga para poder llamarla al guardar ediciones
   const cargarHistorial = async () => {
     setCargando(true)
     try {
       const { data: eqData } = await supabase.from('equipos').select('nombre, logo_url')
       if (eqData) setEquipos(eqData)
 
-      // 🔥 MODIFICACIÓN: Solicitamos el "id" del pronóstico para hacer el UPDATE
+      // 🔥 Agregamos goles_local, goles_visitante y es_final a la consulta
       const { data, error } = await supabase
         .from('tickets')
         .select(`
@@ -35,18 +34,27 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
           pronosticos (
             id,
             eleccion_usuario,
-            partidos (id, equipo_local, equipo_visitante, resultado_real, fecha_hora)
+            partidos (id, equipo_local, equipo_visitante, resultado_real, fecha_hora, goles_local, goles_visitante, es_final)
           )
         `)
         .eq('usuario_id', usuarioId)
         .order('fecha_creacion', { ascending: false })
 
       if (data) {
-        const activos = data.filter(t => t.quinielas?.estado === 'abierta')
-        const completados = data.filter(t => t.quinielas?.estado !== 'abierta')
+        // 🔥 MISMA LÓGICA QUE EN POSICIONES: "Activas" son las abiertas o cerradas pero sin liquidar (En Juego)
+        const activos = data.filter(t => t.quinielas?.estado === 'abierta' || (t.quinielas?.estado === 'cerrada' && t.quinielas?.goles_totales_real === null))
+        const completados = data.filter(t => t.quinielas?.estado === 'cerrada' && t.quinielas?.goles_totales_real !== null)
         
-        setGruposActivos(agruparTicketsPorQuiniela(activos))
-        setGruposCompletados(agruparTicketsPorQuiniela(completados))
+        const gruposA = agruparTicketsPorQuiniela(activos)
+        const gruposC = agruparTicketsPorQuiniela(completados)
+
+        // 🕒 ORDENAMIENTO: Mostramos primero "En Juego" (fecha pasada) y luego "Próximas" (fecha futura)
+        gruposA.sort((a, b) => new Date(a.fecha_cierre).getTime() - new Date(b.fecha_cierre).getTime())
+        // En completados, mostramos lo más reciente primero
+        gruposC.sort((a, b) => new Date(b.fecha_cierre).getTime() - new Date(a.fecha_cierre).getTime())
+
+        setGruposActivos(gruposA)
+        setGruposCompletados(gruposC)
       }
     } catch (error) {
       console.error("Error cargando jugadas:", error)
@@ -66,16 +74,29 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
       const qId = ticket.quinielas?.id || ticket.quinielas?.nombre_jornada; 
       
       if (!grupos[qId]) {
+        let golesEnVivo = 0;
+        let hayGoles = false;
+        ticket.pronosticos.forEach((pr: any) => {
+          if (pr.partidos?.goles_local !== null && pr.partidos?.goles_visitante !== null) {
+             golesEnVivo += (pr.partidos.goles_local + pr.partidos.goles_visitante);
+             hayGoles = true;
+          }
+        });
+
         grupos[qId] = {
           nombre_jornada: ticket.quinielas?.nombre_jornada,
           estado: ticket.quinielas?.estado,
-          goles_reales: ticket.quinielas?.goles_totales_real,
-          fecha_cierre: ticket.quinielas?.fecha_cierre, // 🔥 NUEVO CAMPO
+          goles_reales: ticket.quinielas?.goles_totales_real !== null ? ticket.quinielas?.goles_totales_real : (hayGoles ? golesEnVivo : null),
+          fecha_cierre: ticket.quinielas?.fecha_cierre,
+          // 🔥 Mapeamos los nuevos campos de goles y estado final del partido
           partidos: ticket.pronosticos.map((pr: any) => ({
             id: pr.partidos?.id || `${pr.partidos?.equipo_local}-${pr.partidos?.equipo_visitante}`,
             local: pr.partidos?.equipo_local,
             visitante: pr.partidos?.equipo_visitante,
             real: pr.partidos?.resultado_real,
+            goles_local: pr.partidos?.goles_local,
+            goles_visitante: pr.partidos?.goles_visitante,
+            es_final: pr.partidos?.es_final,
             fecha_hora: pr.partidos?.fecha_hora
           })).sort((a: any, b: any) => {
             if (!a.fecha_hora) return 1;
@@ -92,7 +113,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
       ticket.pronosticos.forEach((pr: any) => {
         const pId = pr.partidos?.id || `${pr.partidos?.equipo_local}-${pr.partidos?.equipo_visitante}`;
         selecciones[pId] = pr.eleccion_usuario;
-        pronosticosIds[pId] = pr.id; // 🔥 Guardamos los IDs de los pronósticos
+        pronosticosIds[pId] = pr.id;
       });
       
       grupos[qId].tickets.push({
@@ -118,7 +139,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
     return equipo?.logo_url || 'https://a.espncdn.com/i/teamlogos/default-soccer-35.png'
   }
 
-  // 🔥 FUNCIONES DE EDICIÓN
   const abrirModalEdicion = (grupo: any, ticket: any) => {
     setTicketEditando({
       ticketId: ticket.id,
@@ -133,7 +153,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
   const guardarEdicion = async () => {
     setGuardandoEdicion(true)
     try {
-      // 1. Guardamos las selecciones de los partidos 
       const pronosticosActualizados = ticketEditando.partidos.map((p: any) => ({
         id: ticketEditando.pronosticosIds[p.id],
         ticket_id: ticketEditando.ticketId,
@@ -144,7 +163,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
       const { error: errorPronosticos } = await supabase.from('pronosticos').upsert(pronosticosActualizados)
       if (errorPronosticos) throw errorPronosticos
 
-      // 2. Guardamos el total de goles en el ticket
       const golesParseados = nuevosGoles === '' ? 0 : Number(nuevosGoles)
       const { error: errorTicket } = await supabase
         .from('tickets')
@@ -173,19 +191,40 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
 
   const TarjetaGrupoAgrupado = ({ grupo, esActivo }: { grupo: any, esActivo: boolean }) => {
     
-    // 🔥 LÓGICA DE BLOQUEO DE EDICIÓN
     const fechaCierreCorta = grupo.fecha_cierre ? grupo.fecha_cierre.substring(0, 16) : null;
     const fechaCierreObj = new Date(fechaCierreCorta || grupo.fecha_cierre || 0);
     const ahora = new Date();
     const yaPasoLaHora = grupo.fecha_cierre ? (ahora > fechaCierreObj) : false;
     const yaHayResultados = grupo.partidos.some((p: any) => p.real !== null);
     
-    // Solo se puede editar si está "En Juego", NO ha pasado la hora, y NO hay resultados reales
+    // Sólo se puede editar si no ha pasado la hora Y no hay resultados.
     const sePuedeEditar = esActivo && !yaPasoLaHora && !yaHayResultados;
+
+    // 🔥 Agregamos un badge visual si la jornada ya está "En Juego"
+    const estaEnJuego = esActivo && (yaPasoLaHora || yaHayResultados);
 
     return (
       <div className={`bg-slate-900 border rounded-xl overflow-hidden shadow-xl transition-all mb-6 ${esActivo ? 'border-amber-600/40 shadow-[0_0_15px_rgba(217,119,6,0.1)]' : 'border-slate-700 opacity-95'}`}>
-        {/* ... (el div del encabezado se queda igual) ... */}
+        
+        <div className={`px-4 py-3 border-b flex flex-col sm:flex-row justify-between items-center gap-2 ${esActivo ? 'bg-gradient-to-r from-amber-900/20 to-slate-900 border-amber-800/40' : 'bg-slate-950 border-slate-700'}`}>
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <span className="text-2xl drop-shadow-md">{esActivo ? (estaEnJuego ? '⚔️' : '🔥') : '✅'}</span>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className={`font-black uppercase tracking-widest text-sm md:text-base ${esActivo ? 'text-amber-500' : 'text-slate-300'}`}>{grupo.nombre_jornada}</h3>
+                {estaEnJuego && <span className="bg-red-600/20 text-red-400 border border-red-900/50 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest animate-pulse">En Juego</span>}
+              </div>
+              <p className="text-[10px] text-slate-500 font-bold uppercase mt-0.5">{grupo.tickets.length} {grupo.tickets.length === 1 ? 'Boleto' : 'Boletos'} participando</p>
+            </div>
+          </div>
+
+          <div className={`px-3 py-1.5 rounded-lg border flex items-center gap-2 w-full sm:w-auto justify-center ${esActivo ? 'bg-slate-950 border-amber-900/50' : 'bg-slate-900 border-slate-700'}`}>
+             <span className="text-[9px] uppercase tracking-widest font-bold text-slate-400">Total Goles Real:</span>
+             <span className={`text-sm font-black drop-shadow-md ${esActivo ? 'text-amber-400' : 'text-blue-400'}`}>
+               {grupo.goles_reales !== null ? grupo.goles_reales : '?'}
+             </span>
+          </div>
+        </div>
         
         <div className="overflow-x-auto">
           <table className="w-full text-left whitespace-nowrap">
@@ -197,7 +236,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
                   <th key={t.id} className={`px-2 py-2 font-black uppercase text-[9px] text-center border-r border-slate-800/50 ${esActivo ? 'text-amber-500' : 'text-blue-400'}`}>
                     <div className="flex flex-col items-center justify-center gap-1">
                       <span>J{idx + 1}</span>
-                      {/* 🔥 APLICAMOS LA NUEVA VARIABLE AQUÍ */}
                       {sePuedeEditar && (
                         <button 
                           onClick={() => abrirModalEdicion(grupo, t)} 
@@ -212,54 +250,74 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
                 ))}
               </tr>
             </thead>
-            {/* ... (el resto del código de la tabla sigue igual) ... */}
             <tbody className="divide-y divide-slate-800/50">
-              {grupo.partidos.map((p: any, pIdx: number) => (
-                <tr key={pIdx} className="hover:bg-slate-800/40 transition-colors">
-                  <td className="px-2 py-1.5">
-                    <div className="flex items-center justify-between text-[9px] sm:text-[10px] font-bold uppercase text-slate-300">
-                      <div className="flex items-center gap-1 w-[45%] justify-end">
-                        <span className="truncate text-right">{p.local}</span>
-                        <img src={obtenerLogo(p.local)} alt="" className="w-3.5 h-3.5 md:w-4 md:h-4 object-contain" />
+              {grupo.partidos.map((p: any, pIdx: number) => {
+                const tieneGoles = p.goles_local !== null && p.goles_visitante !== null;
+                const enVivo = tieneGoles && !p.es_final;
+                
+                return (
+                  <tr key={pIdx} className="hover:bg-slate-800/40 transition-colors">
+                    <td className="px-2 py-1.5">
+                      <div className="flex items-center justify-between text-[9px] sm:text-[10px] font-bold uppercase text-slate-300">
+                        <div className="flex items-center gap-1 w-[45%] justify-end">
+                          <span className="truncate text-right">{p.local}</span>
+                          <img src={obtenerLogo(p.local)} alt="" className="w-3.5 h-3.5 md:w-4 md:h-4 object-contain" />
+                        </div>
+                        <span className="text-[8px] text-slate-600 italic px-0.5">VS</span>
+                        <div className="flex items-center gap-1 w-[45%] justify-start">
+                          <img src={obtenerLogo(p.visitante)} alt="" className="w-3.5 h-3.5 md:w-4 md:h-4 object-contain" />
+                          <span className="truncate text-left">{p.visitante}</span>
+                        </div>
                       </div>
-                      <span className="text-[8px] text-slate-600 italic px-0.5">VS</span>
-                      <div className="flex items-center gap-1 w-[45%] justify-start">
-                        <img src={obtenerLogo(p.visitante)} alt="" className="w-3.5 h-3.5 md:w-4 md:h-4 object-contain" />
-                        <span className="truncate text-left">{p.visitante}</span>
-                      </div>
-                    </div>
-                  </td>
-                  
-                  <td className="px-1 py-1.5 text-center border-r border-slate-800 font-black bg-slate-950/40 sticky left-0 z-10">
-                    {p.real ? (
-                      <span className={`inline-block w-5 h-5 text-[9px] leading-5 rounded-full shadow-inner ${p.real==='L'?'bg-blue-900 text-blue-300':p.real==='E'?'bg-slate-700 text-slate-300':'bg-red-900 text-red-300'}`}>{p.real}</span>
-                    ) : (
-                      <span className="text-slate-600 font-mono text-[10px]">-</span>
-                    )}
-                  </td>
-
-                  {grupo.tickets.map((t: any) => {
-                    const pick = t.selecciones[p.id];
-                    let color = 'bg-slate-800 text-slate-300';
+                    </td>
                     
-                    if (p.real) {
-                      if (pick === p.real) color = 'bg-green-600 text-white shadow-[0_0_8px_rgba(34,197,94,0.3)] border border-green-500'; 
-                      else color = 'bg-red-950/60 text-red-500/50 border border-red-900/30'; 
-                    } else {
-                      if (pick === 'E') color = 'bg-slate-700 text-slate-300 border border-slate-600';
-                      else color = 'bg-blue-900/60 text-blue-300 border border-blue-800';
-                    }
+                    {/* 🔥 COLUMNA REAL MEJORADA (Concatenación de Marcador + L/E/V) */}
+                    <td className="px-1 py-1.5 text-center border-r border-slate-800 bg-slate-950/40 sticky left-0 z-10">
+                      {p.real ? (
+                        <div className="flex flex-col items-center gap-0.5 justify-center">
+                          {tieneGoles && (
+                            <span className="text-[10px] font-black text-white leading-none">
+                              {p.goles_local}-{p.goles_visitante}
+                            </span>
+                          )}
+                          <div className="flex items-center gap-1">
+                            <span className={`inline-block w-4 h-4 text-[8px] leading-4 rounded-full font-black shadow-inner ${p.real==='L'?'bg-blue-900 text-blue-300':p.real==='E'?'bg-slate-700 text-slate-300':'bg-red-900 text-red-300'}`}>
+                              {p.real}
+                            </span>
+                            {enVivo && (
+                              <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_5px_rgba(239,68,68,0.8)]" title="Partido en Vivo"></span>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-slate-600 font-mono text-[10px]">-</span>
+                      )}
+                    </td>
 
-                    return (
-                      <td key={`${t.id}-${p.id}`} className="px-1 py-1.5 text-center border-r border-slate-800/50">
-                        <span className={`inline-block w-5 h-5 text-[9px] leading-5 rounded-md font-black transition-all ${color}`}>
-                          {pick}
-                        </span>
-                      </td>
-                    )
-                  })}
-                </tr>
-              ))}
+                    {/* COLUMNAS DE LOS TICKETS */}
+                    {grupo.tickets.map((t: any) => {
+                      const pick = t.selecciones[p.id];
+                      let color = 'bg-slate-800 text-slate-300';
+                      
+                      if (p.real) {
+                        if (pick === p.real) color = 'bg-green-600 text-white shadow-[0_0_8px_rgba(34,197,94,0.3)] border border-green-500'; 
+                        else color = 'bg-red-950/60 text-red-500/50 border border-red-900/30'; 
+                      } else {
+                        if (pick === 'E') color = 'bg-slate-700 text-slate-300 border border-slate-600';
+                        else color = 'bg-blue-900/60 text-blue-300 border border-blue-800';
+                      }
+
+                      return (
+                        <td key={`${t.id}-${p.id}`} className="px-1 py-1.5 text-center border-r border-slate-800/50">
+                          <span className={`inline-block w-5 h-5 text-[9px] leading-5 rounded-md font-black transition-all ${color}`}>
+                            {pick}
+                          </span>
+                        </td>
+                      )
+                    })}
+                  </tr>
+                )
+              })}
             </tbody>
             
             <tfoot className="bg-slate-950 border-t-2 border-slate-700">
@@ -304,7 +362,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
             : 'text-slate-500 hover:text-slate-300'
           }`}
         >
-          <span>🔥</span> En Juego ({gruposActivos.length})
+          <span>🔥</span> Activas ({gruposActivos.length})
         </button>
         <button 
           onClick={() => setVistaActual('historial')} 

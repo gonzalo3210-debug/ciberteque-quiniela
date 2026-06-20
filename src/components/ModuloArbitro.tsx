@@ -14,13 +14,10 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
   const arbitro = useArbitro(actualizarSaldoGlobal);
   const { state: s, setters: set, actions: a, edicionJornada: ej, edicionTicket: et, constantes: c } = arbitro;
 
-  // =========================================================
-  // 🧠 OPTIMIZACIÓN: Memoización de cálculos pesados (100% Pesos MXN)
-  // =========================================================
   const { totalBoletosAdmin, precioBoletoPesos, cajaTotalPesos, cajaPremioPesos, cajaCiberPesos, ganadorActualAdmin } = useMemo(() => {
     const total = s.rankingAdmin?.length || 0;
-    const precio = s.quiniela?.precio_ticket ?? 30; // <-- Ahora el precio base es directo en pesos
-    const cajaTotal = total * precio; // <-- Eliminado el VALOR_CREDITO
+    const precio = s.quiniela?.precio_ticket ?? 30; 
+    const cajaTotal = total * precio; 
     
     return {
       totalBoletosAdmin: total,
@@ -44,7 +41,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
 
   const esHistoricoLiquidado = s.vistaActual === 'historico' && s.quiniela?.estado === 'cerrada';
 
-  // Memoización del filtro de búsqueda
   const boletosFiltrados = useMemo(() => {
     if (!s.busquedaJugador) return s.rankingAdmin || [];
     const busquedaLower = s.busquedaJugador.toLowerCase();
@@ -56,9 +52,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
 
   const listaQuinielasMostrar = s.vistaActual === 'activas' ? s.quinielasAbiertas : s.quinielasCerradas;
 
-  // =========================================================
-  // ⏳ MANEJO DE ESTADOS UX: Skeleton Loader
-  // =========================================================
   if (s.cargando) {
     return (
       <div className="w-full max-w-4xl mx-auto space-y-4 animate-pulse">
@@ -76,7 +69,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
     <>
       <div className="animate-in fade-in duration-300 space-y-4 w-full max-w-4xl mx-auto">
         
-        {/* PESTAÑAS: ACTIVAS vs HISTÓRICO */}
         <div className="flex bg-slate-900 rounded-xl border border-slate-800 p-1 mb-4 shadow-sm">
           <button onClick={() => set.setVistaActual('activas')} className={`flex-1 py-2 rounded-lg text-[10px] md:text-xs font-black uppercase tracking-widest transition-all ${s.vistaActual === 'activas' ? 'bg-red-600 text-white shadow-md' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
             ⚽ Activas
@@ -86,7 +78,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
           </button>
         </div>
 
-        {/* SELECTOR DE JORNADAS */}
         {listaQuinielasMostrar.length > 1 && (
           <div className="flex flex-wrap justify-center gap-1.5 mb-2 bg-slate-900/50 p-2 rounded-xl border border-slate-800">
             {listaQuinielasMostrar.map(qa => (
@@ -214,6 +205,8 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
             <div className="space-y-2">
               {(s.partidos || []).map((partido: any, idx: number) => {
                 const seleccionado = s.resultadosReales[partido.id];
+                const esFinalActivo = s.esFinalReal[partido.id]; // 🔥 Leemos si es final
+                
                 return (
                   <div key={partido.id} className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 flex flex-col md:flex-row justify-between items-center gap-3">
                     <div className="flex w-full md:w-auto flex-1 justify-between items-center text-[10px] font-bold uppercase gap-2">
@@ -222,12 +215,25 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                       <span className="w-4 text-center text-slate-600 text-[8px] font-black">VS</span>
                       <span className="flex-1 text-left text-slate-300 truncate">{partido.equipo_visitante}</span>
                     </div>
+                    
                     <div className="flex w-full md:w-auto items-center justify-between gap-3">
-                      <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800">
-                        <input type="number" min="0" placeholder="-" value={s.marcadoresReales[partido.id]?.l || ''} onChange={(e) => a.handleMarcadorExacto(partido.id, 'l', e.target.value)} disabled={esHistoricoLiquidado} className="w-8 h-8 bg-slate-900 rounded text-center font-black text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                        <span className="text-slate-600 font-black text-[10px]">-</span>
-                        <input type="number" min="0" placeholder="-" value={s.marcadoresReales[partido.id]?.v || ''} onChange={(e) => a.handleMarcadorExacto(partido.id, 'v', e.target.value)} disabled={esHistoricoLiquidado} className="w-8 h-8 bg-slate-900 rounded text-center font-black text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                      {/* 🔥 BLOQUE DE MARCADOR + BOTÓN "ES FINAL" */}
+                      <div className="flex flex-col items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800">
+                          <input type="number" min="0" placeholder="-" value={s.marcadoresReales[partido.id]?.l || ''} onChange={(e) => a.handleMarcadorExacto(partido.id, 'l', e.target.value)} disabled={esHistoricoLiquidado} className="w-8 h-8 bg-slate-900 rounded text-center font-black text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                          <span className="text-slate-600 font-black text-[10px]">-</span>
+                          <input type="number" min="0" placeholder="-" value={s.marcadoresReales[partido.id]?.v || ''} onChange={(e) => a.handleMarcadorExacto(partido.id, 'v', e.target.value)} disabled={esHistoricoLiquidado} className="w-8 h-8 bg-slate-900 rounded text-center font-black text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                        </div>
+                        {!esHistoricoLiquidado && (
+                          <button 
+                            onClick={() => a.handleToggleEsFinal(partido.id, !esFinalActivo)}
+                            className={`w-full py-1 text-[8px] font-black uppercase rounded transition-colors ${esFinalActivo ? 'bg-green-600 text-white shadow-inner' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white border border-slate-700'}`}
+                          >
+                            {esFinalActivo ? '✅ FINAL' : '🔴 EN VIVO'}
+                          </button>
+                        )}
                       </div>
+
                       <div className="flex gap-1">
                         {['L', 'E', 'V'].map((opc) => (
                           <div key={opc} className={`w-7 h-7 flex items-center justify-center rounded font-black text-[10px] transition-colors ${seleccionado === opc ? 'bg-red-600 text-white shadow-inner' : 'bg-slate-900 border border-slate-800 text-slate-600'}`}>{opc}</div>

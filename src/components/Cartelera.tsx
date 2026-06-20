@@ -6,12 +6,14 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
   const {
     cargando, errorCarga, quinielasActivas, quinielaActual, partidos, selecciones, golesTotales,
     guardando, estaCerrada, motivoCierre, mostrarReglas, aceptoReglas, radiografia, cargandoRadiografia,
-    golesRealesEnVivo, // 🔥 Recibimos los goles reales desde el hook
-    esGratis, bloqueadoPorParticipacion, setGolesTotales, setMostrarReglas,
+    golesRealesEnVivo, esGratis, bloqueadoPorParticipacion, setGolesTotales, setMostrarReglas,
     setAceptoReglas, cambiarQuinielaVisible, seleccionarOpcion, guardarQuiniela, obtenerLogo
   } = useCartelera(usuarioActivo, actualizarSaldo)
 
   const [mensajeUI, setMensajeUI] = useState({ tipo: '', texto: '' })
+  
+  // 🔥 NUEVO: Estado para el buscador de la radiografía
+  const [filtroJugador, setFiltroJugador] = useState('')
 
   const formatearFechaLocal = (fechaDB: string) => {
     if (!fechaDB) return '';
@@ -42,7 +44,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
 
   if (cargando) {
     return (
-      <div className="w-full max-w-4xl mt-2 mb-20 animate-pulse space-y-4">
+      <div className="w-full max-w-7xl mx-auto mt-2 mb-20 animate-pulse space-y-4 px-2">
         <div className="flex justify-center gap-2 mb-4">
           <div className="h-8 w-24 bg-slate-800 rounded-xl"></div>
           <div className="h-8 w-24 bg-slate-800 rounded-xl"></div>
@@ -66,9 +68,15 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
   if (!quinielaActual) return <div className="text-slate-500 italic text-center mt-10 text-sm">No hay quinielas disponibles.</div>
 
   const prem = quinielaActual.tipo_premiacion || 'unico';
+  
+  // 🔥 NUEVO: Filtramos la radiografía según la búsqueda
+  const radiografiaFiltrada = radiografia.filter(user => 
+    user.nombre.toLowerCase().includes(filtroJugador.toLowerCase())
+  );
 
   return (
-    <div className="w-full max-w-5xl mt-2 mb-20 animate-in fade-in duration-500 relative">
+    // 🔥 AMPLITUD MÁXIMA APROVECHADA (w-full max-w-[98%] xl:max-w-7xl)
+    <div className="w-full max-w-[98%] xl:max-w-7xl mx-auto mt-2 mb-20 animate-in fade-in duration-500 relative">
       
       {/* SELECTOR DE QUINIELAS */}
       {quinielasActivas.length > 1 && (
@@ -81,6 +89,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
                 onClick={() => {
                   setMensajeUI({ tipo: '', texto: '' });
                   cambiarQuinielaVisible(q);
+                  setFiltroJugador('');
                 }}
                 className={`px-4 py-2 rounded-xl text-[10px] md:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 ${
                   quinielaActual.id === q.id 
@@ -97,7 +106,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
       )}
 
       {/* CONTENEDOR PRINCIPAL */}
-      <div className={`p-4 md:p-6 rounded-2xl border shadow-2xl relative overflow-hidden w-full mx-auto ${estaCerrada ? 'bg-slate-950 border-amber-900/40 max-w-5xl' : 'bg-slate-900/50 border-slate-800 max-w-4xl'}`}>
+      <div className={`p-4 md:p-6 rounded-2xl border shadow-2xl relative overflow-hidden w-full mx-auto ${estaCerrada ? 'bg-slate-950 border-amber-900/40' : 'bg-slate-900/50 border-slate-800 max-w-5xl'}`}>
         
         {/* CABECERA (Compartida) */}
         <div className="text-center mb-6 border-b border-slate-800 pb-4 relative">
@@ -110,7 +119,6 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
           <h2 className={`text-2xl md:text-3xl font-black uppercase italic ${estaCerrada ? 'text-amber-500' : 'text-white'}`}>{quinielaActual.nombre_jornada}</h2>
           
           <div className="flex flex-wrap items-center justify-center gap-2 mt-3">
-            {/* 🔥 CORRECCIÓN DEL PRECIO EN PESOS: Eliminamos el * 30 */}
             <span className="bg-blue-950/40 border border-blue-900/50 text-blue-400 px-2.5 py-1 rounded-lg text-[9px] md:text-[10px] font-black uppercase tracking-widest">
               Costo: {esGratis ? 'GRATIS (1 MÁX)' : `$${quinielaActual.precio_ticket || 0}.00 Pesos`}
             </span>
@@ -139,97 +147,139 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
             ) : radiografia.length === 0 ? (
                <div className="text-center py-10 text-slate-500 font-bold uppercase text-xs tracking-widest">Nadie participó en esta jornada.</div>
             ) : (
-              <div className="w-full overflow-x-auto pb-2 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-slate-950 [&::-webkit-scrollbar-thumb]:bg-amber-600 [&::-webkit-scrollbar-thumb]:rounded-full">
-                <table className="w-full text-left border-collapse min-w-max">
-                  <thead>
-                    <tr>
-                      {/* Cabecera Jugador */}
-                      <th className="sticky left-0 bg-slate-950 p-3 border-b border-slate-800 border-r text-[9px] md:text-xs text-slate-400 uppercase tracking-widest z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.5)]">
-                        👥 Jugadores ({radiografia.length})
-                      </th>
-                      
-                      {/* Cabeceras Partidos */}
-                      {partidos.map((p, index) => {
-                        const logoL = obtenerLogo(p.equipo_local)
-                        const logoV = obtenerLogo(p.equipo_visitante)
-                        return (
-                          <th key={p.id} className="p-2 border-b border-slate-800 border-r border-slate-800/50 text-center min-w-[70px] bg-slate-900">
-                            <div className="text-[8px] text-slate-500 mb-1 font-black">P{index + 1}</div>
-                            <div className="flex justify-center items-center gap-1 mb-1">
-                              {logoL ? <img src={logoL} className="w-4 h-4 object-contain" alt="L"/> : <span className="text-[8px] truncate max-w-[25px]">{p.equipo_local}</span>}
-                              <span className="text-[7px] text-slate-600 font-black">v</span>
-                              {logoV ? <img src={logoV} className="w-4 h-4 object-contain" alt="V"/> : <span className="text-[8px] truncate max-w-[25px]">{p.equipo_visitante}</span>}
-                            </div>
-                            <div className={`mt-1 mx-auto w-6 h-6 rounded-md flex items-center justify-center text-xs font-black shadow-inner border ${p.resultado_real ? 'bg-amber-500 text-slate-900 border-amber-400' : 'bg-slate-950 text-slate-500 border-slate-800'}`} title="Resultado Oficial">
-                              {p.resultado_real || '?'}
-                            </div>
-                          </th>
-                        )
-                      })}
+              <div className="w-full pb-2">
+                
+                {/* 🔥 NUEVO: BUSCADOR DE JUGADORES */}
+                <div className="p-3 bg-slate-950 border-b border-slate-800 flex justify-between items-center gap-4 flex-wrap">
+                  <div className="relative w-full md:w-auto max-w-sm flex-1">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">🔍</span>
+                    <input 
+                      type="text" 
+                      placeholder="Buscar jugador..." 
+                      value={filtroJugador}
+                      onChange={(e) => setFiltroJugador(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 text-slate-200 text-xs py-2 pl-9 pr-4 rounded-lg focus:outline-none focus:border-amber-500 transition-colors"
+                    />
+                  </div>
+                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                    {radiografiaFiltrada.length} Jugadores
+                  </div>
+                </div>
 
-                      {/* 🔥 NUEVO: Cabecera Diferencia de Goles */}
-                      <th className="p-2 border-b border-slate-800 border-r border-slate-800/50 bg-slate-950 text-center text-[10px] text-slate-300 font-black uppercase tracking-widest z-10" title="Diferencia de goles (Desempate)">
-                        DIF<br/>
-                        <span className="text-[8px] text-amber-500 font-bold block mt-0.5">
-                          Real: {golesRealesEnVivo !== null ? golesRealesEnVivo : '?'}
-                        </span>
-                      </th>
-                      
-                      {/* Cabecera Puntos Totales */}
-                      <th className="p-3 border-b border-slate-800 bg-slate-950 text-center text-[10px] text-amber-500 font-black uppercase tracking-widest sticky right-0 z-10 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.5)]">
-                        PTS
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {radiografia.map((user, i) => (
-                      <tr key={user.id} className="hover:bg-slate-800/50 transition-colors group">
+                <div className="w-full overflow-x-auto [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-slate-950 [&::-webkit-scrollbar-thumb]:bg-amber-600 [&::-webkit-scrollbar-thumb]:rounded-full">
+                  <table className="w-full text-left border-collapse min-w-max">
+                    <thead>
+                      <tr>
+                        {/* Cabecera Jugador */}
+                        <th className="sticky left-0 bg-slate-950 p-2 md:p-3 border-b border-slate-800 border-r text-[9px] md:text-[10px] text-slate-400 uppercase tracking-widest z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.5)]">
+                          👥 Jugador
+                        </th>
                         
-                        {/* Columna Jugador */}
-                        <td className="sticky left-0 bg-slate-950 group-hover:bg-slate-900 p-2 border-b border-slate-800/50 border-r flex items-center gap-2 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.5)] transition-colors">
-                          <span className="text-slate-500 font-black text-[9px] w-3 text-right">{i+1}.</span>
-                          <img src={user.avatar_url || `https://ui-avatars.com/api/?name=${user.nombre}&background=1e293b&color=cbd5e1`} alt="" className="w-6 h-6 md:w-8 md:h-8 rounded-full border border-slate-700 bg-slate-800" />
-                          <div className="flex flex-col">
-                            <span className="text-[10px] md:text-xs font-bold text-slate-200 uppercase truncate max-w-[90px] md:max-w-[150px]">{user.nombre}</span>
-                            <span className="text-[8px] text-slate-500 font-mono">Goles (Pick): {user.goles}</span>
-                          </div>
-                        </td>
-
-                        {/* Columnas Predicciones */}
-                        {partidos.map((p) => {
-                          const pick = user.picks[p.id] || '-'
-                          const real = p.resultado_real
+                        {/* Cabeceras Partidos */}
+                        {partidos.map((p, index) => {
+                          const logoL = obtenerLogo(p.equipo_local)
+                          const logoV = obtenerLogo(p.equipo_visitante)
                           
-                          let bgClass = "bg-slate-800 text-slate-400 border-slate-700" // Pendiente
-                          if (real) {
-                            if (pick === real) bgClass = "bg-green-600/20 text-green-400 border-green-600/50 shadow-[0_0_10px_rgba(22,163,74,0.1)]" // Acierto
-                            else bgClass = "bg-red-950/30 text-red-500/50 border-red-900/30" // Fallo
-                          }
+                          // 🔥 NUEVO: Lógica de estado en vivo para el encabezado
+                          const tieneGoles = p.goles_local !== null && p.goles_visitante !== null;
+                          const enVivo = tieneGoles && !p.es_final;
 
                           return (
-                            <td key={p.id} className="p-1 border-b border-r border-slate-800/50 text-center">
-                              <div className={`mx-auto w-7 h-7 rounded flex items-center justify-center text-[11px] font-black border transition-all ${bgClass}`}>
-                                {pick}
+                            <th key={p.id} className="p-2 border-b border-slate-800 border-r border-slate-800/50 text-center min-w-[70px] bg-slate-900">
+                              <div className="text-[8px] text-slate-500 mb-1 font-black">P{index + 1}</div>
+                              <div className="flex justify-center items-center gap-1 mb-1">
+                                {logoL ? <img src={logoL} className="w-4 h-4 object-contain" alt="L"/> : <span className="text-[8px] truncate max-w-[25px]">{p.equipo_local}</span>}
+                                <span className="text-[7px] text-slate-600 font-black">v</span>
+                                {logoV ? <img src={logoV} className="w-4 h-4 object-contain" alt="V"/> : <span className="text-[8px] truncate max-w-[25px]">{p.equipo_visitante}</span>}
                               </div>
-                            </td>
+                              
+                              {/* 🔥 NUEVO: Bloque de goles y parpadeo */}
+                              <div className="mt-1.5 flex flex-col items-center gap-1 min-h-[30px] justify-end">
+                                {tieneGoles ? (
+                                  <div className="flex flex-col items-center">
+                                    <span className="text-[10px] font-black text-white leading-none mb-0.5">{p.goles_local} - {p.goles_visitante}</span>
+                                    <div className="flex items-center gap-1">
+                                      <div className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-black shadow-inner border bg-amber-500 text-slate-900 border-amber-400`} title="Resultado Oficial">
+                                        {p.resultado_real}
+                                      </div>
+                                      {enVivo && <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_5px_rgba(239,68,68,0.8)]" title="Partido en Vivo"></span>}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <span className="text-[7px] bg-slate-800 border border-slate-700 text-slate-400 px-1.5 py-0.5 rounded font-bold uppercase tracking-widest">Por Jugar</span>
+                                )}
+                              </div>
+                            </th>
                           )
                         })}
 
-                        {/* 🔥 NUEVO: Celda de Diferencia de Goles */}
-                        <td className="p-2 border-b border-r border-slate-800/50 text-center bg-slate-950 group-hover:bg-slate-900 transition-colors">
-                          <span className="text-xs md:text-sm font-mono font-bold text-slate-400">
-                            {user.golesDiff === 999 ? '-' : user.golesDiff}
+                        <th className="p-2 border-b border-slate-800 border-r border-slate-800/50 bg-slate-950 text-center text-[9px] text-slate-300 font-black uppercase tracking-widest z-10" title="Diferencia de goles (Desempate)">
+                          DIF<br/>
+                          <span className="text-[8px] text-amber-500 font-bold block mt-0.5 leading-tight">
+                            Real: {golesRealesEnVivo !== null ? golesRealesEnVivo : '?'}
                           </span>
-                        </td>
-
-                        {/* Columna Puntos */}
-                        <td className="p-2 border-b border-slate-800/50 text-center sticky right-0 bg-slate-950 group-hover:bg-slate-900 z-10 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.5)] transition-colors">
-                          <span className="text-base md:text-lg font-black text-white drop-shadow-md">{user.aciertos}</span>
-                        </td>
+                        </th>
+                        
+                        {/* 🔥 CORRECCIÓN: Columna de PTS libre (sin sticky) */}
+                        <th className="p-2 border-b border-slate-800 bg-slate-950 text-center text-[10px] text-amber-500 font-black uppercase tracking-widest z-10">
+                          PTS
+                        </th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {radiografiaFiltrada.length === 0 && (
+                        <tr><td colSpan={partidos.length + 3} className="text-center py-4 text-xs italic text-slate-500">No se encontraron jugadores.</td></tr>
+                      )}
+                      
+                      {radiografiaFiltrada.map((user, i) => (
+                        <tr key={user.id} className="hover:bg-slate-800/50 transition-colors group">
+                          
+                          {/* Columna Jugador (Más compacta, en dos renglones) */}
+                          <td className="sticky left-0 bg-slate-950 group-hover:bg-slate-900 p-2 border-b border-slate-800/50 border-r flex items-center gap-1.5 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.5)] transition-colors min-w-[120px] md:min-w-[140px]">
+                            <span className="text-slate-500 font-black text-[9px] w-3 text-right shrink-0">{i+1}.</span>
+                            <img src={user.avatar_url || `https://ui-avatars.com/api/?name=${user.nombre}&background=1e293b&color=cbd5e1`} alt="" className="w-5 h-5 md:w-6 md:h-6 rounded-full border border-slate-700 bg-slate-800 shrink-0" />
+                            <div className="flex flex-col flex-1 pl-0.5">
+                              {/* 🔥 NOMBRE EN SALTO DE LÍNEA */}
+                              <span className="text-[9px] md:text-[10px] font-bold text-slate-200 uppercase leading-tight whitespace-normal break-words max-w-[80px] md:max-w-[110px]">{user.nombre}</span>
+                              <span className="text-[8px] text-slate-500 font-mono mt-0.5 leading-none">Pick: {user.goles}</span>
+                            </div>
+                          </td>
+
+                          {/* Columnas Predicciones */}
+                          {partidos.map((p) => {
+                            const pick = user.picks[p.id] || '-'
+                            const real = p.resultado_real
+                            
+                            let bgClass = "bg-slate-800 text-slate-400 border-slate-700" // Pendiente
+                            if (real) {
+                              if (pick === real) bgClass = "bg-green-600/20 text-green-400 border-green-600/50 shadow-[0_0_10px_rgba(22,163,74,0.1)]" // Acierto
+                              else bgClass = "bg-red-950/30 text-red-500/50 border-red-900/30" // Fallo
+                            }
+
+                            return (
+                              <td key={p.id} className="p-1 border-b border-r border-slate-800/50 text-center">
+                                <div className={`mx-auto w-6 h-6 md:w-7 md:h-7 rounded flex items-center justify-center text-[10px] md:text-[11px] font-black border transition-all ${bgClass}`}>
+                                  {pick}
+                                </div>
+                              </td>
+                            )
+                          })}
+
+                          <td className="p-2 border-b border-r border-slate-800/50 text-center bg-slate-950 group-hover:bg-slate-900 transition-colors">
+                            <span className="text-[10px] md:text-xs font-mono font-bold text-slate-400">
+                              {user.golesDiff === 999 ? '-' : user.golesDiff}
+                            </span>
+                          </td>
+
+                          {/* 🔥 CORRECCIÓN: Columna PTS (sin sticky) */}
+                          <td className="p-2 border-b border-slate-800/50 text-center bg-slate-950 group-hover:bg-slate-900 z-10 transition-colors">
+                            <span className="text-sm md:text-base font-black text-white drop-shadow-md">{user.aciertos}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </div>

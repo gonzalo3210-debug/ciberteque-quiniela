@@ -8,7 +8,6 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
   const [equiposInfo, setEquiposInfo] = useState<any[]>([])
   const [selecciones, setSelecciones] = useState<Record<string, string>>({})
   
-  // Estados de UX
   const [cargando, setCargando] = useState(true)
   const [guardando, setGuardando] = useState(false)
   const [errorCarga, setErrorCarga] = useState<string | null>(null)
@@ -21,10 +20,9 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
   const [aceptoReglas, setAceptoReglas] = useState(false) 
   const [yaParticipo, setYaParticipo] = useState(false) 
 
-  // Estados para la Radiografía
   const [radiografia, setRadiografia] = useState<any[]>([])
   const [cargandoRadiografia, setCargandoRadiografia] = useState(false)
-  const [golesRealesEnVivo, setGolesRealesEnVivo] = useState<number | null>(null) // 🔥 NUEVO: Goles totales en juego
+  const [golesRealesEnVivo, setGolesRealesEnVivo] = useState<number | null>(null)
 
   const peticionEnCurso = useRef(false)
 
@@ -34,12 +32,12 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
         setCargando(true)
         setErrorCarga(null)
 
-        // 🔥 MEJORA: Traemos goles_totales_real de la quiniela y goles_local/visitante de los partidos
+        // 🔥 AQUÍ AGREGAMOS es_final
         const { data: qData, error: qError } = await supabase
           .from('quinielas')
           .select(`
             id, nombre_jornada, precio_ticket, fecha_cierre, tipo_premiacion, goles_totales_real,
-            partidos (id, equipo_local, equipo_visitante, fecha_hora, resultado_real, goles_local, goles_visitante)
+            partidos (id, equipo_local, equipo_visitante, fecha_hora, resultado_real, goles_local, goles_visitante, es_final)
           `)
           .eq('estado', 'abierta')
 
@@ -105,7 +103,6 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
     };
   }, [quinielaActual?.id, partidos]);
 
-  // 🔥 MEJORA: Construye la tabla, calcula los goles en vivo y ordena por Puntos y luego por Diferencia
   const cargarRadiografia = async (quinielaData: any, partidosActuales: any[]) => {
     setCargandoRadiografia(true)
     try {
@@ -121,7 +118,6 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
 
       if (error) throw error;
 
-      // 1. Calcular Goles Reales Actuales
       let golesRealesCalculados = 0;
       let hayGolesRegistrados = false;
 
@@ -132,7 +128,6 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
         }
       });
 
-      // Si la base de datos ya tiene el global oficial, lo usamos. Si no, usamos el sumatorio en vivo.
       const golesOficiales = quinielaData.goles_totales_real !== null 
         ? quinielaData.goles_totales_real 
         : (hayGolesRegistrados ? golesRealesCalculados : -1);
@@ -166,7 +161,6 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
           }
         })
 
-        // 2. Ordenamiento Perfecto: Puntos de mayor a menor, Diferencia de menor a mayor
         ranking.sort((a, b) => {
           if (b.aciertos !== a.aciertos) return b.aciertos - a.aciertos;
           return a.golesDiff - b.golesDiff;
@@ -249,8 +243,12 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
 
     const costoTicket = quinielaActual?.precio_ticket || 0
 
-    if (costoTicket > 0 && usuarioActivo.creditos_disponibles < costoTicket) {
-      return { error: 'No tienes saldo suficiente. Pasa a mostrador para recargar.' }
+    const saldoCreditos = Number(usuarioActivo.creditos_disponibles || 0)
+    const saldoPesos = Number(usuarioActivo.saldo_pesos || 0)
+    const poderAdquisitivoTotal = saldoCreditos + saldoPesos
+
+    if (costoTicket > 0 && poderAdquisitivoTotal < costoTicket) {
+      return { error: 'No tienes saldo suficiente en tu billetera. Pasa a mostrador para recargar.' }
     }
 
     peticionEnCurso.current = true
@@ -286,17 +284,37 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
       if (pronoError) throw pronoError
 
       if (costoTicket > 0) {
-        const nuevoSaldo = usuarioActivo.creditos_disponibles - costoTicket
-        const { error: updateError } = await supabase.from('usuarios').update({ creditos_disponibles: nuevoSaldo }).eq('id', usuarioActivo.id)
+        let costoPendiente = costoTicket;
+        let nuevoCreditos = saldoCreditos;
+        let nuevoSaldoPesos = saldoPesos;
+
+        if (nuevoCreditos >= costoPendiente) {
+          nuevoCreditos -= costoPendiente;
+          costoPendiente = 0;
+        } else {
+          costoPendiente -= nuevoCreditos;
+          nuevoCreditos = 0;
+          nuevoSaldoPesos -= costoPendiente;
+        }
+
+        const { error: updateError } = await supabase
+          .from('usuarios')
+          .update({ 
+            creditos_disponibles: nuevoCreditos, 
+            saldo_pesos: nuevoSaldoPesos 
+          })
+          .eq('id', usuarioActivo.id)
+
         if (updateError) throw updateError
 
         await supabase.from('transacciones_creditos').insert([{
           usuario_id: usuarioActivo.id,
-          cantidad: -costoTicket,
+          cantidad: -costoTicket, 
           tipo_movimiento: 'juego_ticket',
           descripcion: `Ticket ${quinielaActual.nombre_jornada}`
         }])
-        actualizarSaldo(nuevoSaldo)
+        
+        actualizarSaldo(nuevoCreditos + nuevoSaldoPesos)
       }
 
       setSelecciones({}) 
@@ -340,7 +358,7 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
     bloqueadoPorParticipacion,
     radiografia,
     cargandoRadiografia,
-    golesRealesEnVivo, // 🔥 Exportado para que lo lea la tabla visual
+    golesRealesEnVivo,
     setGolesTotales,
     setMostrarReglas,
     setAceptoReglas,

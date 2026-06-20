@@ -4,12 +4,12 @@ import { calcularPremios } from '@/utils/calculadoraPremios';
 import toast from 'react-hot-toast';
 
 export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) => void) {
-  // 🌐 CONSTANTES GLOBALES (Eliminamos VALOR_CREDITO, todo es 100% Pesos MXN)
+  // 🌐 CONSTANTES GLOBALES
   const ENLACE_PUBLICO_RANKING = "https://ciberteque-quiniela.vercel.app/";
   const PORCENTAJE_PREMIO = 0.80;
   const PORCENTAJE_ADMIN = 0.20;
 
-  // 🔥 CANDADO DE SEGURIDAD (Previene doble-clic al pagar o guardar)
+  // 🔥 CANDADO DE SEGURIDAD
   const operacionEnCurso = useRef(false);
 
   // --- ESTADOS BASE ---
@@ -24,6 +24,7 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
   // --- ESTADOS CALIFICACIÓN ---
   const [resultadosReales, setResultadosReales] = useState<Record<string, string>>({});
   const [marcadoresReales, setMarcadoresReales] = useState<Record<string, { l: string, v: string }>>({}); 
+  const [esFinalReal, setEsFinalReal] = useState<Record<string, boolean>>({}); // 🔥 NUEVO: Estado para el Toggle
   const [golesReales, setGolesReales] = useState<string>('');
   const [calificando, setCalificando] = useState(false);
   const [rankingAdmin, setRankingAdmin] = useState<any[]>([]); 
@@ -72,9 +73,10 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
   const cargarJornadas = async () => {
     setCargando(true);
     try {
+      // 🔥 NUEVO: Traemos el campo 'es_final' en la consulta
       const query = supabase
         .from('quinielas')
-        .select('id, nombre_jornada, precio_ticket, goles_totales_real, fecha_cierre, estado, tipo_premiacion, partidos (id, equipo_local, equipo_visitante, resultado_real, fecha_hora, goles_local, goles_visitante)');
+        .select('id, nombre_jornada, precio_ticket, goles_totales_real, fecha_cierre, estado, tipo_premiacion, partidos (id, equipo_local, equipo_visitante, resultado_real, fecha_hora, goles_local, goles_visitante, es_final)');
 
       if (vistaActual === 'activas') {
         const { data } = await query.eq('estado', 'abierta').order('fecha_cierre', { ascending: true });
@@ -107,11 +109,14 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     
     const res: Record<string, string> = {};
     const marcs: Record<string, { l: string, v: string }> = {};
+    const finales: Record<string, boolean> = {}; // 🔥 Diccionario para el toggle
     let sumaGolesCalculada = 0;
     let hayGoles = false;
     
     qData.partidos.forEach((p: any) => { 
       if (p.resultado_real) res[p.id] = p.resultado_real;
+      finales[p.id] = p.es_final || false; // Inicializamos el estado del toggle
+
       if (p.goles_local !== null && p.goles_local !== undefined && p.goles_visitante !== null && p.goles_visitante !== undefined) {
         marcs[p.id] = { l: p.goles_local.toString(), v: p.goles_visitante.toString() };
         sumaGolesCalculada += p.goles_local + p.goles_visitante;
@@ -121,6 +126,7 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     
     setResultadosReales(res);
     setMarcadoresReales(marcs); 
+    setEsFinalReal(finales);
     setGolesReales(hayGoles ? sumaGolesCalculada.toString() : (qData.goles_totales_real !== null ? qData.goles_totales_real.toString() : ''));
 
     const { data: tData } = await supabase.from('tickets').select('id, usuario_id, prediccion_goles_total, pronosticos(partido_id, eleccion_usuario)').eq('quiniela_id', qData.id);
@@ -184,6 +190,11 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     setMarcadoresReales(nuevosMarcadores); setResultadosReales(nuevosResultados); setGolesReales(hayGoles ? sumaTotal.toString() : '');
   };
 
+  // 🔥 NUEVA FUNCIÓN: Para actualizar el botón de Es Final
+  const handleToggleEsFinal = (partidoId: string, valor: boolean) => {
+    setEsFinalReal(prev => ({ ...prev, [partidoId]: valor }));
+  };
+
   const guardarYCalificar = async () => {
     if (operacionEnCurso.current) return;
     operacionEnCurso.current = true;
@@ -194,10 +205,13 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
       for (const pId of Object.keys(resultadosReales || {})) {
         const l_val = marcadoresReales[pId]?.l;
         const v_val = marcadoresReales[pId]?.v;
+        
+        // 🔥 ACTUALIZAMOS EL CAMPO es_final EN LA BD
         await supabase.from('partidos').update({ 
           resultado_real: resultadosReales[pId], 
           goles_local: (l_val !== undefined && l_val !== '') ? parseInt(l_val) : null, 
-          goles_visitante: (v_val !== undefined && v_val !== '') ? parseInt(v_val) : null
+          goles_visitante: (v_val !== undefined && v_val !== '') ? parseInt(v_val) : null,
+          es_final: esFinalReal[pId] || false
         }).eq('id', pId);
       }
       
@@ -228,7 +242,6 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     let partidosJugados = 0;
     partidos.forEach(p => { if (resultadosReales[p.id]) partidosJugados++; });
 
-    // 💰 BOLSAS EN PESOS DIRECTOS (precio_ticket ahora es en MXN)
     const precioBoletoMXN = quiniela.precio_ticket ?? 30;
     const bolsaPesos = ['promo_unico', 'promo_top2'].includes(quiniela.tipo_premiacion) 
       ? precioBoletoMXN * (quiniela.tipo_premiacion === 'promo_top2' ? 2 : 1)
@@ -267,29 +280,19 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     if (!rankingAdmin || rankingAdmin.length === 0) return toast.error('No hay tickets registrados.');
     if (operacionEnCurso.current) return;
 
-    // 1. CALCULADORA EN PESOS MXN
     const tPremio = quiniela.tipo_premiacion || 'unico';
-    const precioTicketMXN = quiniela.precio_ticket ?? 30; // Directamente en Pesos
+    const precioTicketMXN = quiniela.precio_ticket ?? 30; 
     
-    const { ganadores, desgloseTexto } = calcularPremios(
-      rankingAdmin, 
-      tPremio, 
-      precioTicketMXN, 
-      1, // Neutralizamos el multiplicador, todo va directo en MXN
-      PORCENTAJE_PREMIO
-    );
+    const { ganadores, desgloseTexto } = calcularPremios(rankingAdmin, tPremio, precioTicketMXN, 1, PORCENTAJE_PREMIO);
 
-    // 2. Pedimos confirmación al administrador
     const confirmar = window.confirm(`⚠️ ¿DENTRO DE CAJA REAL? ⚠️\n\nVas a cerrar la jornada de forma DEFINITIVA.\n\nFormato: ${tPremio.replace('_', ' ').toUpperCase()}\nDesglose de Premiación (Pesos MXN):${desgloseTexto}\n\nLos premios se depositarán en las billeteras digitales.\n¿Confirmas la liquidación?`);
     if (!confirmar) return;
 
-    // 3. Activamos candados de seguridad
     operacionEnCurso.current = true;
     setCalificando(true);
     const idToast = toast.loading('Liquidando premios y cerrando jornada...');
     
     try {
-      // Guardamos los resultados de los partidos en Supabase
       for (const pId of Object.keys(resultadosReales || {})) {
         const l_val = marcadoresReales[pId]?.l;
         const v_val = marcadoresReales[pId]?.v;
@@ -297,41 +300,26 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
         await supabase.from('partidos').update({ 
           resultado_real: resultadosReales[pId],
           goles_local: (l_val !== undefined && l_val !== '') ? parseInt(l_val) : null,
-          goles_visitante: (v_val !== undefined && v_val !== '') ? parseInt(v_val) : null
+          goles_visitante: (v_val !== undefined && v_val !== '') ? parseInt(v_val) : null,
+          es_final: esFinalReal[pId] || false
         }).eq('id', pId);
       }
       
-      // Cerramos la jornada
-      await supabase.from('quinielas').update({ 
-        goles_totales_real: parseInt(golesReales), 
-        estado: 'cerrada' 
-      }).eq('id', quiniela.id);
+      await supabase.from('quinielas').update({ goles_totales_real: parseInt(golesReales), estado: 'cerrada' }).eq('id', quiniela.id);
       
-      // 💰 DEPOSITAMOS EL EFECTIVO A TODOS LOS GANADORES DIRECTO EN SU CUENTA
       if (ganadores.length > 0) {
         for (const ganador of ganadores) {
-          // Consultar saldo actual
-          const { data: userData } = await supabase.from('usuarios')
-            .select('creditos_disponibles').eq('id', ganador.usuario_id).single();
-            
-          const saldoActual = userData?.creditos_disponibles || 0;
-          const nuevoSaldo = saldoActual + ganador.cantidad; // Aquí la cantidad YA ES EN PESOS MXN
+          const { data: userData } = await supabase.from('usuarios').select('creditos_disponibles').eq('id', ganador.usuario_id).single();
+          const nuevoSaldo = (userData?.creditos_disponibles || 0) + ganador.cantidad; 
           
-          // Actualizar billetera
           await supabase.from('usuarios').update({ creditos_disponibles: nuevoSaldo }).eq('id', ganador.usuario_id);
-          
-          // Guardar en el historial
           await supabase.from('transacciones_creditos').insert([{ 
-            usuario_id: ganador.usuario_id, 
-            cantidad: ganador.cantidad, 
-            tipo_movimiento: 'premio_quiniela',
+            usuario_id: ganador.usuario_id, cantidad: ganador.cantidad, tipo_movimiento: 'premio_quiniela',
             descripcion: `Premio ${ganador.lugar}: ${quiniela.nombre_jornada}` 
           }]);
-
-          // Actualizar estado global en React si existe la función
           if (actualizarSaldoGlobal) actualizarSaldoGlobal(ganador.usuario_id, nuevoSaldo);
         }
-        toast.success(`🎉 ¡Jornada Cerrada!\nLos premios en efectivo (MXN) han sido depositados en las cuentas de los ganadores.`, { id: idToast, duration: 6000 });
+        toast.success(`🎉 ¡Jornada Cerrada!\nLos premios en efectivo han sido depositados.`, { id: idToast, duration: 6000 });
       } else {
         toast.success(`🎉 ¡Jornada Cerrada Exitosamente!\nNo hubo ganadores para premiar.`, { id: idToast, duration: 5000 });
       }
@@ -355,12 +343,11 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     if (!quiniela) return;
     setEditandoQuinielaId(quiniela.id);
     setEditNombreJornada(quiniela.nombre_jornada);
-    // Ajuste de zona horaria para el input datetime-local
     const fecha = new Date(quiniela.fecha_cierre);
     fecha.setMinutes(fecha.getMinutes() - fecha.getTimezoneOffset());
     setEditFechaCierre(fecha.toISOString().slice(0, 16));
     setEditTipoPremiacion(quiniela.tipo_premiacion || 'unico');
-    setEditPartidos(JSON.parse(JSON.stringify(partidos))); // Copia profunda
+    setEditPartidos(JSON.parse(JSON.stringify(partidos))); 
   };
 
   const actualizarPartidoEditado = (index: number, campo: 'equipo_local' | 'equipo_visitante', valor: string) => {
@@ -370,36 +357,25 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
   };
 
   const guardarCambiosJornada = async () => {
-    if (!editandoQuinielaId) return;
-    if (operacionEnCurso.current) return;
-    
+    if (!editandoQuinielaId || operacionEnCurso.current) return;
     operacionEnCurso.current = true;
     setGuardandoEdicion(true);
     const idToast = toast.loading('Guardando ajustes de jornada...');
     
     try {
       await supabase.from('quinielas').update({
-        nombre_jornada: editNombreJornada,
-        fecha_cierre: new Date(editFechaCierre).toISOString(),
-        tipo_premiacion: editTipoPremiacion
+        nombre_jornada: editNombreJornada, fecha_cierre: new Date(editFechaCierre).toISOString(), tipo_premiacion: editTipoPremiacion
       }).eq('id', editandoQuinielaId);
 
       for (const p of editPartidos) {
-        await supabase.from('partidos').update({
-          equipo_local: p.equipo_local,
-          equipo_visitante: p.equipo_visitante
-        }).eq('id', p.id);
+        await supabase.from('partidos').update({ equipo_local: p.equipo_local, equipo_visitante: p.equipo_visitante }).eq('id', p.id);
       }
       
       toast.success('Jornada actualizada', { id: idToast });
       setEditandoQuinielaId(null);
       await cargarJornadas();
-    } catch (error) {
-      toast.error('Error al actualizar', { id: idToast });
-    } finally {
-      setGuardandoEdicion(false);
-      operacionEnCurso.current = false;
-    }
+    } catch (error) { toast.error('Error al actualizar', { id: idToast }); } 
+    finally { setGuardandoEdicion(false); operacionEnCurso.current = false; }
   };
 
   // --- LÓGICA EDICIÓN TICKET ---
@@ -415,9 +391,7 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
   };
 
   const guardarEdicionTicket = async () => {
-    if (!editandoTicketId) return;
-    if (operacionEnCurso.current) return;
-
+    if (!editandoTicketId || operacionEnCurso.current) return;
     operacionEnCurso.current = true;
     setGuardandoEdicionTicket(true);
     const idToast = toast.loading('Modificando ticket...');
@@ -430,30 +404,23 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
         const { data: pronExistente } = await supabase.from('pronosticos')
           .select('id').eq('ticket_id', editandoTicketId).eq('partido_id', pId).single();
           
-        if (pronExistente) {
-          await supabase.from('pronosticos').update({ eleccion_usuario: eleccion }).eq('id', pronExistente.id);
-        } else {
-          await supabase.from('pronosticos').insert({ ticket_id: editandoTicketId, partido_id: pId, eleccion_usuario: eleccion });
-        }
+        if (pronExistente) await supabase.from('pronosticos').update({ eleccion_usuario: eleccion }).eq('id', pronExistente.id);
+        else await supabase.from('pronosticos').insert({ ticket_id: editandoTicketId, partido_id: pId, eleccion_usuario: eleccion });
       }
       
       toast.success('Ticket modificado', { id: idToast });
       setEditandoTicketId(null);
       await cargarJornadas();
-    } catch (error) {
-      toast.error('Error al modificar ticket', { id: idToast });
-    } finally {
-      setGuardandoEdicionTicket(false);
-      operacionEnCurso.current = false;
-    }
+    } catch (error) { toast.error('Error al modificar ticket', { id: idToast }); } 
+    finally { setGuardandoEdicionTicket(false); operacionEnCurso.current = false; }
   };
 
   return {
-    state: { cargando, vistaActual, equipos, quinielasAbiertas, quinielasCerradas, quiniela, partidos, resultadosReales, marcadoresReales, golesReales, calificando, rankingAdmin, busquedaJugador, tipoImpresion, ticketAImprimir },
+    state: { cargando, vistaActual, equipos, quinielasAbiertas, quinielasCerradas, quiniela, partidos, resultadosReales, marcadoresReales, esFinalReal, golesReales, calificando, rankingAdmin, busquedaJugador, tipoImpresion, ticketAImprimir },
     setters: { setVistaActual, setGolesReales, setBusquedaJugador, setTicketAImprimir, setTipoImpresion },
-    actions: { cargarDetallesQuiniela, handleMarcadorExacto, guardarYCalificar, compartirAvanceGrupo, enviarWhatsAppBoleto, cerrarJornadaDefinitivo, obtenerLogo, activarImpresion },
+    actions: { cargarDetallesQuiniela, handleMarcadorExacto, handleToggleEsFinal, guardarYCalificar, compartirAvanceGrupo, enviarWhatsAppBoleto, cerrarJornadaDefinitivo, obtenerLogo, activarImpresion },
     edicionJornada: { editandoQuinielaId, editNombreJornada, editFechaCierre, editTipoPremiacion, editPartidos, guardandoEdicion, setEditandoQuinielaId, setEditNombreJornada, setEditFechaCierre, setEditTipoPremiacion, iniciarEdicionJornada, actualizarPartidoEditado, guardarCambiosJornada },
     edicionTicket: { editandoTicketId, editTicketNombre, editTicketGoles, editTicketSelecciones, guardandoEdicionTicket, setEditandoTicketId, abrirEdicionTicket, seleccionarOpcionEditTicket, guardarEdicionTicket },
-    constantes: { PORCENTAJE_PREMIO, PORCENTAJE_ADMIN } // <-- Removido VALOR_CREDITO
+    constantes: { PORCENTAJE_PREMIO, PORCENTAJE_ADMIN }
   };
 }

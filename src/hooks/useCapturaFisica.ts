@@ -138,7 +138,8 @@ export function useCapturaFisica(actualizarSaldoGlobal?: (id: string, nuevo: num
   return {
     quinielasAbiertas, quiniela, seleccionarQuiniela, partidos, equipos,
     capTelefono, capNombre, capUsuarioId, capSelecciones, capGoles,
-    setCapNombre, setCapGoles, setCapSelecciones,
+    // 🔥 AQUÍ ESTÁ LA MAGIA QUE FALTABA:
+    setCapNombre, setCapGoles, setCapSelecciones, setCapTelefono, setCapUsuarioId,
     buscarClienteParaCaptura, guardarCapturaFisica, guardandoCaptura,
     linkWaReciente, setLinkWaReciente, ticketAImprimir, setTicketAImprimir
   };
