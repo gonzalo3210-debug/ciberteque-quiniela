@@ -1,6 +1,7 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useSincronizacionRealtime } from '@/hooks/useSincronizacionRealtime' // 👈 Importamos nuestro motor de tiempo real
 
 export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
   const [gruposActivos, setGruposActivos] = useState<any[]>([])
@@ -15,14 +16,18 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
   const [nuevasSelecciones, setNuevasSelecciones] = useState<Record<string, string>>({})
   const [nuevosGoles, setNuevosGoles] = useState<number | ''>('')
   const [guardandoEdicion, setGuardandoEdicion] = useState(false)
+  
+  // Candado anti-doble clic
+  const procesandoEdicionRef = useRef(false)
 
-  const cargarHistorial = async () => {
-    setCargando(true)
+  // 🛠️ MODIFICACIÓN: Agregamos el parámetro para que las actualizaciones en tiempo real no parpadeen la pantalla
+  const cargarHistorial = async (esCargaSilenciosa = false) => {
+    if (!esCargaSilenciosa) setCargando(true)
+    
     try {
       const { data: eqData } = await supabase.from('equipos').select('nombre, logo_url')
       if (eqData) setEquipos(eqData)
 
-      // 🔥 Agregamos goles_local, goles_visitante y es_final a la consulta
       const { data, error } = await supabase
         .from('tickets')
         .select(`
@@ -41,16 +46,13 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
         .order('fecha_creacion', { ascending: false })
 
       if (data) {
-        // 🔥 MISMA LÓGICA QUE EN POSICIONES: "Activas" son las abiertas o cerradas pero sin liquidar (En Juego)
         const activos = data.filter(t => t.quinielas?.estado === 'abierta' || (t.quinielas?.estado === 'cerrada' && t.quinielas?.goles_totales_real === null))
         const completados = data.filter(t => t.quinielas?.estado === 'cerrada' && t.quinielas?.goles_totales_real !== null)
         
         const gruposA = agruparTicketsPorQuiniela(activos)
         const gruposC = agruparTicketsPorQuiniela(completados)
 
-        // 🕒 ORDENAMIENTO: Mostramos primero "En Juego" (fecha pasada) y luego "Próximas" (fecha futura)
         gruposA.sort((a, b) => new Date(a.fecha_cierre).getTime() - new Date(b.fecha_cierre).getTime())
-        // En completados, mostramos lo más reciente primero
         gruposC.sort((a, b) => new Date(b.fecha_cierre).getTime() - new Date(a.fecha_cierre).getTime())
 
         setGruposActivos(gruposA)
@@ -63,9 +65,17 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
     }
   }
 
+  // Carga inicial
   useEffect(() => {
     cargarHistorial()
   }, [usuarioId])
+
+  // 📡 CONEXIÓN WEB-SOCKETS: Escuchamos todo silenciosamente
+  const recargaSilenciosa = () => cargarHistorial(true)
+  useSincronizacionRealtime('quinielas', recargaSilenciosa, false)
+  useSincronizacionRealtime('partidos', recargaSilenciosa, false)
+  useSincronizacionRealtime('tickets', recargaSilenciosa, false)
+  useSincronizacionRealtime('pronosticos', recargaSilenciosa, false)
 
   const agruparTicketsPorQuiniela = (ticketsArray: any[]) => {
     const grupos: Record<string, any> = {};
@@ -88,7 +98,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
           estado: ticket.quinielas?.estado,
           goles_reales: ticket.quinielas?.goles_totales_real !== null ? ticket.quinielas?.goles_totales_real : (hayGoles ? golesEnVivo : null),
           fecha_cierre: ticket.quinielas?.fecha_cierre,
-          // 🔥 Mapeamos los nuevos campos de goles y estado final del partido
           partidos: ticket.pronosticos.map((pr: any) => ({
             id: pr.partidos?.id || `${pr.partidos?.equipo_local}-${pr.partidos?.equipo_visitante}`,
             local: pr.partidos?.equipo_local,
@@ -151,7 +160,12 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
   }
 
   const guardarEdicion = async () => {
+    // Candado anti-doble clic
+    if (procesandoEdicionRef.current) return;
+    
+    procesandoEdicionRef.current = true;
     setGuardandoEdicion(true)
+    
     try {
       const pronosticosActualizados = ticketEditando.partidos.map((p: any) => ({
         id: ticketEditando.pronosticosIds[p.id],
@@ -173,12 +187,14 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
 
       alert('¡Boleto actualizado con éxito!')
       setTicketEditando(null)
-      await cargarHistorial() 
+      // Recarga silenciosa para no mostrar el skeleton loading
+      await cargarHistorial(true) 
 
     } catch (error) {
       console.error(error)
       alert('Hubo un error al actualizar el boleto. Intenta de nuevo.')
     } finally {
+      procesandoEdicionRef.current = false;
       setGuardandoEdicion(false)
     }
   }
@@ -200,7 +216,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
     // Sólo se puede editar si no ha pasado la hora Y no hay resultados.
     const sePuedeEditar = esActivo && !yaPasoLaHora && !yaHayResultados;
 
-    // 🔥 Agregamos un badge visual si la jornada ya está "En Juego"
     const estaEnJuego = esActivo && (yaPasoLaHora || yaHayResultados);
 
     return (
@@ -271,7 +286,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
                       </div>
                     </td>
                     
-                    {/* 🔥 COLUMNA REAL MEJORADA (Concatenación de Marcador + L/E/V) */}
                     <td className="px-1 py-1.5 text-center border-r border-slate-800 bg-slate-950/40 sticky left-0 z-10">
                       {p.real ? (
                         <div className="flex flex-col items-center gap-0.5 justify-center">
@@ -294,7 +308,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
                       )}
                     </td>
 
-                    {/* COLUMNAS DE LOS TICKETS */}
                     {grupo.tickets.map((t: any) => {
                       const pick = t.selecciones[p.id];
                       let color = 'bg-slate-800 text-slate-300';

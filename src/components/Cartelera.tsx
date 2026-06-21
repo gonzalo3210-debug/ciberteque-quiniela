@@ -1,6 +1,7 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useCartelera } from '@/hooks/useCartelera'
+import ModalReglas from '@/components/ModalReglas' // 👈 Importamos tu nuevo componente modular
 
 export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioActivo: any, actualizarSaldo: (nuevoSaldo: number) => void }) {
   const {
@@ -10,6 +11,19 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
   } = useCartelera(usuarioActivo, actualizarSaldo)
 
   const [mensajeUI, setMensajeUI] = useState({ tipo: '', texto: '' })
+  
+  // 🔥 Candado estricto en memoria para evitar doble clic y cobros múltiples
+  const procesandoRef = useRef(false)
+
+  // Limpiar el mensaje de éxito automáticamente después de 5 segundos
+  useEffect(() => {
+    if (mensajeUI.tipo === 'exito') {
+      const timer = setTimeout(() => {
+        setMensajeUI({ tipo: '', texto: '' })
+      }, 5000)
+      return () => clearTimeout(timer)
+    }
+  }, [mensajeUI])
 
   const formatearFechaObj = (fechaStr: string) => {
     if (!fechaStr) return null;
@@ -22,12 +36,29 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
   }
 
   const handleGuardar = async () => {
-    setMensajeUI({ tipo: '', texto: '' })
-    const resultado = await guardarQuiniela();
-    if (resultado?.error) {
-      setMensajeUI({ tipo: 'error', texto: resultado.error });
-    } else if (resultado?.success) {
-      setMensajeUI({ tipo: 'exito', texto: resultado.success });
+    // 🛑 BLOQUEO INMEDIATO: Si ya está procesando, ignora clics adicionales (metralleta de dedos)
+    if (procesandoRef.current) return;
+    
+    procesandoRef.current = true;
+    setMensajeUI({ tipo: '', texto: '' });
+    
+    try {
+      const resultado = await guardarQuiniela();
+      
+      if (resultado?.error) {
+        setMensajeUI({ tipo: 'error', texto: resultado.error });
+      } else if (resultado?.success) {
+        setMensajeUI({ tipo: 'exito', texto: resultado.success || '¡Jugada guardada con éxito! Los partidos sin marcar se guardaron como Empate.' });
+      }
+      
+      // Hacemos scroll hacia el mensaje para asegurarnos de que lo vea (con un ligero delay para el render)
+      setTimeout(() => {
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      }, 100);
+
+    } finally {
+      // 🔓 ABRIMOS EL CANDADO
+      procesandoRef.current = false;
     }
   }
 
@@ -171,10 +202,14 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
           </label>
         </div>
 
+        {/* CONTENEDOR DE NOTIFICACIONES MEJORADO */}
         {mensajeUI.texto && (
-          <div className={`mb-4 mx-auto max-w-sm text-center text-[10px] font-bold uppercase tracking-wider py-2.5 px-4 rounded-xl border animate-in zoom-in-95 ${
-            mensajeUI.tipo === 'error' ? 'bg-red-950/30 border-red-900/50 text-red-400' : 'bg-green-950/30 border-green-900/50 text-green-400'
+          <div className={`mb-5 mx-auto w-full text-center text-[11px] font-black uppercase tracking-wider py-4 px-4 rounded-xl border-2 shadow-2xl animate-in zoom-in-95 slide-in-from-bottom-4 duration-300 ${
+            mensajeUI.tipo === 'error' 
+              ? 'bg-red-950/80 border-red-500 text-red-400 shadow-[0_0_20px_rgba(239,68,68,0.3)]' 
+              : 'bg-green-950/80 border-green-500 text-green-400 shadow-[0_0_20px_rgba(34,197,94,0.3)]'
           }`}>
+            <span className="text-lg block mb-1">{mensajeUI.tipo === 'error' ? '⚠️' : '✅'}</span>
             {mensajeUI.texto}
           </div>
         )}
@@ -182,85 +217,28 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
         <div className="flex flex-col items-center pt-2 border-t border-slate-800 z-10 relative">
           <button 
             onClick={handleGuardar}
-            disabled={guardando || !aceptoReglas || bloqueadoPorParticipacion}
+            disabled={guardando || !aceptoReglas || bloqueadoPorParticipacion || mensajeUI.tipo === 'exito'}
             className={`w-full max-w-[280px] py-3 md:py-4 rounded-xl font-black uppercase text-xs tracking-widest transition-all ${
-              bloqueadoPorParticipacion ? 'bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-700 shadow-inner' 
+              mensajeUI.tipo === 'exito' ? 'bg-green-900 text-green-400 border border-green-700 cursor-default'
+              : bloqueadoPorParticipacion ? 'bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-700 shadow-inner' 
               : (guardando || !aceptoReglas) ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700' 
               : 'bg-green-600 hover:bg-green-500 text-white shadow-[0_0_20px_rgba(22,163,74,0.4)] hover:scale-105 active:scale-95'
             }`}
           >
-            {bloqueadoPorParticipacion ? 'YA PARTICIPASTE (MÁX 1)' : guardando ? 'Guardando...' : 'Confirmar Jugada'}
+            {mensajeUI.tipo === 'exito' ? '¡BOLETO ENVIADO!' 
+            : bloqueadoPorParticipacion ? 'YA PARTICIPASTE (MÁX 1)' 
+            : guardando ? 'Guardando...' 
+            : 'Confirmar Jugada'}
           </button>
         </div>
       </div>
 
-      {/* MODAL DEL REGLAMENTO */}
+      {/* MODAL DEL REGLAMENTO REUTILIZABLE */}
       {mostrarReglas && (
-        <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 max-w-md w-full p-5 rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-2.5 mb-3">
-              <h3 className="text-base font-black text-white flex items-center gap-2 uppercase tracking-tight"><span>📜</span> Reglamento CiberTeque</h3>
-              <button onClick={() => setMostrarReglas(false)} className="text-slate-500 hover:text-slate-300 font-bold font-mono text-lg">✕</button>
-            </div>
-            
-            <div className="space-y-3.5 text-[10px] md:text-xs text-slate-300 font-medium leading-relaxed uppercase tracking-wide max-h-[300px] md:max-h-[380px] overflow-y-auto pr-1">
-              <div>
-                <strong className="text-blue-400 block mb-0.5">1️⃣ Cierre y Correcciones:</strong>
-                <span className="text-slate-400 block pl-2 font-bold mb-1">• Boletos Digitales (App):</span>
-                <span className="normal-case text-slate-300 pl-4 block leading-normal">Tu jugada es tu responsabilidad. Una vez confirmada tu jugada en la aplicación, <span className="text-amber-400 font-bold">no hay cambios ni correcciones posibles</span>. Asegúrate de revisarla bien antes de finalizar.</span>
-                <span className="text-slate-400 block pl-2 font-bold mt-1.5 mb-1">• Boletos Físicos:</span>
-                <span className="normal-case text-slate-300 pl-4 block leading-normal">Se reciben a más tardar un día antes de la fecha de cierre a las 8:00 P.M. Si detectas un error en la captura realizada por el personal de CiberTeque, debe reportarse inmediatamente antes del cierre para su corrección.</span>
-              </div>
-
-              <p>
-                <strong className="text-blue-400 block mb-0.5">2️⃣ Tiempo Reglamentario (90 Min):</strong>
-                <span className="normal-case leading-normal block text-slate-300">Para los pronósticos, solo cuentan los 90 minutos reglamentarios (incluyendo el tiempo agregado por el árbitro). NO cuentan los tiempos extras ni las tandas de penales.</span>
-              </p>
-
-              <p>
-                <strong className="text-blue-400 block mb-0.5">3️⃣ Partidos Aplazados o Suspendidos:</strong>
-                <span className="normal-case leading-normal block text-slate-300">Si un partido se suspende después de haber iniciado, se toma como válido el marcador que tenía en ese momento. Si un partido se cancela o aplaza antes de iniciar, para fines de la quiniela se declarará como Empate (E).</span>
-              </p>
-
-              <p>
-                <strong className="text-blue-400 block mb-0.5">4️⃣ Criterios de Desempate:</strong>
-                <span className="normal-case leading-normal block text-slate-300">El ganador se define por quién tenga más aciertos. Si dos o más jugadores empatan en puntos, el desempate se decide por la predicción de goles totales de la jornada (quien se acerque más al número real).</span>
-              </p>
-
-              <div>
-                <strong className="text-blue-400 block mb-0.5">5️⃣ Empates Perfectos (Bolsa Compartida):</strong>
-                <span className="normal-case text-slate-300 block leading-normal"><span className="text-amber-500 font-bold uppercase text-[9px] tracking-wider block mt-0.5">💸 En quinielas de paga:</span> Se sumarán las bolsas de los lugares ocupados y se dividirá el dinero en partes iguales.</span>
-                <span className="normal-case text-slate-300 block leading-normal"><span className="text-amber-500 font-bold uppercase text-[9px] tracking-wider block mt-1">🎁 En quinielas Promocionales (Gratis):</span> Se respetará el premio completo (ej. 1 crédito) para todos los que empaten en el primer lugar.</span>
-              </div>
-
-              <p>
-                <strong className="text-blue-400 block mb-0.5">6️⃣ Boletos Físicos VS Digitales:</strong>
-                <span className="normal-case leading-normal block text-slate-300">Ambos tienen exactamente la misma validez. Si dejas tu boleto físico en CiberTeque, nosotros lo capturamos y aparecerás en el ranking web al igual que todos.</span>
-              </p>
-
-              <p>
-                <strong className="text-amber-500 block mb-0.5">7️⃣ Actualización de Marcadores:</strong>
-                <span className="normal-case leading-normal block text-slate-300">Procuramos reflejar los resultados al instante, pero la administración cuenta con un margen de tolerancia de hasta 24 horas posteriores al partido para su actualización oficial en el sistema.</span>
-              </p>
-
-              <p>
-                <strong className="text-amber-500 block mb-0.5">8️⃣ Cierre y Premiación:</strong>
-                <span className="normal-case leading-normal block text-slate-300">La validación final de la jornada y el pago de premios a los ganadores se realizará a más tardar el siguiente día hábil tras concluir el último encuentro de la quiniela.</span>
-              </p>
-
-              <p>
-                <strong className="text-amber-500 block mb-0.5">9️⃣ Cancelación y Reembolsos:</strong>
-                <span className="normal-case leading-normal block text-slate-300">En caso de fallas mayores en la plataforma o la cancelación oficial de más de la mitad de los partidos de la jornada, la quiniela será anulada y se reembolsarán íntegramente los créditos a todos los participantes.</span>
-              </p>
-
-              <p className="italic text-slate-500 mt-4 border-t border-slate-800 pt-2.5 text-[9px] md:text-[10px]">
-                Al participar en CiberTeque se entiende que conoces y aceptas todos los puntos mencionados anteriormente.
-              </p>
-            </div>
-            
-            <button onClick={() => { setAceptoReglas(true); setMostrarReglas(false); }} className="w-full mt-4 bg-blue-600 hover:bg-blue-500 text-white font-black py-2.5 rounded-xl uppercase tracking-wider text-xs transition-all shadow-lg transform active:scale-95">Entendido y Aceptado</button>
-          </div>
-        </div>
+        <ModalReglas 
+          onClose={() => setMostrarReglas(false)} 
+          onAccept={() => { setAceptoReglas(true); setMostrarReglas(false); }} 
+        />
       )}
     </div>
   )
