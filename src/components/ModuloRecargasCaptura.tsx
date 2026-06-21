@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useCajero } from '@/hooks/useCajero'
 import { useCapturaFisica } from '@/hooks/useCapturaFisica'
+import { Toaster } from 'react-hot-toast' 
 
 interface ModuloRecargasCapturaProps {
   vista: 'recargas' | 'captura';
@@ -13,14 +14,11 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
   const cajero = useCajero(actualizarSaldoGlobal);
   const captura = useCapturaFisica(actualizarSaldoGlobal);
 
-  // 🆕 ESTADO UNIFICADO: Maneja si está abierta la recarga o el retiro
   const [modalOperacion, setModalOperacion] = useState<{id: string, tipo: 'recarga' | 'retiro'} | null>(null);
   const [montoOperacion, setMontoOperacion] = useState('');
 
-  // 🖨️ Estado para controlar el tipo de impresión dinámica
   const [formatoImpresion, setFormatoImpresion] = useState<'A4' | 'termica' | null>(null);
 
-  // 🚀 ESTADOS AUTOCOMPLETADO (Captura Física)
   const [sugerenciasClientes, setSugerenciasClientes] = useState<any[]>([]);
   const [mostrarSugerencias, setMostrarSugerencias] = useState(false);
   const [buscandoCliente, setBuscandoCliente] = useState(false);
@@ -58,7 +56,6 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
     }
   }
 
-  // 🔥 Filtro y Auto-selección Segura de Jornadas Abiertas
   const quinielasCapturables = captura.quinielasAbiertas.filter(qa => {
     const yaPasoFecha = qa.fecha_cierre ? new Date() > new Date(qa.fecha_cierre.substring(0, 16)) : false;
     const yaHayResultados = (qa.partidos || []).some((p: any) => p.resultado_real !== null);
@@ -72,7 +69,6 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
     }
   }, [vista, captura.quiniela?.id, quinielasCapturables.length]);
 
-  // 🧠 Lógica Robusta de Autocompletado Dual
   const manejarAutocompletado = (valor: string, campo: 'telefono' | 'nombre') => {
     if (campo === 'telefono') {
       captura.setCapTelefono(valor);
@@ -109,7 +105,7 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
         setMostrarSugerencias(false);
       }
       setBuscandoCliente(false);
-    }, 400); // Debounce de 400ms
+    }, 400); 
   };
 
   const aplicarSugerencia = (cliente: any) => {
@@ -130,7 +126,9 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
 
   return (
     <>
-      {/* VISTA: VENTAS Y RETIROS (Restaurada al diseño unificado original) */}
+      <Toaster position="top-right" reverseOrder={false} />
+
+      {/* VISTA: VENTAS Y RETIROS */}
       {vista === 'recargas' && (
         <div className="animate-in fade-in duration-300 w-full max-w-2xl mx-auto space-y-4">
           <div className="flex gap-2 relative">
@@ -160,11 +158,11 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                       <div className="flex flex-wrap items-center gap-3 mt-1">
                         <p className="text-[10px] text-slate-400 font-mono font-bold bg-slate-950 px-2 py-0.5 rounded border border-slate-800">{u.telefono}</p>
                         
-                        {/* 💰 VISTA DE BILLETERA UNIFICADA */}
+                        {/* 💰 VISTA DE BILLETERA UNIFICADA (Consolidada en una sola moneda) */}
                         <div className="flex items-center gap-1.5 border-l border-slate-700 pl-3">
-                          <span className="text-[9px] uppercase text-slate-500 font-bold">Billetera:</span>
+                          <span className="text-[9px] uppercase text-slate-500 font-bold">Saldo:</span>
                           <span className="text-amber-400 font-black text-sm drop-shadow-[0_0_5px_rgba(251,191,36,0.2)]">
-                            ${saldoTotal.toLocaleString('es-MX', {minimumFractionDigits: 2})} <span className="text-[9px] text-amber-600">MXN</span>
+                            ${saldoTotal.toLocaleString('es-MX', {minimumFractionDigits: 2})} <span className="text-[9px] text-amber-600">PESOS</span>
                           </span>
                         </div>
                       </div>
@@ -495,7 +493,7 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                 <span className="font-bold uppercase text-sm">Desempate (Goles):</span>
                 <span className="font-black text-3xl">{captura.ticketAImprimir.goles}</span>
               </div>
-              <p className="text-center text-sm font-bold uppercase mt-6 text-blue-900">Costo del Boleto: {captura.quiniela.precio_ticket ?? 1} {(captura.quiniela.precio_ticket ?? 1) === 1 ? 'Crédito' : 'Créditos'}</p>
+              <p className="text-center text-sm font-bold uppercase mt-6 text-blue-900">Costo del Boleto: {captura.quiniela.precio_ticket ?? 1} PESOS</p>
             </div>
             
             <div className="mt-6 pt-6 border-t-2 border-black border-dashed">

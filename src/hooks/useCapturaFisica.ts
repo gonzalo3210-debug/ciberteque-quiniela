@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
 
 export function useCapturaFisica(actualizarSaldoGlobal?: (id: string, nuevo: number) => void) {
+  // --- ESTADOS ---
   const [quinielasAbiertas, setQuinielasAbiertas] = useState<any[]>([]);
   const [quiniela, setQuiniela] = useState<any>(null);
   const [partidos, setPartidos] = useState<any[]>([]);
@@ -18,27 +19,40 @@ export function useCapturaFisica(actualizarSaldoGlobal?: (id: string, nuevo: num
   const [linkWaReciente, setLinkWaReciente] = useState<string | null>(null);
   const [ticketAImprimir, setTicketAImprimir] = useState<any>(null);
 
+  // --- EFECTOS INICIALES ---
   useEffect(() => {
     cargarEquiposDB();
     cargarPartidosJornada();
   }, []);
 
+  // --- FUNCIONES ---
   const cargarEquiposDB = async () => {
-    const { data } = await supabase.from('equipos').select('nombre, logo_url');
-    if (data) setEquipos(data);
+    try {
+      const { data: eq, error } = await supabase.from('equipos').select('nombre, logo_url');
+      if (error) throw error;
+      if (eq) setEquipos(eq);
+    } catch (error: any) {
+      toast.error('Error al cargar logos de equipos.');
+    }
   };
 
   const cargarPartidosJornada = async () => {
-    const { data } = await supabase
-      .from('quinielas')
-      .select('id, nombre_jornada, precio_ticket, fecha_cierre, estado, partidos (id, equipo_local, equipo_visitante, resultado_real)')
-      .eq('estado', 'abierta')
-      .order('fecha_cierre', { ascending: true });
-      
-    if (data && data.length > 0) {
-      setQuinielasAbiertas(data);
-      setQuiniela(data[0]);
-      setPartidos(data[0].partidos || []);
+    try {
+      const { data: abiertas, error } = await supabase
+        .from('quinielas')
+        .select('id, nombre_jornada, precio_ticket, fecha_cierre, estado, partidos (id, equipo_local, equipo_visitante, resultado_real)')
+        .eq('estado', 'abierta')
+        .order('fecha_cierre', { ascending: true });
+        
+      if (error) throw error;
+
+      if (abiertas && abiertas.length > 0) {
+        setQuinielasAbiertas(abiertas);
+        setQuiniela(abiertas[0]);
+        setPartidos(abiertas[0].partidos || []);
+      }
+    } catch (error: any) {
+      toast.error('Error al cargar las jornadas activas.');
     }
   };
 
@@ -62,22 +76,41 @@ export function useCapturaFisica(actualizarSaldoGlobal?: (id: string, nuevo: num
   };
 
   const guardarCapturaFisica = async () => {
-    if (!capTelefono || !capNombre || !capGoles || !quiniela) return toast.error('Faltan datos por llenar.');
+    if (!capTelefono || !capNombre || !capGoles || !quiniela) {
+      return toast.error('Faltan datos por llenar (Nombre, WhatsApp o Goles).');
+    }
+    
     setGuardandoCaptura(true);
-    const loadingId = toast.loading('Guardando ticket...');
+    const loadingId = toast.loading('Procesando cobro y guardando ticket...');
     
     try {
       let uid = capUsuarioId;
       let creditosActuales = 0;
+      let saldoPesosActual = 0;
 
+      // 1. OBTENER O CREAR USUARIO
       if (!uid) {
-        const { data: nu } = await supabase.from('usuarios').insert([{ nombre: capNombre, telefono: capTelefono, creditos_disponibles: 0, saldo_pesos: 0 }]).select().single();
+        const { data: nu, error: errNu } = await supabase
+          .from('usuarios')
+          .insert([{ nombre: capNombre, telefono: capTelefono, creditos_disponibles: 0, saldo_pesos: 0 }])
+          .select()
+          .single();
+        if (errNu) throw errNu;
         uid = nu.id;
       } else {
-        const { data: eu } = await supabase.from('usuarios').select('creditos_disponibles').eq('id', uid).single();
-        if (eu) creditosActuales = eu.creditos_disponibles || 0;
+        const { data: eu, error: errEu } = await supabase
+          .from('usuarios')
+          .select('creditos_disponibles, saldo_pesos')
+          .eq('id', uid)
+          .single();
+        if (errEu) throw errEu;
+        if (eu) {
+          creditosActuales = Number(eu.creditos_disponibles) || 0;
+          saldoPesosActual = Number(eu.saldo_pesos) || 0;
+        }
       }
 
+      // 2. VALIDACIÓN DE PROMOCIONES GRATUITAS
       const esGratis = quiniela.precio_ticket === 0;
       if (esGratis) {
         const { data: tp } = await supabase.from('tickets').select('id').eq('usuario_id', uid).eq('quiniela_id', quiniela.id);
@@ -88,32 +121,77 @@ export function useCapturaFisica(actualizarSaldoGlobal?: (id: string, nuevo: num
         }
       }
 
+      // 3. LÓGICA DE COBRO MATEMÁTICO DIRECTA (1 Crédito = 1 Peso)
+      const precio = Number(quiniela.precio_ticket ?? 1);
+      const poderAdquisitivoTotal = creditosActuales + saldoPesosActual;
+
+      // 🚨 MENSAJE UNIFICADO (Sin multiplicaciones)
+      if (precio > 0 && poderAdquisitivoTotal < precio) {
+        toast.error(`Saldo Insuficiente. Tiene $${poderAdquisitivoTotal} PESOS. Necesita $${precio} PESOS.`, { id: loadingId, duration: 5000 });
+        setGuardandoCaptura(false);
+        return;
+      }
+
+      // Procesar selecciones vacías como Empate (E)
       const seleccionesFinales = { ...capSelecciones };
       partidos.forEach(p => { if (!seleccionesFinales[p.id]) seleccionesFinales[p.id] = 'E'; });
       
-      const precio = quiniela.precio_ticket ?? 1; 
-      let nuevoSaldo = creditosActuales;
+      let nuevoCreditos = creditosActuales;
+      let nuevoSaldoPesos = saldoPesosActual;
 
+      // 4. DESCUENTO DE BILLETERA MIXTA
       if (precio > 0) {
-        if (creditosActuales >= precio) {
-          nuevoSaldo = creditosActuales - precio;
-          await supabase.from('usuarios').update({ creditos_disponibles: nuevoSaldo }).eq('id', uid);
+        if (nuevoCreditos >= precio) {
+          // Si tiene créditos suficientes, descontamos directo de ahí
+          nuevoCreditos -= precio;
         } else {
-          const faltante = precio - creditosActuales;
-          await supabase.from('transacciones_creditos').insert([{ usuario_id: uid, cantidad: faltante, tipo_movimiento: 'recarga_manual', descripcion: 'Pago en mostrador (Físico)' }]);
-          nuevoSaldo = 0;
-          await supabase.from('usuarios').update({ creditos_disponibles: nuevoSaldo }).eq('id', uid);
+          // Si no alcanzan los créditos, descontamos de la suma total
+          const faltante = precio - nuevoCreditos;
+          nuevoCreditos = 0;
+          nuevoSaldoPesos -= faltante;
         }
-        await supabase.from('transacciones_creditos').insert([{ usuario_id: uid, cantidad: -precio, tipo_movimiento: 'juego_ticket_fisico', descripcion: `Ticket físico ${quiniela.nombre_jornada}` }]);
+
+        const { error: errUpd } = await supabase.from('usuarios').update({ 
+          creditos_disponibles: nuevoCreditos, 
+          saldo_pesos: nuevoSaldoPesos 
+        }).eq('id', uid);
+        
+        if (errUpd) throw errUpd;
+
+        await supabase.from('transacciones_creditos').insert([{ 
+          usuario_id: uid, 
+          cantidad: -precio, 
+          tipo_movimiento: 'juego_ticket_fisico', 
+          descripcion: `Ticket físico ${quiniela.nombre_jornada}` 
+        }]);
       }
 
-      const { data: tk } = await supabase.from('tickets').insert([{ usuario_id: uid, quiniela_id: quiniela.id, metodo_ingreso: 'fisico', prediccion_goles_total: parseInt(capGoles) }]).select().single();
+      // 5. GUARDAR TICKET Y PRONÓSTICOS
+      const { data: tk, error: errTk } = await supabase
+        .from('tickets')
+        .insert([{ 
+          usuario_id: uid, 
+          quiniela_id: quiniela.id, 
+          metodo_ingreso: 'fisico', 
+          prediccion_goles_total: parseInt(capGoles) 
+        }])
+        .select()
+        .single();
+        
+      if (errTk) throw errTk;
       
-      const prons = Object.keys(seleccionesFinales).map(pId => ({ ticket_id: tk.id, partido_id: pId, eleccion_usuario: seleccionesFinales[pId] }));
-      await supabase.from('pronosticos').insert(prons);
+      const prons = Object.keys(seleccionesFinales).map(pId => ({ 
+        ticket_id: tk.id, 
+        partido_id: pId, 
+        eleccion_usuario: seleccionesFinales[pId] 
+      }));
       
-      if (actualizarSaldoGlobal) actualizarSaldoGlobal(uid, nuevoSaldo);
+      const { error: errProns } = await supabase.from('pronosticos').insert(prons);
+      if (errProns) throw errProns;
+      
+      if (actualizarSaldoGlobal) actualizarSaldoGlobal(uid, nuevoCreditos + nuevoSaldoPesos);
 
+      // 6. GENERAR WHATSAPP Y TICKET DE IMPRESIÓN
       let seleccionesTexto = '';
       partidos.forEach(p => {
         const sel = seleccionesFinales[p.id];
@@ -126,21 +204,44 @@ export function useCapturaFisica(actualizarSaldoGlobal?: (id: string, nuevo: num
       setLinkWaReciente(`https://wa.me/52${capTelefono}?text=${encodeURIComponent(msgWa)}`);
       setTicketAImprimir({ nombre: capNombre, telefono: capTelefono, selecciones: seleccionesFinales, goles: capGoles });
       
-      toast.success('🎟️ ¡Boleto guardado con éxito!', { id: loadingId });
-      setCapTelefono(''); setCapNombre(''); setCapSelecciones({}); setCapGoles(''); 
+      toast.success('🎟️ ¡Boleto pagado y guardado con éxito!', { id: loadingId });
+      
+      // Limpiar formulario
+      setCapTelefono(''); 
+      setCapNombre(''); 
+      setCapSelecciones({}); 
+      setCapGoles(''); 
+      setCapUsuarioId(null);
+
     } catch (e: any) { 
-      toast.error('Error al guardar captura', { id: loadingId }); 
+      toast.error(e.message || 'Error al guardar captura', { id: loadingId }); 
     } finally { 
       setGuardandoCaptura(false); 
     }
   };
 
   return {
-    quinielasAbiertas, quiniela, seleccionarQuiniela, partidos, equipos,
-    capTelefono, capNombre, capUsuarioId, capSelecciones, capGoles,
-    // 🔥 AQUÍ ESTÁ LA MAGIA QUE FALTABA:
-    setCapNombre, setCapGoles, setCapSelecciones, setCapTelefono, setCapUsuarioId,
-    buscarClienteParaCaptura, guardarCapturaFisica, guardandoCaptura,
-    linkWaReciente, setLinkWaReciente, ticketAImprimir, setTicketAImprimir
+    quinielasAbiertas,
+    quiniela,
+    partidos,
+    equipos,
+    capTelefono,
+    setCapTelefono,
+    capNombre,
+    setCapNombre,
+    capUsuarioId,
+    setCapUsuarioId,
+    capSelecciones,
+    setCapSelecciones,
+    capGoles,
+    setCapGoles,
+    guardandoCaptura,
+    linkWaReciente,
+    setLinkWaReciente,
+    ticketAImprimir,
+    setTicketAImprimir,
+    seleccionarQuiniela,
+    buscarClienteParaCaptura,
+    guardarCapturaFisica
   };
 }
