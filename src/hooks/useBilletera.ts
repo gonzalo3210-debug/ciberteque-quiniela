@@ -1,63 +1,65 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export function useBilletera(usuarioId: string) {
-  // 🧠 ESTADO UNIFICADO: Un solo total en pesos
+  // 🧠 ESTADOS
   const [saldoTotalPesos, setSaldoTotalPesos] = useState<number>(0) 
+  const [deudaPesos, setDeudaPesos] = useState<number>(0) // 👈 NUEVO: Estado para la deuda
   const [transacciones, setTransacciones] = useState<any[]>([])
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
+  // Envolvemos en useCallback para poder usarla en tiempo real sin redibujos infinitos
+  const cargarBilletera = useCallback(async (silencioso = false) => {
     if (!usuarioId) {
       setCargando(false)
       return
     }
 
-    async function cargarBilletera() {
-      setCargando(true)
-      setError(null) // Reiniciamos el error en cada intento
-      
-      try {
-        // 1. Traer ambos campos de la BD
-        const { data: userData, error: userError } = await supabase
-          .from('usuarios')
-          .select('creditos_disponibles, saldo_pesos')
-          .eq('id', usuarioId)
-          .single()
-          
-        if (userError) throw userError
+    if (!silencioso) setCargando(true)
+    setError(null) 
+    
+    try {
+      // 1. Traer saldo y DEUDA de la BD
+      const { data: userData, error: userError } = await supabase
+        .from('usuarios')
+        .select('creditos_disponibles, saldo_pesos, deuda_pesos') // 👈 Agregamos deuda_pesos
+        .eq('id', usuarioId)
+        .single()
+        
+      if (userError) throw userError
 
-        if (userData) {
-          // 💰 SUMA DIRECTA: Consolidamos el dinero de ambos campos
-          const totalUnificado = Number(userData.creditos_disponibles || 0) + Number(userData.saldo_pesos || 0)
-          setSaldoTotalPesos(totalUnificado)
-        }
-
-        // 2. Traer el historial de movimientos (últimos 30)
-        const { data: txData, error: txError } = await supabase
-          .from('transacciones_creditos')
-          .select('*')
-          .eq('usuario_id', usuarioId)
-          .order('created_at', { ascending: false })
-          .limit(30)
-
-        if (txError) throw txError
-
-        if (txData) {
-          setTransacciones(txData)
-        }
-      } catch (err: any) {
-        console.error("Error al cargar la billetera:", err.message)
-        setError("Error de conexión. No pudimos cargar tu billetera.")
-      } finally {
-        setCargando(false)
+      if (userData) {
+        const totalUnificado = Number(userData.creditos_disponibles || 0) + Number(userData.saldo_pesos || 0)
+        setSaldoTotalPesos(totalUnificado)
+        setDeudaPesos(Number(userData.deuda_pesos || 0)) // 👈 Guardamos la deuda
       }
+
+      // 2. Traer el historial
+      const { data: txData, error: txError } = await supabase
+        .from('transacciones_creditos')
+        .select('*')
+        .eq('usuario_id', usuarioId)
+        .order('created_at', { ascending: false })
+        .limit(30)
+
+      if (txError) throw txError
+
+      if (txData) {
+        setTransacciones(txData)
+      }
+    } catch (err: any) {
+      console.error("Error al cargar la billetera:", err.message)
+      if (!silencioso) setError("Error de conexión. No pudimos cargar tu billetera.")
+    } finally {
+      setCargando(false)
     }
+  }, [usuarioId]);
 
+  useEffect(() => {
     cargarBilletera()
-  }, [usuarioId])
+  }, [cargarBilletera])
 
-  // Retornamos el saldo unificado
-  return { saldoTotalPesos, transacciones, cargando, error }
+  // 👈 Exportamos deudaPesos y la función recargar
+  return { saldoTotalPesos, deudaPesos, transacciones, cargando, error, recargar: cargarBilletera }
 }

@@ -1,6 +1,7 @@
 'use client'
 import { useState, useMemo, useEffect } from 'react'
 import { usePerfilUsuario } from '@/hooks/usePerfilUsuario'
+import { supabase } from '@/lib/supabase' // 👈 Importamos el cliente nativo de Supabase
 
 const SelectorConLogo = ({ label, opciones, valorActual, onChange, placeholder }: any) => {
   const [abierto, setAbierto] = useState(false)
@@ -104,6 +105,26 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
   const [avatarAmpliado, setAvatarAmpliado] = useState(false)
   const [formPrefs, setFormPrefs] = useState({ fecha_nacimiento: '', equipo_favorito: '', pais_favorito: '' })
 
+  // 📡 NUEVO: CONEXIÓN NATIVA A SUPABASE PARA TIEMPO REAL
+  useEffect(() => {
+    if (!usuarioActivo?.id) return;
+
+    const canalPerfil = supabase.channel(`perfil_activo_${usuarioActivo.id}`)
+      // Escucha cambios en el saldo o perfil del usuario
+      .on('postgres', { event: 'UPDATE', schema: 'public', table: 'usuarios', filter: `id=eq.${usuarioActivo.id}` }, () => {
+        if (onUpdate) onUpdate(usuarioActivo);
+      })
+      // Escucha cambios en los partidos para recalcular efectividad y medallas en vivo
+      .on('postgres', { event: 'UPDATE', schema: 'public', table: 'partidos' }, () => {
+        if (onUpdate) onUpdate(usuarioActivo);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(canalPerfil);
+    }
+  }, [usuarioActivo?.id, onUpdate])
+
   const opcionesPaises = useMemo(() => {
     return equiposInfo.filter(e => {
       const liga = e.liga?.toUpperCase() || '';
@@ -181,9 +202,6 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
   const portadaMostrada = usuarioTienePortada ? perfil.portada_url : (logoPaisFav || imagenEstadioGenerico);
 
   // 💰 LÓGICA DE SUMA UNIFICADA EN PESOS
-  // Si en el pasado los creditos_disponibles eran x30 pesos y saldo_pesos era el sobrante, 
-  // usa: (Number(perfil.creditos_disponibles || 0) * 30) + Number(perfil.saldo_pesos || 0)
-  // Pero si ahora ambos campos guardan pesos 1 a 1, se suma así directamente:
   const totalBilleteraPesos = Number(perfil.creditos_disponibles || 0) + Number(perfil.saldo_pesos || 0);
 
   return (

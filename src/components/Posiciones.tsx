@@ -1,5 +1,5 @@
 'use client'
-import React, { useEffect, useState, Fragment } from 'react'
+import React, { useEffect, useState, Fragment, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export default function Posiciones() {
@@ -8,16 +8,16 @@ export default function Posiciones() {
   const [historial, setHistorial] = useState<any[]>([])
   const [cargando, setCargando] = useState(true)
   
-  // Efecto Acordeón para Salón de la Fama
   const [quinielaExpandidaId, setQuinielaExpandidaId] = useState<string | null>(null)
-  
-  // Efecto Acordeón para ver los partidos en vivo de un jugador
   const [jugadorExpandidoId, setJugadorExpandidoId] = useState<string | null>(null)
 
   const PORCENTAJE_PREMIO = 0.80 
 
-  useEffect(() => {
-    async function cargarDatos() {
+  // 🔥 1. USAMOS useCallback PARA CONGELAR LA FUNCIÓN EN MEMORIA
+  const cargarDatos = useCallback(async (esCargaSilenciosa = false) => {
+    if (!esCargaSilenciosa) setCargando(true)
+
+    try {
       const { data: qData } = await supabase
         .from('quinielas')
         .select('*')
@@ -121,13 +121,47 @@ export default function Posiciones() {
         .sort((a, b) => new Date(b.fecha_cierre).getTime() - new Date(a.fecha_cierre).getTime())
 
       setQuinielasAbiertas(activas)
-      setQuinielaActiva(activas.length > 0 ? activas[0] : quinielasProcesadas[0])
       setHistorial(pasadas)
+
+      setQuinielaActiva((prevActiva) => {
+        if (prevActiva) {
+          const actualizada = quinielasProcesadas.find(q => q.id === prevActiva.id)
+          return actualizada || (activas.length > 0 ? activas[0] : quinielasProcesadas[0])
+        }
+        return activas.length > 0 ? activas[0] : quinielasProcesadas[0]
+      })
+
+    } catch (error) {
+      console.error("Error al cargar posiciones:", error)
+    } finally {
       setCargando(false)
     }
+  }, []) // <-- Dependencia vacía asegura que la función no cambie en memoria
 
+  // 🔥 2. CONEXIÓN NATIVA SUPABASE (Carga inicial + Suscripciones)
+  useEffect(() => {
     cargarDatos()
-  }, [])
+
+    const canalPosiciones = supabase.channel('posiciones_publicas_blindado')
+      .on('postgres', { event: '*', schema: 'public', table: 'partidos' }, () => {
+        cargarDatos(true);
+      })
+      .on('postgres', { event: '*', schema: 'public', table: 'quinielas' }, () => {
+        cargarDatos(true);
+      })
+      .on('postgres', { event: '*', schema: 'public', table: 'tickets' }, () => {
+        cargarDatos(true);
+      })
+      .on('postgres', { event: '*', schema: 'public', table: 'pronosticos' }, () => {
+        cargarDatos(true);
+      })
+      .subscribe();
+
+    // Limpieza al desmontar
+    return () => {
+      supabase.removeChannel(canalPosiciones);
+    }
+  }, [cargarDatos]) // Solo se ejecuta una vez gracias al useCallback
 
   const toggleExpandirHistorial = (id: string) => {
     setQuinielaExpandidaId(prevId => prevId === id ? null : id)
@@ -162,7 +196,6 @@ export default function Posiciones() {
   
   const mostrarPicks = quinielaActiva.estado === 'cerrada' || yaPasoCierre
 
-  // 🔥 NUEVO: Formateo de fecha y hora bonita para el candado
   const opcionesFecha: Intl.DateTimeFormatOptions = { day: '2-digit', month: 'short', hour: '2-digit', minute:'2-digit' };
   const fechaTextoVisible = fechaCierre.toLocaleDateString('es-MX', opcionesFecha).replace(',', ' a las');
 
@@ -291,7 +324,6 @@ export default function Posiciones() {
                               <span className={`font-black uppercase text-[10px] md:text-xs block tracking-tight truncate max-w-[100px] md:max-w-[150px] ${esLider ? 'text-amber-400' : 'text-slate-200'}`}>
                                 {jugador.nombre} {esLider && <span className="ml-0.5 text-[9px]">👑</span>}
                               </span>
-                              {/* 🔥 CORRECCIÓN: Filtrar Dif en móviles si no se deben mostrar picks */}
                               {mostrarPicks && (
                                 <div className="block md:hidden text-[8px] font-bold text-slate-500 mt-0.5 uppercase tracking-wide">
                                   Dif: {quinielaActiva.goles_totales_real !== null ? jugador.golesDiff : '?'}
@@ -311,7 +343,6 @@ export default function Posiciones() {
                           <span className="text-[10px] md:text-xs font-mono font-bold text-slate-300 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">
                             {mostrarPicks ? jugador.prediccionGoles : '🔒'}
                           </span>
-                          {/* 🔥 CORRECCIÓN: Filtrar Dif en desktop si no se deben mostrar picks */}
                           {mostrarPicks && quinielaActiva.goles_totales_real !== null && (
                             <span className="hidden md:inline-block text-[8px] font-bold text-amber-500 ml-1">Dif:{jugador.golesDiff}</span>
                           )}
@@ -323,7 +354,6 @@ export default function Posiciones() {
                               const pronostico = jugador.pronosticos.find((pr: any) => pr.partido_id === p.id)
                               const estado = jugador.aciertos[p.id]
                               
-                              // 🔥 NUEVO: Detectar si este partido está EN VIVO para el cuadrito
                               const tieneGoles = p.goles_local !== null && p.goles_visitante !== null
                               const enVivo = tieneGoles && !p.es_final
                               
@@ -340,7 +370,6 @@ export default function Posiciones() {
                               if (estado === 'fallo') bgClass = "bg-red-950/40 border-red-900 text-red-500"
                               if (estado === 'pendiente' && pronostico) bgClass = "bg-slate-800 border-slate-600 text-slate-300"
                               
-                              // 🔥 NUEVO: Agregar anillo parpadeante si está en vivo
                               const enVivoClass = enVivo ? "ring-1 ring-red-500 animate-pulse shadow-[0_0_5px_rgba(239,68,68,0.5)]" : ""
                               
                               return (

@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useCajero } from '@/hooks/useCajero'
 import { useCapturaFisica } from '@/hooks/useCapturaFisica'
-import { Toaster } from 'react-hot-toast' 
+import { Toaster, toast } from 'react-hot-toast' 
 
 interface ModuloRecargasCapturaProps {
   vista: 'recargas' | 'captura';
@@ -14,7 +14,10 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
   const cajero = useCajero(actualizarSaldoGlobal);
   const captura = useCapturaFisica(actualizarSaldoGlobal);
 
-  const [modalOperacion, setModalOperacion] = useState<{id: string, tipo: 'recarga' | 'retiro'} | null>(null);
+  // ⚡ NUEVO: Selección global de Método de Pago
+  const [metodoPago, setMetodoPago] = useState<'efectivo' | 'transferencia' | 'fiado'>('efectivo');
+
+  const [modalOperacion, setModalOperacion] = useState<{id: string, tipo: 'recarga' | 'retiro' | 'deuda'} | null>(null);
   const [montoOperacion, setMontoOperacion] = useState('');
 
   const [formatoImpresion, setFormatoImpresion] = useState<'A4' | 'termica' | null>(null);
@@ -44,10 +47,17 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
 
   const handleProcesarOperacion = async (u: any) => {
     let exito = false;
+    
     if (modalOperacion?.tipo === 'recarga') {
-      exito = await cajero.procesarRecargaLibre(u, montoOperacion);
+      exito = await cajero.procesarRecargaLibre(u, montoOperacion, metodoPago);
     } else if (modalOperacion?.tipo === 'retiro') {
       exito = await cajero.procesarRetiro(u, montoOperacion);
+    } else if (modalOperacion?.tipo === 'deuda') {
+      if (metodoPago === 'fiado') {
+        toast.error('Para cobrar una deuda, selecciona Efectivo o Transferencia en la parte superior.');
+        return;
+      }
+      exito = await cajero.procesarPagoDeuda(u, montoOperacion, metodoPago);
     }
     
     if (exito) {
@@ -131,6 +141,14 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
       {/* VISTA: VENTAS Y RETIROS */}
       {vista === 'recargas' && (
         <div className="animate-in fade-in duration-300 w-full max-w-2xl mx-auto space-y-4">
+          
+          {/* PANEL DE MÉTODOS DE PAGO */}
+          <div className="bg-slate-900/80 p-1.5 rounded-xl border border-slate-700 shadow-inner flex flex-col sm:flex-row gap-1">
+            <button onClick={() => setMetodoPago('efectivo')} className={`flex-1 py-2 rounded-lg text-[10px] md:text-xs font-black uppercase tracking-wider transition-all flex justify-center items-center gap-2 ${metodoPago === 'efectivo' ? 'bg-green-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800'}`}>💵 Efectivo</button>
+            <button onClick={() => setMetodoPago('transferencia')} className={`flex-1 py-2 rounded-lg text-[10px] md:text-xs font-black uppercase tracking-wider transition-all flex justify-center items-center gap-2 ${metodoPago === 'transferencia' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800'}`}>📱 Transferencia</button>
+            <button onClick={() => setMetodoPago('fiado')} className={`flex-1 py-2 rounded-lg text-[10px] md:text-xs font-black uppercase tracking-wider transition-all flex justify-center items-center gap-2 ${metodoPago === 'fiado' ? 'bg-red-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800'}`}>✍️ Fiado (Deuda)</button>
+          </div>
+
           <div className="flex gap-2 relative">
             <input 
               type="text" 
@@ -158,29 +176,55 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                       <div className="flex flex-wrap items-center gap-3 mt-1">
                         <p className="text-[10px] text-slate-400 font-mono font-bold bg-slate-950 px-2 py-0.5 rounded border border-slate-800">{u.telefono}</p>
                         
-                        {/* 💰 VISTA DE BILLETERA UNIFICADA (Consolidada en una sola moneda) */}
                         <div className="flex items-center gap-1.5 border-l border-slate-700 pl-3">
                           <span className="text-[9px] uppercase text-slate-500 font-bold">Saldo:</span>
                           <span className="text-amber-400 font-black text-sm drop-shadow-[0_0_5px_rgba(251,191,36,0.2)]">
-                            ${saldoTotal.toLocaleString('es-MX', {minimumFractionDigits: 2})} <span className="text-[9px] text-amber-600">PESOS</span>
+                            ${saldoTotal.toLocaleString('es-MX', {minimumFractionDigits: 2})}
                           </span>
                         </div>
+
+                        {/* VISUALIZADOR DE DEUDA EN TARJETA */}
+                        {Number(u.deuda_pesos) > 0 && (
+                          <div className="flex items-center gap-1.5 border-l border-red-900/50 pl-3 bg-red-950/20 px-2 py-0.5 rounded">
+                            <span className="text-[9px] uppercase text-red-500 font-bold">Debe:</span>
+                            <span className="text-red-400 font-black text-sm drop-shadow-[0_0_5px_rgba(248,113,113,0.3)]">
+                              -${Number(u.deuda_pesos).toLocaleString('es-MX', {minimumFractionDigits: 2})}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
                     
                     <div className="flex flex-wrap gap-2 w-full md:w-auto">
                       <button onClick={() => cajero.verHistorial(u.id)} className="bg-slate-800 hover:bg-slate-700 px-3 py-2 rounded-lg text-[10px] font-black uppercase transition-all text-slate-300 border border-slate-700 flex-1 md:flex-none shadow-md">📜 Historial</button>
+                      
+                      {Number(u.deuda_pesos) > 0 && (
+                        <button onClick={() => {setModalOperacion({id: u.id, tipo: 'deuda'}); setMontoOperacion('');}} className="bg-red-950/60 hover:bg-red-900/80 border border-red-800/50 text-red-400 px-3 py-2 rounded-lg text-[10px] font-black uppercase transition-all shadow-md flex-1 md:flex-none">
+                          💸 Cobrar Deuda
+                        </button>
+                      )}
+
                       <button onClick={() => {setModalOperacion({id: u.id, tipo: 'recarga'}); setMontoOperacion('');}} className="bg-green-900 hover:bg-green-800 border border-green-600/50 text-white px-3 py-2 rounded-lg text-[10px] font-black uppercase transition-all shadow-[0_0_10px_rgba(22,163,74,0.2)] flex-1 md:flex-none">💰 Ingresar $</button>
-                      <button onClick={() => {setModalOperacion({id: u.id, tipo: 'retiro'}); setMontoOperacion('');}} className="bg-red-950 hover:bg-red-900 border border-red-800/50 text-red-300 px-3 py-2 rounded-lg text-[10px] font-black uppercase transition-all shadow-md flex-1 md:flex-none">💸 Retirar $</button>
+                      <button onClick={() => {setModalOperacion({id: u.id, tipo: 'retiro'}); setMontoOperacion('');}} className="bg-slate-900 hover:bg-red-950 border border-slate-700 hover:border-red-800/50 text-slate-400 hover:text-red-300 px-3 py-2 rounded-lg text-[10px] font-black uppercase transition-all shadow-md flex-1 md:flex-none">Retirar $</button>
                     </div>
                   </div>
 
-                  {/* MODAL FLOTANTE DUAL: Ingreso / Retiro */}
+                  {/* MODAL FLOTANTE MULTIUSO: Ingreso / Retiro / Deuda */}
                   {modalOperacion?.id === u.id && (
-                    <div className={`mt-4 p-4 border rounded-xl animate-in fade-in zoom-in-95 ${modalOperacion.tipo === 'recarga' ? 'bg-green-950/20 border-green-900/50' : 'bg-red-950/20 border-red-900/50'}`}>
+                    <div className={`mt-4 p-4 border rounded-xl animate-in fade-in zoom-in-95 ${
+                      modalOperacion.tipo === 'recarga' ? 'bg-green-950/20 border-green-900/50' : 
+                      modalOperacion.tipo === 'deuda' ? 'bg-red-950/30 border-red-900/50' :
+                      'bg-slate-950 border-slate-800'
+                    }`}>
                       <div className="flex justify-between items-center mb-3">
-                        <label className={`text-[10px] font-black uppercase tracking-widest block ${modalOperacion.tipo === 'recarga' ? 'text-green-500' : 'text-red-500'}`}>
-                          {modalOperacion.tipo === 'recarga' ? '¿Cuánto dinero te entregó el cliente?' : '¿Cuánto dinero vas a retirar?'}
+                        <label className={`text-[10px] font-black uppercase tracking-widest block ${
+                          modalOperacion.tipo === 'recarga' ? 'text-green-500' : 
+                          modalOperacion.tipo === 'deuda' ? 'text-red-400' :
+                          'text-slate-400'
+                        }`}>
+                          {modalOperacion.tipo === 'recarga' ? `Ingreso de saldo (Método: ${metodoPago})` : 
+                           modalOperacion.tipo === 'deuda' ? `Registrar pago de deuda (Asegúrate de marcar Efectivo/Transferencia arriba)` :
+                           '¿Cuánto dinero vas a retirar?'}
                         </label>
                         <button onClick={() => setModalOperacion(null)} className="text-slate-500 hover:text-white font-mono text-sm">✕</button>
                       </div>
@@ -192,18 +236,32 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                             type="number" 
                             value={montoOperacion} 
                             onChange={(e) => setMontoOperacion(e.target.value)} 
-                            placeholder="Ej. 100" 
-                            className={`w-full bg-slate-950 border rounded-lg pl-8 pr-3 py-2.5 text-white outline-none transition-all font-black text-xl shadow-inner ${modalOperacion.tipo === 'recarga' ? 'border-green-900/50 focus:border-green-500' : 'border-red-900/50 focus:border-red-500'}`} 
+                            placeholder={modalOperacion.tipo === 'deuda' ? `Max. ${u.deuda_pesos}` : "Ej. 100"} 
+                            className={`w-full bg-slate-900 border rounded-lg pl-8 pr-3 py-2.5 text-white outline-none transition-all font-black text-xl shadow-inner ${
+                              modalOperacion.tipo === 'recarga' ? 'border-green-900/50 focus:border-green-500' : 
+                              modalOperacion.tipo === 'deuda' ? 'border-red-900/50 focus:border-red-500' :
+                              'border-slate-700 focus:border-slate-500'
+                            }`} 
                           />
                         </div>
-                        <button onClick={() => handleProcesarOperacion(u)} className={`text-white font-black px-6 py-2.5 rounded-lg text-[10px] uppercase tracking-widest transition-all shadow-lg ${modalOperacion.tipo === 'recarga' ? 'bg-green-600 hover:bg-green-500' : 'bg-red-600 hover:bg-red-500'}`}>
-                          {modalOperacion.tipo === 'recarga' ? 'Ingresar y Cobrar' : 'Confirmar Retiro'}
+                        <button 
+                          onClick={() => handleProcesarOperacion(u)} 
+                          disabled={modalOperacion.tipo === 'deuda' && metodoPago === 'fiado'}
+                          className={`text-white font-black px-6 py-2.5 rounded-lg text-[10px] uppercase tracking-widest transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed ${
+                            modalOperacion.tipo === 'recarga' ? 'bg-green-600 hover:bg-green-500' : 
+                            modalOperacion.tipo === 'deuda' ? 'bg-red-600 hover:bg-red-500' :
+                            'bg-slate-700 hover:bg-slate-600'
+                          }`}
+                        >
+                          {modalOperacion.tipo === 'recarga' ? 'Confirmar Ingreso' : 
+                           modalOperacion.tipo === 'deuda' ? 'Registrar Abono' :
+                           'Confirmar Retiro'}
                         </button>
                       </div>
                     </div>
                   )}
 
-                  {/* HISTORIAL UNIFICADO EN PESOS */}
+                  {/* HISTORIAL UNIFICADO CON COLUMNA DE SALDO */}
                   {cajero.historialActivo === u.id && (
                     <div className="mt-4 pt-3 border-t border-slate-800 animate-in slide-in-from-top-2">
                       {cajero.cargandoHistorial ? (
@@ -230,10 +288,12 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                                     <tr key={mov.id} className="hover:bg-slate-800/30 transition-colors">
                                       <td className="p-2 text-[9px] md:text-[10px] text-slate-400 font-mono">{new Date(mov.created_at).toLocaleDateString()}</td>
                                       <td className="p-2 text-[9px] md:text-[10px] text-slate-300 font-bold uppercase truncate max-w-[120px] md:max-w-[200px]" title={conceptoLimpio}>{conceptoLimpio}</td>
-                                      <td className={`p-2 text-center font-black text-[10px] md:text-xs ${mov.cantidad > 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                        {mov.cantidad > 0 ? '+' : '-'}${Math.abs(mov.cantidad).toLocaleString('es-MX', {minimumFractionDigits:0})}
+                                      <td className={`p-2 text-center font-black text-[10px] md:text-xs ${mov.cantidad > 0 ? 'text-green-500' : mov.cantidad < 0 ? 'text-red-500' : 'text-amber-500'}`}>
+                                        {mov.cantidad > 0 ? '+' : (mov.cantidad === 0 ? '' : '-')}${Math.abs(mov.cantidad).toLocaleString('es-MX', {minimumFractionDigits:0})}
                                       </td>
-                                      <td className="p-2 text-right font-black text-[10px] md:text-xs text-amber-400">${saldoEnEseMomento.toLocaleString('es-MX', {minimumFractionDigits:0})}</td>
+                                      <td className="p-2 text-right font-black text-[10px] md:text-xs text-amber-400">
+                                        ${saldoEnEseMomento.toLocaleString('es-MX', {minimumFractionDigits:0})}
+                                      </td>
                                     </tr>
                                   )
                                 })

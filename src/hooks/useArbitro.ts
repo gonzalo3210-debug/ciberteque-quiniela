@@ -24,7 +24,7 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
   // --- ESTADOS CALIFICACIÓN ---
   const [resultadosReales, setResultadosReales] = useState<Record<string, string>>({});
   const [marcadoresReales, setMarcadoresReales] = useState<Record<string, { l: string, v: string }>>({}); 
-  const [esFinalReal, setEsFinalReal] = useState<Record<string, boolean>>({}); // 🔥 NUEVO: Estado para el Toggle
+  const [esFinalReal, setEsFinalReal] = useState<Record<string, boolean>>({});
   const [golesReales, setGolesReales] = useState<string>('');
   const [calificando, setCalificando] = useState(false);
   const [rankingAdmin, setRankingAdmin] = useState<any[]>([]); 
@@ -73,7 +73,6 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
   const cargarJornadas = async () => {
     setCargando(true);
     try {
-      // 🔥 NUEVO: Traemos el campo 'es_final' en la consulta
       const query = supabase
         .from('quinielas')
         .select('id, nombre_jornada, precio_ticket, goles_totales_real, fecha_cierre, estado, tipo_premiacion, partidos (id, equipo_local, equipo_visitante, resultado_real, fecha_hora, goles_local, goles_visitante, es_final)');
@@ -109,13 +108,13 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     
     const res: Record<string, string> = {};
     const marcs: Record<string, { l: string, v: string }> = {};
-    const finales: Record<string, boolean> = {}; // 🔥 Diccionario para el toggle
+    const finales: Record<string, boolean> = {}; 
     let sumaGolesCalculada = 0;
     let hayGoles = false;
     
     qData.partidos.forEach((p: any) => { 
       if (p.resultado_real) res[p.id] = p.resultado_real;
-      finales[p.id] = p.es_final || false; // Inicializamos el estado del toggle
+      finales[p.id] = p.es_final || false; 
 
       if (p.goles_local !== null && p.goles_local !== undefined && p.goles_visitante !== null && p.goles_visitante !== undefined) {
         marcs[p.id] = { l: p.goles_local.toString(), v: p.goles_visitante.toString() };
@@ -190,7 +189,6 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     setMarcadoresReales(nuevosMarcadores); setResultadosReales(nuevosResultados); setGolesReales(hayGoles ? sumaTotal.toString() : '');
   };
 
-  // 🔥 NUEVA FUNCIÓN: Para actualizar el botón de Es Final
   const handleToggleEsFinal = (partidoId: string, valor: boolean) => {
     setEsFinalReal(prev => ({ ...prev, [partidoId]: valor }));
   };
@@ -206,7 +204,6 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
         const l_val = marcadoresReales[pId]?.l;
         const v_val = marcadoresReales[pId]?.v;
         
-        // 🔥 ACTUALIZAMOS EL CAMPO es_final EN LA BD
         await supabase.from('partidos').update({ 
           resultado_real: resultadosReales[pId], 
           goles_local: (l_val !== undefined && l_val !== '') ? parseInt(l_val) : null, 
@@ -338,6 +335,36 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     setTimeout(() => window.print(), 200);
   };
 
+  // 🔥 NUEVA FUNCIÓN: ELIMINAR TICKET
+  const eliminarTicket = async (ticketId: string, nombreJugador: string) => {
+    if (operacionEnCurso.current) return;
+    
+    const confirmar = window.confirm(`⚠️ ADVERTENCIA ⚠️\n\n¿Estás seguro que deseas ELIMINAR el boleto de ${nombreJugador}?\n\nEsta acción borrará el boleto permanentemente y no se puede deshacer.`);
+    if (!confirmar) return;
+
+    operacionEnCurso.current = true;
+    const idToast = toast.loading(`Eliminando boleto de ${nombreJugador}...`);
+    
+    try {
+      // 1. Por seguridad en cascada, primero eliminamos los pronósticos amarrados al ticket
+      await supabase.from('pronosticos').delete().eq('ticket_id', ticketId);
+      
+      // 2. Eliminamos el ticket principal
+      const { error } = await supabase.from('tickets').delete().eq('id', ticketId);
+      if (error) throw error;
+
+      toast.success('Boleto eliminado exitosamente.', { id: idToast });
+      
+      // 3. Refrescamos la vista
+      await cargarJornadas();
+    } catch (error: any) {
+      console.error(error);
+      toast.error('Error al eliminar boleto: ' + error.message, { id: idToast });
+    } finally {
+      operacionEnCurso.current = false;
+    }
+  };
+
   // --- LÓGICA EDICIÓN JORNADA ---
   const iniciarEdicionJornada = () => {
     if (!quiniela) return;
@@ -418,7 +445,7 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
   return {
     state: { cargando, vistaActual, equipos, quinielasAbiertas, quinielasCerradas, quiniela, partidos, resultadosReales, marcadoresReales, esFinalReal, golesReales, calificando, rankingAdmin, busquedaJugador, tipoImpresion, ticketAImprimir },
     setters: { setVistaActual, setGolesReales, setBusquedaJugador, setTicketAImprimir, setTipoImpresion },
-    actions: { cargarDetallesQuiniela, handleMarcadorExacto, handleToggleEsFinal, guardarYCalificar, compartirAvanceGrupo, enviarWhatsAppBoleto, cerrarJornadaDefinitivo, obtenerLogo, activarImpresion },
+    actions: { cargarDetallesQuiniela, handleMarcadorExacto, handleToggleEsFinal, guardarYCalificar, compartirAvanceGrupo, enviarWhatsAppBoleto, cerrarJornadaDefinitivo, obtenerLogo, activarImpresion, eliminarTicket }, // Agregamos eliminarTicket
     edicionJornada: { editandoQuinielaId, editNombreJornada, editFechaCierre, editTipoPremiacion, editPartidos, guardandoEdicion, setEditandoQuinielaId, setEditNombreJornada, setEditFechaCierre, setEditTipoPremiacion, iniciarEdicionJornada, actualizarPartidoEditado, guardarCambiosJornada },
     edicionTicket: { editandoTicketId, editTicketNombre, editTicketGoles, editTicketSelecciones, guardandoEdicionTicket, setEditandoTicketId, abrirEdicionTicket, seleccionarOpcionEditTicket, guardarEdicionTicket },
     constantes: { PORCENTAJE_PREMIO, PORCENTAJE_ADMIN }

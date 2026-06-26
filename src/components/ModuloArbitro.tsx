@@ -1,5 +1,5 @@
 'use client'
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useArbitro } from '@/hooks/useArbitro'
 import PlantillaTicketsBlanco from '@/components/impresion/PlantillaTicketsBlanco';
 import PlantillaReciboJugada from '@/components/impresion/PlantillaReciboJugada';
@@ -13,6 +13,9 @@ interface ModuloArbitroProps {
 export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroProps) {
   const arbitro = useArbitro(actualizarSaldoGlobal);
   const { state: s, setters: set, actions: a, edicionJornada: ej, edicionTicket: et, constantes: c } = arbitro;
+
+  // ESTADO DE UX: Loader para dar tiempo de renderizado a las imágenes antes de imprimir
+  const [cargandoImpresion, setCargandoImpresion] = useState(false);
 
   const { totalBoletosAdmin, precioBoletoPesos, cajaTotalPesos, cajaPremioPesos, cajaCiberPesos, ganadorActualAdmin } = useMemo(() => {
     const total = s.rankingAdmin?.length || 0;
@@ -52,6 +55,21 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
 
   const listaQuinielasMostrar = s.vistaActual === 'activas' ? s.quinielasAbiertas : s.quinielasCerradas;
 
+  // FUNCIÓN ENVOLTORIO UX: Maneja el tiempo de espera para renderizado antes de imprimir
+  const ejecutarImpresionUX = (tipo: string, payload?: any) => {
+    setCargandoImpresion(true);
+    
+    if (tipo === 'recibo' && payload) {
+      set.setTicketAImprimir(payload);
+    }
+
+    // Le damos 800ms al DOM para descargar imágenes y montar el componente visual oculto
+    setTimeout(() => {
+      a.activarImpresion(tipo);
+      setCargandoImpresion(false);
+    }, 800);
+  };
+
   if (s.cargando) {
     return (
       <div className="w-full max-w-4xl mx-auto space-y-4 animate-pulse">
@@ -67,7 +85,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
 
   return (
     <>
-      <div className="animate-in fade-in duration-300 space-y-4 w-full max-w-4xl mx-auto">
+      <div className="animate-in fade-in duration-300 space-y-4 w-full max-w-4xl mx-auto print:hidden">
         
         <div className="flex bg-slate-900 rounded-xl border border-slate-800 p-1 mb-4 shadow-sm">
           <button onClick={() => set.setVistaActual('activas')} className={`flex-1 py-2 rounded-lg text-[10px] md:text-xs font-black uppercase tracking-widest transition-all ${s.vistaActual === 'activas' ? 'bg-red-600 text-white shadow-md' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
@@ -168,11 +186,15 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                                 <span className="truncate">{r.nombre}</span>
                               </div>
                               <div className="flex gap-1 shrink-0">
-                                <button onClick={() => a.enviarWhatsAppBoleto(r)} className="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-green-400">📲</button>
+                                <button onClick={() => a.enviarWhatsAppBoleto(r)} className="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-green-400" title="Enviar WhatsApp">📲</button>
                                 {!jornadaCerrada && !esHistoricoLiquidado && (
-                                  <button onClick={() => et.abrirEdicionTicket(r)} className="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-blue-400">✏️</button>
+                                  <>
+                                    <button onClick={() => et.abrirEdicionTicket(r)} className="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-blue-400" title="Editar Boleto">✏️</button>
+                                    <button onClick={() => a.eliminarTicket(r.id, r.nombre)} className="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-red-900 border border-slate-700 hover:border-red-700 rounded text-red-500 transition-colors" title="Eliminar Boleto">🗑️</button>
+                                  </>
                                 )}
-                                <button onClick={() => { set.setTicketAImprimir({ nombre: r.nombre, telefono: r.telefono || '-', selecciones: r.pronosticosDiccionario, goles: r.prediccionGoles }); a.activarImpresion('recibo'); }} className="w-6 h-6 flex items-center justify-center bg-slate-800 border border-slate-700 rounded text-slate-400 hover:text-white">🖨️</button>
+                                {/* USO DE LA FUNCIÓN UX PARA IMPRIMIR RECIBO */}
+                                <button onClick={() => ejecutarImpresionUX('recibo', { nombre: r.nombre, telefono: r.telefono || '-', selecciones: r.pronosticosDiccionario, goles: r.prediccionGoles })} className="w-6 h-6 flex items-center justify-center bg-slate-800 border border-slate-700 rounded text-slate-400 hover:text-white" title="Imprimir Recibo">🖨️</button>
                               </div>
                             </td>
                             <td className="p-2 text-center text-slate-500 font-mono font-bold">{r.golesDiff === 999 ? '-' : r.golesDiff}</td>
@@ -190,14 +212,14 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
               </div>
             </div>
 
-            {/* BOTONES DE DIFUSIÓN */}
+            {/* BOTONES DE DIFUSIÓN CON UX DE IMPRESIÓN */}
             <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-3 flex flex-wrap justify-center gap-2">
               {!esHistoricoLiquidado ? (
-                <button onClick={() => a.activarImpresion('tickets')} className="bg-slate-800 border border-slate-600 text-white font-bold px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-slate-700 transition-colors">🖨️ Formatos Blanco</button>
+                <button onClick={() => ejecutarImpresionUX('tickets')} className="bg-slate-800 border border-slate-600 text-white font-bold px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-slate-700 transition-colors">🖨️ Formatos Blanco</button>
               ) : (
-                <button onClick={() => a.activarImpresion('tabla')} className="bg-slate-800 border border-slate-600 text-white font-bold px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-slate-700 transition-colors">🖨️ Tabla Final</button>
+                <button onClick={() => ejecutarImpresionUX('tabla')} className="bg-slate-800 border border-slate-600 text-white font-bold px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-slate-700 transition-colors">🖨️ Tabla Final</button>
               )}
-              <button onClick={() => a.activarImpresion('sabana')} className="bg-blue-900 border border-blue-700 text-white font-bold px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-blue-800 transition-colors">📊 Sábana (PDF)</button>
+              <button onClick={() => ejecutarImpresionUX('sabana')} className="bg-blue-900 border border-blue-700 text-white font-bold px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-blue-800 transition-colors">📊 Sábana (PDF)</button>
               <button onClick={a.compartirAvanceGrupo} className="bg-green-700 border border-green-600 text-white font-bold px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-green-600 transition-colors">📢 Copiar Avance</button>
             </div>
 
@@ -205,7 +227,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
             <div className="space-y-2">
               {(s.partidos || []).map((partido: any, idx: number) => {
                 const seleccionado = s.resultadosReales[partido.id];
-                const esFinalActivo = s.esFinalReal[partido.id]; // 🔥 Leemos si es final
+                const esFinalActivo = s.esFinalReal[partido.id]; 
                 
                 return (
                   <div key={partido.id} className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 flex flex-col md:flex-row justify-between items-center gap-3">
@@ -217,7 +239,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                     </div>
                     
                     <div className="flex w-full md:w-auto items-center justify-between gap-3">
-                      {/* 🔥 BLOQUE DE MARCADOR + BOTÓN "ES FINAL" */}
                       <div className="flex flex-col items-center gap-1.5">
                         <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800">
                           <input type="number" min="0" placeholder="-" value={s.marcadoresReales[partido.id]?.l || ''} onChange={(e) => a.handleMarcadorExacto(partido.id, 'l', e.target.value)} disabled={esHistoricoLiquidado} className="w-8 h-8 bg-slate-900 rounded text-center font-black text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
@@ -271,39 +292,18 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
         )}
       </div>
 
-      {/* --- ESTILOS IMPRESIÓN --- */}
-      {s.tipoImpresion && (
-        <style>{`
-          @media print {
-            @page { margin: 0mm; size: letter; }
-            body { 
-              background: white; 
-              margin: 0; 
-              padding: 0; 
-              -webkit-print-color-adjust: exact !important; 
-              print-color-adjust: exact !important; 
-            }
-            body * { visibility: hidden !important; }
-            img { visibility: visible !important; } 
-            .zona-impresion, .zona-impresion * { visibility: visible !important; }
-            .zona-impresion { 
-              position: absolute !important; 
-              left: 0 !important; 
-              top: 0 !important; 
-              width: 100% !important; 
-              height: 100% !important;
-              margin: 0 !important; 
-              padding: 15px !important; 
-              box-sizing: border-box !important; 
-              background-color: white !important; 
-            }
-          }
-        `}</style>
-      )}
-      
       {/* ========================================================= */}
       {/* OVERLAYS Y MODALES DE EDICIÓN (UX Y MANEJO DE ESTADOS) */}
       {/* ========================================================= */}
+
+      {/* LOADER DE IMPRESIÓN (NUEVO) */}
+      {cargandoImpresion && (
+        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-sm z-[9999] flex flex-col items-center justify-center animate-in fade-in duration-200">
+          <div className="w-16 h-16 border-4 border-slate-500 border-t-white rounded-full animate-spin mb-4"></div>
+          <p className="text-white font-black tracking-widest uppercase animate-pulse">Generando Documento...</p>
+          <p className="text-slate-400 text-xs mt-2 text-center px-4">Preparando imágenes y aplicando formatos de página.</p>
+        </div>
+      )}
 
       {/* Loader Global cuando se está calificando/guardando */}
       {s.calificando && (
@@ -420,7 +420,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
       )}
 
       {s.tipoImpresion === 'recibo' && (
-        <PlantillaReciboJugada quiniela={s.quiniela} partidos={s.partidos} ticketAImprimir={s.ticketAImprimir} />
+        <PlantillaReciboJugada quiniela={s.quiniela} partidos={s.partidos} ticketAImprimir={s.ticketAImprimir} obtenerLogo={a.obtenerLogo} />
       )}
 
       {s.tipoImpresion === 'sabana' && (
