@@ -17,6 +17,10 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
   // ESTADO DE UX: Loader para dar tiempo de renderizado a las imágenes antes de imprimir
   const [cargandoImpresion, setCargandoImpresion] = useState(false);
 
+  // ⚡ NUEVOS SELECTORES PARA CONTROL DE MODALIDAD
+  const esSorteo = s.quiniela?.modalidad === 'sorteo';
+  const sorteoRealizado = s.rankingAdmin?.some((r: any) => r.equipo_asignado_id);
+
   const { totalBoletosAdmin, precioBoletoPesos, cajaTotalPesos, cajaPremioPesos, cajaCiberPesos, ganadorActualAdmin } = useMemo(() => {
     const total = s.rankingAdmin?.length || 0;
     const precio = s.quiniela?.precio_ticket ?? 30; 
@@ -63,9 +67,8 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
       set.setTicketAImprimir(payload);
     }
 
-    // Le damos 800ms al DOM para descargar imágenes y montar el componente visual oculto
     setTimeout(() => {
-      a.activarImpresion(tipo);
+      a.activarImpresion(tipo as any);
       setCargandoImpresion(false);
     }, 800);
   };
@@ -117,18 +120,21 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
           <>
             <div className="flex justify-between items-center bg-slate-900/60 p-3 rounded-xl border border-slate-800 mb-2 shadow-sm">
               <div className="flex items-center gap-3">
-                <h2 className="text-lg md:text-xl font-black text-white uppercase tracking-tight">{s.quiniela.nombre_jornada}</h2>
+                <h2 className={`text-lg md:text-xl font-black ${esSorteo ? 'text-blue-400' : 'text-white'} uppercase tracking-tight flex items-center gap-2`}>
+                  {esSorteo && <span>🎲</span>}
+                  {s.quiniela.nombre_jornada}
+                </h2>
                 {esHistoricoLiquidado && <span className="bg-slate-800 text-slate-400 px-2 py-1 rounded text-[8px] font-black uppercase flex items-center border border-slate-700">🔒 Cerrada</span>}
               </div>
-              {!esHistoricoLiquidado && (
+              {!esHistoricoLiquidado && !esSorteo && (
                 <button onClick={ej.iniciarEdicionJornada} className="bg-slate-900 border border-slate-700 hover:border-slate-500 text-slate-300 text-[9px] font-bold uppercase px-3 py-1.5 rounded-lg transition-all shadow-sm">✏️ Ajustar</button>
               )}
             </div>
 
-            <div className={`grid grid-cols-2 md:grid-cols-4 gap-2 p-3 rounded-xl border shadow-inner ${esCualquierPromo ? 'bg-purple-950/20 border-purple-900/50' : 'bg-slate-900/40 border-slate-800'}`}>
+            <div className={`grid grid-cols-2 md:grid-cols-4 gap-2 p-3 rounded-xl border shadow-inner ${esSorteo ? 'bg-blue-950/20 border-blue-900/50' : esCualquierPromo ? 'bg-purple-950/20 border-purple-900/50' : 'bg-slate-900/40 border-slate-800'}`}>
               <div className="text-center p-2 bg-slate-950 border border-slate-800 rounded-lg">
                 <span className="block text-[8px] text-slate-400 font-bold uppercase tracking-widest">Boletos</span>
-                <span className="text-lg font-black text-white">{totalBoletosAdmin}</span>
+                <span className={`text-lg font-black ${esSorteo && totalBoletosAdmin === 8 ? 'text-green-400' : 'text-white'}`}>{totalBoletosAdmin} {esSorteo && '/ 8'}</span>
               </div>
               <div className="text-center p-2 bg-slate-950 border border-slate-800 rounded-lg">
                 <span className="block text-[8px] text-slate-400 font-bold uppercase tracking-widest">Caja Total</span>
@@ -154,135 +160,211 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
               )}
             </div>
 
-            <div className={`p-2 rounded-lg text-center text-[9px] border font-bold uppercase tracking-widest ${esCualquierPromo ? 'bg-purple-950/30 border-purple-800 text-purple-300' : 'bg-slate-900 border-slate-800 text-slate-400'}`}>
+            <div className={`p-2 rounded-lg text-center text-[9px] border font-bold uppercase tracking-widest ${esSorteo ? 'bg-blue-950/30 border-blue-900 text-blue-300' : esCualquierPromo ? 'bg-purple-950/30 border-purple-800 text-purple-300' : 'bg-slate-900 border-slate-800 text-slate-400'}`}>
               🏆 Formato: <span className={`${esCualquierPromo ? 'text-white' : 'text-blue-400'} font-black`}>{s.quiniela.tipo_premiacion}</span>
             </div>
 
-            {/* TABLA DE BOLETOS */}
-            <div className="bg-slate-900/60 rounded-xl border border-slate-800 overflow-hidden shadow-sm">
-              <div className="bg-slate-950 p-2.5 border-b border-slate-800 flex justify-between items-center gap-2">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">🎫 Boletos</h3>
-                  {ganadorActualAdmin && <span className="text-[8px] text-amber-500 font-bold uppercase bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-900/50">Líder: {ganadorActualAdmin.nombre}</span>}
-                </div>
-                <input type="text" placeholder="Buscar jugador..." value={s.busquedaJugador} onChange={(e) => set.setBusquedaJugador(e.target.value)} className="w-full sm:w-48 bg-slate-900 border border-slate-700 rounded-md px-2.5 py-1.5 text-[10px] text-white outline-none focus:border-blue-500 font-bold" />
-              </div>
-              <div className="max-h-60 overflow-y-auto">
-                {totalBoletosAdmin > 0 && boletosFiltrados.length > 0 ? (
-                    <table className="w-full text-left text-[10px]">
-                      <thead className="bg-slate-900/80 text-slate-500 uppercase tracking-widest sticky top-0 z-10 backdrop-blur-sm">
-                        <tr>
-                          <th className="p-2 font-bold border-b border-slate-800">Pos / Jugador</th>
-                          <th className="p-2 text-center font-bold border-b border-slate-800">Dif.</th>
-                          <th className="p-2 text-center text-green-500 font-bold border-b border-slate-800">Pts</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/60">
-                        {boletosFiltrados.map((r: any) => (
-                          <tr key={r.id} className="hover:bg-slate-800/50 transition-colors">
-                            <td className="p-2 font-bold text-slate-300 uppercase flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
-                              <div className="flex items-center gap-1.5 truncate">
-                                <span className="shrink-0 w-4 h-4 rounded text-[8px] bg-slate-800 text-slate-500 flex items-center justify-center font-black">{r.posicion}</span>
-                                <span className="truncate">{r.nombre}</span>
-                              </div>
-                              <div className="flex gap-1 shrink-0">
-                                <button onClick={() => a.enviarWhatsAppBoleto(r)} className="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-green-400" title="Enviar WhatsApp">📲</button>
-                                {!jornadaCerrada && !esHistoricoLiquidado && (
-                                  <>
-                                    <button onClick={() => et.abrirEdicionTicket(r)} className="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-blue-400" title="Editar Boleto">✏️</button>
-                                    <button onClick={() => a.eliminarTicket(r.id, r.nombre)} className="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-red-900 border border-slate-700 hover:border-red-700 rounded text-red-500 transition-colors" title="Eliminar Boleto">🗑️</button>
-                                  </>
-                                )}
-                                {/* USO DE LA FUNCIÓN UX PARA IMPRIMIR RECIBO */}
-                                <button onClick={() => ejecutarImpresionUX('recibo', { nombre: r.nombre, telefono: r.telefono || '-', selecciones: r.pronosticosDiccionario, goles: r.prediccionGoles })} className="w-6 h-6 flex items-center justify-center bg-slate-800 border border-slate-700 rounded text-slate-400 hover:text-white" title="Imprimir Recibo">🖨️</button>
-                              </div>
-                            </td>
-                            <td className="p-2 text-center text-slate-500 font-mono font-bold">{r.golesDiff === 999 ? '-' : r.golesDiff}</td>
-                            <td className="p-2 text-center font-black text-green-400">{r.puntos}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  ) : (
-                    <div className="py-8 text-center text-slate-500">
-                      <span className="block text-2xl mb-2 opacity-50">🔍</span>
-                      <p className="text-[10px] font-bold uppercase">Sin resultados.</p>
-                    </div>
-                  )}
-              </div>
-            </div>
-
-            {/* BOTONES DE DIFUSIÓN CON UX DE IMPRESIÓN */}
-            <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-3 flex flex-wrap justify-center gap-2">
-              {!esHistoricoLiquidado ? (
-                <button onClick={() => ejecutarImpresionUX('tickets')} className="bg-slate-800 border border-slate-600 text-white font-bold px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-slate-700 transition-colors">🖨️ Formatos Blanco</button>
-              ) : (
-                <button onClick={() => ejecutarImpresionUX('tabla')} className="bg-slate-800 border border-slate-600 text-white font-bold px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-slate-700 transition-colors">🖨️ Tabla Final</button>
-              )}
-              <button onClick={() => ejecutarImpresionUX('sabana')} className="bg-blue-900 border border-blue-700 text-white font-bold px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-blue-800 transition-colors">📊 Sábana (PDF)</button>
-              <button onClick={a.compartirAvanceGrupo} className="bg-green-700 border border-green-600 text-white font-bold px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-green-600 transition-colors">📢 Copiar Avance</button>
-            </div>
-
-            {/* LISTA DE PARTIDOS Y MARCADORES */}
-            <div className="space-y-2">
-              {(s.partidos || []).map((partido: any, idx: number) => {
-                const seleccionado = s.resultadosReales[partido.id];
-                const esFinalActivo = s.esFinalReal[partido.id]; 
+            {/* ⚡ VISTA CONDICIONAL: BOMBO VIRTUAL VS TABLA DE RESULTADOS */}
+            {esSorteo ? (
+              <div className="bg-blue-950/20 border border-blue-900/50 rounded-xl p-4 md:p-6 shadow-inner mt-4">
+                <h3 className="text-blue-400 font-black uppercase text-center text-lg md:text-xl mb-6 tracking-widest flex items-center justify-center gap-2"><span>🎲</span> Bombo Virtual (Sorteo Mundial)</h3>
                 
-                return (
-                  <div key={partido.id} className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 flex flex-col md:flex-row justify-between items-center gap-3">
-                    <div className="flex w-full md:w-auto flex-1 justify-between items-center text-[10px] font-bold uppercase gap-2">
-                      <span className="text-[8px] text-slate-600 font-black w-4 text-center">{idx + 1}</span>
-                      <span className="flex-1 text-right text-slate-300 truncate">{partido.equipo_local}</span>
-                      <span className="w-4 text-center text-slate-600 text-[8px] font-black">VS</span>
-                      <span className="flex-1 text-left text-slate-300 truncate">{partido.equipo_visitante}</span>
-                    </div>
-                    
-                    <div className="flex w-full md:w-auto items-center justify-between gap-3">
-                      <div className="flex flex-col items-center gap-1.5">
-                        <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800">
-                          <input type="number" min="0" placeholder="-" value={s.marcadoresReales[partido.id]?.l || ''} onChange={(e) => a.handleMarcadorExacto(partido.id, 'l', e.target.value)} disabled={esHistoricoLiquidado} className="w-8 h-8 bg-slate-900 rounded text-center font-black text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                          <span className="text-slate-600 font-black text-[10px]">-</span>
-                          <input type="number" min="0" placeholder="-" value={s.marcadoresReales[partido.id]?.v || ''} onChange={(e) => a.handleMarcadorExacto(partido.id, 'v', e.target.value)} disabled={esHistoricoLiquidado} className="w-8 h-8 bg-slate-900 rounded text-center font-black text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+                  {s.rankingAdmin.map((jugador: any, idx: number) => {
+                    const eqSorteado = jugador.equipo_asignado_id ? s.equipos.find((e:any) => e.id === jugador.equipo_asignado_id) : null;
+                    return (
+                      <div key={jugador.id} className="bg-slate-900 border border-slate-700 p-3 rounded-lg flex justify-between items-center transition-all hover:border-slate-500">
+                        <div className="flex flex-col flex-1 truncate pr-2">
+                          <span className="text-[10px] text-slate-500 font-black uppercase">Esfera {idx + 1}</span>
+                          <span className="font-bold text-white text-sm uppercase truncate pr-2" title={jugador.nombre}>{jugador.nombre}</span>
+                          <div className="flex items-center gap-2 mt-1">
+                            <button onClick={() => a.enviarWhatsAppBoleto(jugador)} className="text-[10px] text-green-400 hover:text-green-300 font-bold uppercase transition-colors">📲 Enviar WA</button>
+                            {!esHistoricoLiquidado && !sorteoRealizado && (
+                              <button onClick={() => a.eliminarTicket(jugador.id, jugador.nombre)} className="text-[10px] text-red-500 hover:text-red-400 font-bold uppercase transition-colors">🗑️ Borrar</button>
+                            )}
+                          </div>
                         </div>
-                        {!esHistoricoLiquidado && (
-                          <button 
-                            onClick={() => a.handleToggleEsFinal(partido.id, !esFinalActivo)}
-                            className={`w-full py-1 text-[8px] font-black uppercase rounded transition-colors ${esFinalActivo ? 'bg-green-600 text-white shadow-inner' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white border border-slate-700'}`}
-                          >
-                            {esFinalActivo ? '✅ FINAL' : '🔴 EN VIVO'}
-                          </button>
-                        )}
+                        
+                        <div className="flex items-center gap-2 shrink-0 border-l border-slate-700 pl-3">
+                          {eqSorteado ? (
+                            <>
+                              <span className="font-black text-blue-400 uppercase text-xs text-right w-[80px] leading-tight">{eqSorteado.nombre}</span>
+                              <div className="w-10 h-10 bg-slate-950 border border-slate-800 rounded-full p-1.5 flex items-center justify-center shrink-0 shadow-lg">
+                                <img src={eqSorteado.logo_url} className="w-full h-full object-contain drop-shadow-md" alt="" onError={(evt:any)=>{evt.target.src='https://a.espncdn.com/i/teamlogos/default-soccer-35.png'}} />
+                              </div>
+                            </>
+                          ) : (
+                            <span className="text-[10px] text-slate-500 uppercase font-black px-2 py-1 bg-slate-950 rounded border border-slate-800 animate-pulse">Buscando ❓</span>
+                          )}
+                        </div>
                       </div>
-
-                      <div className="flex gap-1">
-                        {['L', 'E', 'V'].map((opc) => (
-                          <div key={opc} className={`w-7 h-7 flex items-center justify-center rounded font-black text-[10px] transition-colors ${seleccionado === opc ? 'bg-red-600 text-white shadow-inner' : 'bg-slate-900 border border-slate-800 text-slate-600'}`}>{opc}</div>
-                        ))}
+                    )
+                  })}
+                  
+                  {/* LUGARES VACÍOS PLACEHOLDER */}
+                  {Array.from({ length: 8 - s.rankingAdmin.length }).map((_, i) => (
+                    <div key={`empty-${i}`} className="bg-slate-950/50 border border-slate-800 border-dashed p-3 rounded-lg flex justify-between items-center opacity-50">
+                      <div className="flex flex-col">
+                         <span className="text-[10px] text-slate-600 font-black uppercase">Esfera {s.rankingAdmin.length + i + 1}</span>
+                         <span className="text-xs font-bold text-slate-500 uppercase mt-0.5">Lugar Disponible</span>
                       </div>
+                      <div className="w-8 h-8 rounded-full border-2 border-slate-800 border-dashed"></div>
                     </div>
-                  </div>
-                )
-              })}
-            </div>
+                  ))}
+                </div>
 
-            {/* SECCIÓN FINAL */}
+                {/* BOTON MAESTRO DEL SORTEO */}
+                {!esHistoricoLiquidado && (
+                  <div className="flex flex-col gap-3">
+                    {!sorteoRealizado ? (
+                      <button 
+                         onClick={() => a.ejecutarSorteoMundial(s.quiniela.equipos_sorteo || [])}
+                         disabled={s.rankingAdmin.length !== 8 || s.calificando}
+                         className={`w-full py-4 rounded-xl font-black uppercase tracking-[0.2em] transition-all ${s.rankingAdmin.length === 8 ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_20px_rgba(37,99,235,0.4)] hover:scale-[1.01] active:scale-95' : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'}`}
+                      >
+                         {s.calificando ? 'Procesando...' : s.rankingAdmin.length === 8 ? '🎲 Ejecutar Sorteo Aleatorio' : `Esperando Jugadores (${s.rankingAdmin.length}/8)`}
+                      </button>
+                    ) : (
+                      <button onClick={a.compartirResultadoSorteo} className="w-full py-3 rounded-xl font-black uppercase tracking-widest bg-green-600 hover:bg-green-500 text-white transition-all shadow-[0_0_15px_rgba(22,163,74,0.3)]">
+                        📲 Compartir Resultados Oficiales en WhatsApp
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <>
+                {/* 👈 CÓDIGO ORIGINAL PARA PARTIDOS TRADICIONALES Y MARCADOR EXACTO */}
+                <div className="bg-slate-900/60 rounded-xl border border-slate-800 overflow-hidden shadow-sm mt-4">
+                  <div className="bg-slate-950 p-2.5 border-b border-slate-800 flex justify-between items-center gap-2">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">🎫 Boletos</h3>
+                      {ganadorActualAdmin && <span className="text-[8px] text-amber-500 font-bold uppercase bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-900/50">Líder: {ganadorActualAdmin.nombre}</span>}
+                    </div>
+                    <input type="text" placeholder="Buscar jugador..." value={s.busquedaJugador} onChange={(e) => set.setBusquedaJugador(e.target.value)} className="w-full sm:w-48 bg-slate-900 border border-slate-700 rounded-md px-2.5 py-1.5 text-[10px] text-white outline-none focus:border-blue-500 font-bold" />
+                  </div>
+                  <div className="max-h-60 overflow-y-auto">
+                    {totalBoletosAdmin > 0 && boletosFiltrados.length > 0 ? (
+                        <table className="w-full text-left text-[10px]">
+                          <thead className="bg-slate-900/80 text-slate-500 uppercase tracking-widest sticky top-0 z-10 backdrop-blur-sm">
+                            <tr>
+                              <th className="p-2 font-bold border-b border-slate-800">Pos / Jugador</th>
+                              <th className="p-2 text-center font-bold border-b border-slate-800">Dif.</th>
+                              <th className="p-2 text-center text-green-500 font-bold border-b border-slate-800">Pts</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/60">
+                            {boletosFiltrados.map((r: any) => (
+                              <tr key={r.id} className="hover:bg-slate-800/50 transition-colors">
+                                <td className="p-2 font-bold text-slate-300 uppercase flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                                  <div className="flex items-center gap-1.5 truncate">
+                                    <span className="shrink-0 w-4 h-4 rounded text-[8px] bg-slate-800 text-slate-500 flex items-center justify-center font-black">{r.posicion}</span>
+                                    <span className="truncate">{r.nombre}</span>
+                                  </div>
+                                  <div className="flex gap-1 shrink-0">
+                                    <button onClick={() => a.enviarWhatsAppBoleto(r)} className="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-green-400" title="Enviar WhatsApp">📲</button>
+                                    {!jornadaCerrada && !esHistoricoLiquidado && (
+                                      <>
+                                        <button onClick={() => et.abrirEdicionTicket(r)} className="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-blue-400" title="Editar Boleto">✏️</button>
+                                        <button onClick={() => a.eliminarTicket(r.id, r.nombre)} className="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-red-900 border border-slate-700 hover:border-red-700 rounded text-red-500 transition-colors" title="Eliminar Boleto">🗑️</button>
+                                      </>
+                                    )}
+                                    <button onClick={() => ejecutarImpresionUX('recibo', { nombre: r.nombre, telefono: r.telefono || '-', selecciones: r.pronosticosDiccionario, goles: r.prediccionGoles })} className="w-6 h-6 flex items-center justify-center bg-slate-800 border border-slate-700 rounded text-slate-400 hover:text-white" title="Imprimir Recibo">🖨️</button>
+                                  </div>
+                                </td>
+                                <td className="p-2 text-center text-slate-500 font-mono font-bold">{r.golesDiff === 999 ? '-' : r.golesDiff}</td>
+                                <td className="p-2 text-center font-black text-green-400">{r.puntos}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <div className="py-8 text-center text-slate-500">
+                          <span className="block text-2xl mb-2 opacity-50">🔍</span>
+                          <p className="text-[10px] font-bold uppercase">Sin resultados.</p>
+                        </div>
+                      )}
+                  </div>
+                </div>
+
+                {/* BOTONES DE DIFUSIÓN CON UX DE IMPRESIÓN */}
+                <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-3 flex flex-wrap justify-center gap-2 mt-4">
+                  {!esHistoricoLiquidado ? (
+                    <button onClick={() => ejecutarImpresionUX('tickets')} className="bg-slate-800 border border-slate-600 text-white font-bold px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-slate-700 transition-colors">🖨️ Formatos Blanco</button>
+                  ) : (
+                    <button onClick={() => ejecutarImpresionUX('tabla')} className="bg-slate-800 border border-slate-600 text-white font-bold px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-slate-700 transition-colors">🖨️ Tabla Final</button>
+                  )}
+                  <button onClick={() => ejecutarImpresionUX('sabana')} className="bg-blue-900 border border-blue-700 text-white font-bold px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-blue-800 transition-colors">📊 Sábana (PDF)</button>
+                  <button onClick={a.compartirAvanceGrupo} className="bg-green-700 border border-green-600 text-white font-bold px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-green-600 transition-colors">📢 Copiar Avance</button>
+                </div>
+
+                {/* LISTA DE PARTIDOS Y MARCADORES */}
+                <div className="space-y-2 mt-4">
+                  {(s.partidos || []).map((partido: any, idx: number) => {
+                    const seleccionado = s.resultadosReales[partido.id];
+                    const esFinalActivo = s.esFinalReal[partido.id]; 
+                    
+                    return (
+                      <div key={partido.id} className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 flex flex-col md:flex-row justify-between items-center gap-3">
+                        <div className="flex w-full md:w-auto flex-1 justify-between items-center text-[10px] font-bold uppercase gap-2">
+                          <span className="text-[8px] text-slate-600 font-black w-4 text-center">{idx + 1}</span>
+                          <span className="flex-1 text-right text-slate-300 truncate">{partido.equipo_local}</span>
+                          <span className="w-4 text-center text-slate-600 text-[8px] font-black">VS</span>
+                          <span className="flex-1 text-left text-slate-300 truncate">{partido.equipo_visitante}</span>
+                        </div>
+                        
+                        <div className="flex w-full md:w-auto items-center justify-between gap-3">
+                          <div className="flex flex-col items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800">
+                              <input type="number" min="0" placeholder="-" value={s.marcadoresReales[partido.id]?.l || ''} onChange={(e) => a.handleMarcadorExacto(partido.id, 'l', e.target.value)} disabled={esHistoricoLiquidado} className="w-8 h-8 bg-slate-900 rounded text-center font-black text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                              <span className="text-slate-600 font-black text-[10px]">-</span>
+                              <input type="number" min="0" placeholder="-" value={s.marcadoresReales[partido.id]?.v || ''} onChange={(e) => a.handleMarcadorExacto(partido.id, 'v', e.target.value)} disabled={esHistoricoLiquidado} className="w-8 h-8 bg-slate-900 rounded text-center font-black text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                            </div>
+                            {!esHistoricoLiquidado && (
+                              <button 
+                                onClick={() => a.handleToggleEsFinal(partido.id, !esFinalActivo)}
+                                className={`w-full py-1 text-[8px] font-black uppercase rounded transition-colors ${esFinalActivo ? 'bg-green-600 text-white shadow-inner' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white border border-slate-700'}`}
+                              >
+                                {esFinalActivo ? '✅ FINAL' : '🔴 EN VIVO'}
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="flex gap-1">
+                            {['L', 'E', 'V'].map((opc) => (
+                              <div key={opc} className={`w-7 h-7 flex items-center justify-center rounded font-black text-[10px] transition-colors ${seleccionado === opc ? 'bg-red-600 text-white shadow-inner' : 'bg-slate-900 border border-slate-800 text-slate-600'}`}>{opc}</div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+
+            {/* SECCIÓN FINAL (CERRAR JORNADA) */}
             {!esHistoricoLiquidado && (
               <div className="flex flex-col md:flex-row items-center gap-3 border-t border-slate-800 pt-4 mt-2">
-                <div className="w-full md:w-1/3 p-3 bg-red-950/20 border border-red-900/40 rounded-xl text-center flex flex-col justify-center items-center gap-1.5">
-                  <label className="text-red-500 font-black uppercase text-[9px] tracking-widest">Total Goles Oficial</label>
-                  <input type="number" min="0" value={s.golesReales} onChange={(e) => set.setGolesReales(e.target.value)} className="w-20 bg-slate-950 border border-red-900/50 rounded-lg px-2 py-1 text-center text-xl font-black text-white focus:outline-none focus:ring-1 focus:ring-red-500" />
-                </div>
-                <div className="w-full md:w-2/3 flex gap-2">
-                  <button onClick={a.guardarYCalificar} disabled={s.calificando} className="flex-1 py-3 rounded-xl font-bold text-[10px] uppercase bg-slate-800 hover:bg-slate-700 text-white transition-colors">💾 Guardar Avance</button>
-                  <button onClick={a.cerrarJornadaDefinitivo} disabled={s.calificando || totalBoletosAdmin === 0} className={`flex-1 py-3 rounded-xl font-black text-[10px] uppercase text-white transition-transform active:scale-95 ${esCualquierPromo ? 'bg-purple-600 hover:bg-purple-500 shadow-[0_0_15px_rgba(147,51,234,0.3)]' : 'bg-red-600 hover:bg-red-500 shadow-[0_0_15px_rgba(220,38,38,0.3)]'} disabled:opacity-50 disabled:active:scale-100`}>
-                    {esCualquierPromo ? '🎁 Cerrar y Pagar' : '🏆 Cerrar y Liquidar'}
+                {!esSorteo && (
+                  <div className="w-full md:w-1/3 p-3 bg-red-950/20 border border-red-900/40 rounded-xl text-center flex flex-col justify-center items-center gap-1.5">
+                    <label className="text-red-500 font-black uppercase text-[9px] tracking-widest">Total Goles Oficial</label>
+                    <input type="number" min="0" value={s.golesReales} onChange={(e) => set.setGolesReales(e.target.value)} className="w-20 bg-slate-950 border border-red-900/50 rounded-lg px-2 py-1 text-center text-xl font-black text-white focus:outline-none focus:ring-1 focus:ring-red-500" />
+                  </div>
+                )}
+                
+                <div className={`w-full ${esSorteo ? 'md:w-full' : 'md:w-2/3'} flex gap-2`}>
+                  {!esSorteo && (
+                    <button onClick={a.guardarYCalificar} disabled={s.calificando} className="flex-1 py-3 rounded-xl font-bold text-[10px] uppercase bg-slate-800 hover:bg-slate-700 text-white transition-colors">💾 Guardar Avance</button>
+                  )}
+                  <button onClick={a.cerrarJornadaDefinitivo} disabled={s.calificando || totalBoletosAdmin === 0} className={`flex-1 py-3 rounded-xl font-black text-[10px] uppercase text-white transition-transform active:scale-95 ${esSorteo ? 'bg-slate-700 hover:bg-slate-600 border border-slate-600' : esCualquierPromo ? 'bg-purple-600 hover:bg-purple-500 shadow-[0_0_15px_rgba(147,51,234,0.3)]' : 'bg-red-600 hover:bg-red-500 shadow-[0_0_15px_rgba(220,38,38,0.3)]'} disabled:opacity-50 disabled:active:scale-100`}>
+                    {esSorteo ? '🔒 Cerrar Sala y Archivar' : esCualquierPromo ? '🎁 Cerrar y Pagar' : '🏆 Cerrar y Liquidar'}
                   </button>
                 </div>
               </div>
             )}
             
-            {esHistoricoLiquidado && (
+            {esHistoricoLiquidado && !esSorteo && (
               <div className="mt-4 p-4 bg-slate-900 border border-slate-800 rounded-xl text-center">
                 <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest block mb-1">Goles Totales Oficiales</span>
                 <span className="text-3xl font-black text-white">{s.golesReales || '0'}</span>
@@ -296,7 +378,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
       {/* OVERLAYS Y MODALES DE EDICIÓN (UX Y MANEJO DE ESTADOS) */}
       {/* ========================================================= */}
 
-      {/* LOADER DE IMPRESIÓN (NUEVO) */}
       {cargandoImpresion && (
         <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-sm z-[9999] flex flex-col items-center justify-center animate-in fade-in duration-200">
           <div className="w-16 h-16 border-4 border-slate-500 border-t-white rounded-full animate-spin mb-4"></div>
@@ -305,7 +386,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
         </div>
       )}
 
-      {/* Loader Global cuando se está calificando/guardando */}
       {s.calificando && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center">
           <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
@@ -412,9 +492,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
         </div>
       )}
 
-      {/* ========================================================= */}
       {/* VISTAS DE IMPRESIÓN (OCULTAS EN PANTALLA, VISIBLES EN PAPEL) */}
-      {/* ========================================================= */}
       {s.tipoImpresion === 'tickets' && (
         <PlantillaTicketsBlanco quiniela={s.quiniela} partidos={s.partidos} obtenerLogo={a.obtenerLogo} />
       )}

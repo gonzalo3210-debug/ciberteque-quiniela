@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { useEquipos } from '@/hooks/useEquipos'
 import { useCreadorJornadas } from '@/hooks/useCreadorJornadas'
-import toast from 'react-hot-toast' // 🌟 Reemplazo de los alert()
+import toast from 'react-hot-toast' 
 
 interface ModuloJornadasEquiposProps {
   vista: 'crear' | 'equipos';
@@ -31,6 +31,9 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
   const [busquedaEquipo, setBusquedaEquipo] = useState('');
   const [filtroLigaEquipo, setFiltroLigaEquipo] = useState('Todas');
 
+  // ⚡ NUEVO: Estado para el buscador en la vista de Sorteo
+  const [busquedaEquipoSorteo, setBusquedaEquipoSorteo] = useState('');
+
   const ligasDinamicas = Array.from(new Set(equipos.map(eq => eq.liga || 'Sin Liga'))).sort();
 
   // --- FUNCIONES GESTIÓN EQUIPOS UI ---
@@ -50,7 +53,7 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
   }
 
   const handleGuardarEquipo = async () => {
-    if (!formEquipoNombre) return toast.error('El nombre del equipo es obligatorio'); // 🌟 Toast
+    if (!formEquipoNombre) return toast.error('El nombre del equipo es obligatorio');
     setGuardandoEquipo(true)
     
     const urlLogoFinal = formEquipoLogo.trim() || 'https://a.espncdn.com/i/teamlogos/default-soccer-35.png'
@@ -63,10 +66,10 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
     });
 
     if (result.success) {
-      toast.success(equipoEditandoId ? 'Equipo actualizado' : '¡Equipo guardado con éxito!'); // 🌟 Toast
+      toast.success(equipoEditandoId ? 'Equipo actualizado' : '¡Equipo guardado con éxito!'); 
       cancelarEdicionEquipo();
     } else {
-      toast.error(result.message || 'Error al guardar el equipo'); // 🌟 Toast
+      toast.error(result.message || 'Error al guardar el equipo'); 
     }
     
     setGuardandoEquipo(false);
@@ -133,45 +136,118 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
             </div>
           </div>
           
-          <div className="bg-slate-950/40 border border-slate-800 p-3 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3">
-            <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">🎯 Filtrar Autocompletado:</span>
-            <select value={ligaFiltroJornada} onChange={(e) => setLigaFiltroJornada(e.target.value)} className="w-full sm:w-auto bg-slate-900 text-xs py-1.5 px-3 rounded-lg border border-slate-700 text-white font-bold outline-none focus:border-green-500">
-              <option value="Todas">Todas las Ligas</option>
-              {ligasDinamicas.map(l => <option key={l} value={l}>{l}</option>)}
-            </select>
+          {/* PANEL DE CONFIGURACIÓN ESPECIAL */}
+          <div className="flex flex-col sm:flex-row gap-4 bg-slate-900/50 p-4 rounded-xl border border-slate-800 shadow-inner">
+            <div className="flex-1">
+              <label className="text-[9px] md:text-[10px] text-amber-500 font-bold uppercase mb-1.5 block tracking-wider flex items-center gap-1"><span>⚙️</span> Modalidad de Juego</label>
+              <select value={f.modalidad} onChange={(e: any) => s.setModalidad(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-amber-400 outline-none focus:border-amber-500 transition-all text-xs font-black h-[38px]">
+                <option value="clasica">Tradicional (Local / Empate / Visita)</option>
+                <option value="marcador_exacto">Marcador Exacto (Ej. 2-1)</option>
+                <option value="sorteo">Sorteo Aleatorio (8 Participantes)</option>
+              </select>
+            </div>
+            <div className="flex-1 flex flex-col justify-center mt-2 sm:mt-0 border-t sm:border-t-0 sm:border-l border-slate-800 pt-3 sm:pt-0 sm:pl-4">
+              <label className="flex items-center gap-3 cursor-pointer group">
+                <input 
+                  type="checkbox" 
+                  checked={f.soloAdmins} 
+                  onChange={(e) => s.setSoloAdmins(e.target.checked)} 
+                  className="w-5 h-5 accent-red-600 rounded bg-slate-950 border-slate-700 cursor-pointer"
+                />
+                <div>
+                  <span className="block text-[10px] md:text-xs text-red-400 font-black uppercase tracking-widest group-hover:text-red-300 transition-colors">
+                    Ocultar a Clientes
+                  </span>
+                  <span className="block text-[8px] md:text-[9px] text-slate-500 uppercase tracking-widest mt-0.5 font-bold">
+                    Solo visible en Mostrador / Modo Prueba
+                  </span>
+                </div>
+              </label>
+            </div>
           </div>
 
-          <div className="space-y-2.5">
-            <label className="text-[10px] text-slate-500 font-bold uppercase block tracking-widest px-1">Partidos de la Jornada</label>
-            <datalist id="lista-equipos">
-              {equipos.filter(eq => ligaFiltroJornada === 'Todas' ? true : eq.liga === ligaFiltroJornada).map(eq => <option key={eq.id} value={eq.nombre} />)}
-            </datalist>
-            
-            {(f.partidosNuevos || []).map((p, idx) => (
-              <div key={idx} className="flex flex-col md:flex-row gap-2 bg-slate-900/40 p-2.5 rounded-xl border border-slate-800/80 hover:border-slate-600 transition-colors relative group items-center">
-                
-                <div className="flex justify-between items-center w-full md:w-auto md:flex-col md:gap-1 border-b md:border-b-0 md:border-r border-slate-700/50 pb-2 md:pb-0 md:pr-3 shrink-0">
-                   <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Partido {idx + 1}</span>
-                   <div className="flex gap-1">
-                     <button onClick={() => a.moverPartido(idx, -1)} disabled={idx === 0} className="w-6 h-6 flex items-center justify-center bg-slate-950 border border-slate-700 rounded text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 transition-all text-[10px]" title="Subir">▲</button>
-                     <button onClick={() => a.moverPartido(idx, 1)} disabled={idx === f.partidosNuevos.length - 1} className="w-6 h-6 flex items-center justify-center bg-slate-950 border border-slate-700 rounded text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 transition-all text-[10px]" title="Bajar">▼</button>
-                     <button onClick={() => a.eliminarPartido(idx)} disabled={f.partidosNuevos.length === 1} className="w-6 h-6 flex items-center justify-center bg-red-950/30 border border-red-900/50 rounded text-red-500 hover:text-red-400 hover:bg-red-900/50 disabled:opacity-30 transition-all text-[10px] ml-1" title="Eliminar">✕</button>
-                   </div>
+          {/* ⚡ VISTA CONDICIONAL: SELECTOR DE SORTEO VS PARTIDOS TRADICIONALES */}
+          {f.modalidad === 'sorteo' ? (
+            <div className="bg-blue-950/20 border border-blue-900/50 p-4 rounded-xl space-y-4 shadow-inner">
+              <div className="flex flex-col md:flex-row items-center justify-between gap-3 border-b border-blue-900/50 pb-3">
+                <div className="flex-1">
+                  <h4 className="text-blue-400 font-black uppercase text-sm tracking-widest flex items-center gap-2"><span>🎲</span> Selecciona 8 Equipos</h4>
+                  <p className="text-slate-400 text-[10px] mt-1">Llevas: <strong className={(f.equiposSorteo?.length || 0) === 8 ? "text-green-400" : "text-amber-400"}>{f.equiposSorteo?.length || 0}/8</strong></p>
                 </div>
                 
-                <div className="flex flex-1 w-full items-center gap-2">
-                  <input list="lista-equipos" placeholder="Local" value={p.local} onChange={(ev) => a.actualizarPartidoInput(idx, 'local', ev.target.value)} className="flex-1 w-full bg-slate-950 text-xs md:text-sm p-2 rounded-lg border border-slate-700 text-white outline-none focus:border-green-500 font-bold uppercase text-right" />
-                  <span className="text-[10px] font-black text-slate-600 italic shrink-0 w-4 text-center">VS</span>
-                  <input list="lista-equipos" placeholder="Visita" value={p.visitante} onChange={(ev) => a.actualizarPartidoInput(idx, 'visitante', ev.target.value)} className="flex-1 w-full bg-slate-950 text-xs md:text-sm p-2 rounded-lg border border-slate-700 text-white outline-none focus:border-green-500 font-bold uppercase" />
+                {/* ⚡ NUEVO BUSCADOR */}
+                <div className="flex-1 w-full relative">
+                  <input 
+                    type="text" 
+                    placeholder="Buscar equipo o país..." 
+                    value={busquedaEquipoSorteo}
+                    onChange={(e) => setBusquedaEquipoSorteo(e.target.value)}
+                    className="w-full bg-slate-950 border border-blue-900/50 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-blue-500 font-bold placeholder:text-slate-600 shadow-inner"
+                  />
                 </div>
-                
-                <div className="w-full md:w-[150px] shrink-0">
-                   <input type="datetime-local" value={p.fecha_hora} onChange={(ev) => a.actualizarPartidoInput(idx, 'fecha_hora', ev.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-slate-300 outline-none focus:border-green-500 transition-all text-[10px] font-bold" />
-                </div>
+
+                <button onClick={a.clonarUltimoSorteo} type="button" className="bg-blue-900 hover:bg-blue-800 text-blue-100 text-[10px] font-black uppercase px-4 py-2 rounded-lg border border-blue-700 transition-all shadow-md shrink-0">
+                  ♻️ Clonar Sorteo Anterior
+                </button>
               </div>
-            ))}
-            <button onClick={a.agregarPartidoInput} className="w-full py-3 md:py-2.5 mt-1 border border-dashed border-slate-700 rounded-xl text-slate-500 font-black text-[10px] uppercase hover:bg-slate-800 hover:text-slate-300 hover:border-slate-500 transition-all tracking-widest">+ Agregar Partido</button>
-          </div>
+
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                {equipos
+                  .filter(eq => eq.nombre.toLowerCase().includes(busquedaEquipoSorteo.toLowerCase()))
+                  .map(eq => {
+                  const seleccionado = f.equiposSorteo?.includes(eq.id);
+                  return (
+                    <div key={eq.id} onClick={() => a.toggleEquipoSorteo(eq.id)} className={`p-2 rounded-lg flex flex-col items-center gap-1.5 cursor-pointer transition-all border shadow-sm ${seleccionado ? 'bg-blue-600 border-blue-400 scale-[1.05] shadow-[0_0_15px_rgba(37,99,235,0.5)] z-10' : 'bg-slate-900 border-slate-800 hover:border-slate-600'}`}>
+                      <div className="w-8 h-8 flex items-center justify-center bg-slate-950 rounded-full border border-slate-800/80 p-1">
+                        <img src={eq.logo_url} alt="" className="w-full h-full object-contain" onError={(evt:any)=>{evt.target.src='https://a.espncdn.com/i/teamlogos/default-soccer-35.png'}} />
+                      </div>
+                      <span className={`text-[8px] font-bold truncate uppercase w-full text-center ${seleccionado ? 'text-white' : 'text-slate-400'}`}>{eq.nombre}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              <div className="bg-slate-950/40 border border-slate-800 p-3 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3">
+                <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">🎯 Filtrar Autocompletado:</span>
+                <select value={ligaFiltroJornada} onChange={(e) => setLigaFiltroJornada(e.target.value)} className="w-full sm:w-auto bg-slate-900 text-xs py-1.5 px-3 rounded-lg border border-slate-700 text-white font-bold outline-none focus:border-green-500">
+                  <option value="Todas">Todas las Ligas</option>
+                  {ligasDinamicas.map(l => <option key={l} value={l}>{l}</option>)}
+                </select>
+              </div>
+
+              <label className="text-[10px] text-slate-500 font-bold uppercase block tracking-widest px-1">Partidos de la Jornada</label>
+              <datalist id="lista-equipos">
+                {equipos.filter(eq => ligaFiltroJornada === 'Todas' ? true : eq.liga === ligaFiltroJornada).map(eq => <option key={eq.id} value={eq.nombre} />)}
+              </datalist>
+              
+              {(f.partidosNuevos || []).map((p, idx) => (
+                <div key={idx} className="flex flex-col md:flex-row gap-2 bg-slate-900/40 p-2.5 rounded-xl border border-slate-800/80 hover:border-slate-600 transition-colors relative group items-center">
+                  
+                  <div className="flex justify-between items-center w-full md:w-auto md:flex-col md:gap-1 border-b md:border-b-0 md:border-r border-slate-700/50 pb-2 md:pb-0 md:pr-3 shrink-0">
+                     <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Partido {idx + 1}</span>
+                     <div className="flex gap-1">
+                       <button onClick={() => a.moverPartido(idx, -1)} disabled={idx === 0} className="w-6 h-6 flex items-center justify-center bg-slate-950 border border-slate-700 rounded text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 transition-all text-[10px]" title="Subir">▲</button>
+                       <button onClick={() => a.moverPartido(idx, 1)} disabled={idx === f.partidosNuevos.length - 1} className="w-6 h-6 flex items-center justify-center bg-slate-950 border border-slate-700 rounded text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 transition-all text-[10px]" title="Bajar">▼</button>
+                       <button onClick={() => a.eliminarPartido(idx)} disabled={f.partidosNuevos.length === 1} className="w-6 h-6 flex items-center justify-center bg-red-950/30 border border-red-900/50 rounded text-red-500 hover:text-red-400 hover:bg-red-900/50 disabled:opacity-30 transition-all text-[10px] ml-1" title="Eliminar">✕</button>
+                     </div>
+                  </div>
+                  
+                  <div className="flex flex-1 w-full items-center gap-2">
+                    <input list="lista-equipos" placeholder="Local" value={p.local} onChange={(ev) => a.actualizarPartidoInput(idx, 'local', ev.target.value)} className="flex-1 w-full bg-slate-950 text-xs md:text-sm p-2 rounded-lg border border-slate-700 text-white outline-none focus:border-green-500 font-bold uppercase text-right" />
+                    <span className="text-[10px] font-black text-slate-600 italic shrink-0 w-4 text-center">VS</span>
+                    <input list="lista-equipos" placeholder="Visita" value={p.visitante} onChange={(ev) => a.actualizarPartidoInput(idx, 'visitante', ev.target.value)} className="flex-1 w-full bg-slate-950 text-xs md:text-sm p-2 rounded-lg border border-slate-700 text-white outline-none focus:border-green-500 font-bold uppercase" />
+                  </div>
+                  
+                  <div className="w-full md:w-[150px] shrink-0">
+                     <input type="datetime-local" value={p.fecha_hora} onChange={(ev) => a.actualizarPartidoInput(idx, 'fecha_hora', ev.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-slate-300 outline-none focus:border-green-500 transition-all text-[10px] font-bold" />
+                  </div>
+                </div>
+              ))}
+              <button onClick={a.agregarPartidoInput} className="w-full py-3 md:py-2.5 mt-1 border border-dashed border-slate-700 rounded-xl text-slate-500 font-black text-[10px] uppercase hover:bg-slate-800 hover:text-slate-300 hover:border-slate-500 transition-all tracking-widest">+ Agregar Partido</button>
+            </div>
+          )}
           
           <div className="pt-2">
             <button onClick={handleCrearJornada} disabled={e.creando} className={`w-full py-3.5 rounded-xl font-black uppercase tracking-[0.15em] transition-all flex justify-center items-center gap-2 text-xs md:text-sm ${e.creando ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700' : 'bg-green-600 hover:bg-green-500 text-white shadow-[0_0_15px_rgba(22,163,74,0.3)] hover:scale-[1.01] active:scale-95'}`}>
@@ -181,7 +257,7 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
         </div>
       )}
 
-      {/* --- VISTA: EQUIPOS (Se mantiene la lógica de ayer pero con Toasts) --- */}
+      {/* --- VISTA: EQUIPOS --- */}
       {vista === 'equipos' && (
         <div className="space-y-6 animate-in fade-in duration-300 w-full max-w-4xl mx-auto">
           <div className={`p-4 md:p-5 rounded-2xl border shadow-lg transition-colors ${equipoEditandoId ? 'bg-purple-950/20 border-purple-800/50' : 'bg-slate-900/50 border-slate-800'}`}>

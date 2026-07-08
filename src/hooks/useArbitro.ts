@@ -1,3 +1,4 @@
+// src/hooks/useArbitro.ts
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { calcularPremios } from '@/utils/calculadoraPremios';
@@ -73,9 +74,10 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
   const cargarJornadas = async () => {
     setCargando(true);
     try {
+      // ⚡ ACTUALIZADO: Añadido 'equipos_sorteo' para que el Árbitro sepa qué mezclar
       const query = supabase
         .from('quinielas')
-        .select('id, nombre_jornada, precio_ticket, goles_totales_real, fecha_cierre, estado, tipo_premiacion, partidos (id, equipo_local, equipo_visitante, resultado_real, fecha_hora, goles_local, goles_visitante, es_final)');
+        .select('id, nombre_jornada, precio_ticket, goles_totales_real, fecha_cierre, estado, tipo_premiacion, modalidad, equipos_sorteo, partidos (id, equipo_local, equipo_visitante, resultado_real, fecha_hora, goles_local, goles_visitante, es_final)');
 
       if (vistaActual === 'activas') {
         const { data } = await query.eq('estado', 'abierta').order('fecha_cierre', { ascending: true });
@@ -128,7 +130,8 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     setEsFinalReal(finales);
     setGolesReales(hayGoles ? sumaGolesCalculada.toString() : (qData.goles_totales_real !== null ? qData.goles_totales_real.toString() : ''));
 
-    const { data: tData } = await supabase.from('tickets').select('id, usuario_id, prediccion_goles_total, pronosticos(partido_id, eleccion_usuario)').eq('quiniela_id', qData.id);
+    // Agregado 'equipo_asignado_id' para la lógica de sorteo
+    const { data: tData } = await supabase.from('tickets').select('id, usuario_id, prediccion_goles_total, equipo_asignado_id, pronosticos(partido_id, eleccion_usuario)').eq('quiniela_id', qData.id);
     const { data: uDataReal } = await supabase.from('usuarios').select('id, nombre, telefono, creditos_disponibles');
     const mapaU: Record<string, any> = {};
     if (uDataReal) uDataReal.forEach(u => mapaU[u.id] = { nombre: u.nombre, telefono: u.telefono, creditos: u.creditos_disponibles });
@@ -149,7 +152,8 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
         return { 
           id: ticket.id, usuario_id: ticket.usuario_id, nombre: mapaU[ticket.usuario_id]?.nombre || 'Mostrador', 
           telefono: mapaU[ticket.usuario_id]?.telefono || '', creditos_disponibles: mapaU[ticket.usuario_id]?.creditos || 0,
-          puntos: pts, prediccionGoles: ticket.prediccion_goles_total, golesDiff, pronosticosDiccionario: prons 
+          puntos: pts, prediccionGoles: ticket.prediccion_goles_total, golesDiff, pronosticosDiccionario: prons,
+          equipo_asignado_id: ticket.equipo_asignado_id 
         };
       }).sort((a, b) => {
         if (b.puntos !== a.puntos) return b.puntos - a.puntos;
@@ -261,28 +265,54 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
 
   const enviarWhatsAppBoleto = (jugador: any) => {
     if (!jugador.telefono || jugador.telefono.trim() === '') return toast.error(`Sin WhatsApp registrado para ${jugador.nombre}.`);
-    let seleccionesTexto = '';
-    partidos.forEach(p => {
-      const pick = jugador.pronosticosDiccionario[p.id] === 'L' ? p.equipo_local : jugador.pronosticosDiccionario[p.id] === 'V' ? p.equipo_visitante : 'Empate';
-      seleccionesTexto += `⚽ ${p.equipo_local} vs ${p.equipo_visitante} 👉 *${pick}*\n`;
-    });
-
-    const msg = `🎫 *QUINIELA CIBERTEQUE*\nHola ${jugador.nombre}, tu jugada para *${quiniela.nombre_jornada}* está registrada.\n\n*Tus pronósticos:*\n${seleccionesTexto}\nDesempate: *${jugador.prediccionGoles}*\n\nRanking en vivo:\n👉 ${ENLACE_PUBLICO_RANKING}\n\n🍀 ¡Suerte!`;
+    
+    let msg = '';
+    // ⚡ ACTUALIZADO: Manejo de envío adaptativo si es Sorteo
+    if (quiniela.modalidad === 'sorteo') {
+      const eqSorteado = jugador.equipo_asignado_id ? equipos.find((e:any) => e.id === jugador.equipo_asignado_id) : null;
+      msg = `🎫 *SORTEO CIBERTEQUE*\nHola ${jugador.nombre}, tu lugar en *${quiniela.nombre_jornada}* está asegurado.\n\n`;
+      if (eqSorteado) {
+        msg += `🎲 *¡EL SORTEO SE HA REALIZADO!*\nTu equipo asignado es: *${eqSorteado.nombre.toUpperCase()}*\n\n¡Mucha suerte en el torneo!`;
+      } else {
+        msg += `Esperando a que la sala se llene (8 participantes) para conocer qué equipo te será asignado aleatoriamente.\n\n🍀 ¡Mucha suerte!`;
+      }
+    } else {
+      let seleccionesTexto = '';
+      partidos.forEach(p => {
+        const pick = jugador.pronosticosDiccionario[p.id] === 'L' ? p.equipo_local : jugador.pronosticosDiccionario[p.id] === 'V' ? p.equipo_visitante : 'Empate';
+        seleccionesTexto += `⚽ ${p.equipo_local} vs ${p.equipo_visitante} 👉 *${pick}*\n`;
+      });
+      msg = `🎫 *QUINIELA CIBERTEQUE*\nHola ${jugador.nombre}, tu jugada para *${quiniela.nombre_jornada}* está registrada.\n\n*Tus pronósticos:*\n${seleccionesTexto}\nDesempate: *${jugador.prediccionGoles}*\n\nRanking en vivo:\n👉 ${ENLACE_PUBLICO_RANKING}\n\n🍀 ¡Suerte!`;
+    }
+    
     window.open(`https://wa.me/52${jugador.telefono}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
   const cerrarJornadaDefinitivo = async () => {
     if (!quiniela) return;
-    if (golesReales === '') return toast.error('🚨 Ingresa primero el "Resultado Oficial" de goles totales.');
+    
+    // ⚡ ACTUALIZADO: Omitimos validación de goles si es sorteo
+    if (golesReales === '' && quiniela.modalidad !== 'sorteo') return toast.error('🚨 Ingresa primero el "Resultado Oficial" de goles totales.');
+    
     if (!rankingAdmin || rankingAdmin.length === 0) return toast.error('No hay tickets registrados.');
     if (operacionEnCurso.current) return;
 
     const tPremio = quiniela.tipo_premiacion || 'unico';
     const precioTicketMXN = quiniela.precio_ticket ?? 30; 
     
-    const { ganadores, desgloseTexto } = calcularPremios(rankingAdmin, tPremio, precioTicketMXN, 1, PORCENTAJE_PREMIO);
+    let ganadores: any[] = [];
+    let desgloseTexto = '';
 
-    const confirmar = window.confirm(`⚠️ ¿DENTRO DE CAJA REAL? ⚠️\n\nVas a cerrar la jornada de forma DEFINITIVA.\n\nFormato: ${tPremio.replace('_', ' ').toUpperCase()}\nDesglose de Premiación (Pesos MXN):${desgloseTexto}\n\nLos premios se depositarán en las billeteras digitales.\n¿Confirmas la liquidación?`);
+    // ⚡ ACTUALIZADO: Si es sorteo, la liquidación la harás tú manualmente
+    if (quiniela.modalidad !== 'sorteo') {
+      const res = calcularPremios(rankingAdmin, tPremio, precioTicketMXN, 1, PORCENTAJE_PREMIO);
+      ganadores = res.ganadores;
+      desgloseTexto = res.desgloseTexto;
+    } else {
+      desgloseTexto = '\n- Cierre de Sala Sorteo (El pago al ganador se debe realizar manualmente en Mostrador).';
+    }
+
+    const confirmar = window.confirm(`⚠️ ¿DENTRO DE CAJA REAL? ⚠️\n\nVas a cerrar la jornada de forma DEFINITIVA.\n\nFormato: ${tPremio.replace('_', ' ').toUpperCase()}\nDesglose de Premiación (Pesos MXN):${desgloseTexto}\n\n¿Confirmas el cierre?`);
     if (!confirmar) return;
 
     operacionEnCurso.current = true;
@@ -290,19 +320,22 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     const idToast = toast.loading('Liquidando premios y cerrando jornada...');
     
     try {
-      for (const pId of Object.keys(resultadosReales || {})) {
-        const l_val = marcadoresReales[pId]?.l;
-        const v_val = marcadoresReales[pId]?.v;
-        
-        await supabase.from('partidos').update({ 
-          resultado_real: resultadosReales[pId],
-          goles_local: (l_val !== undefined && l_val !== '') ? parseInt(l_val) : null,
-          goles_visitante: (v_val !== undefined && v_val !== '') ? parseInt(v_val) : null,
-          es_final: esFinalReal[pId] || false
-        }).eq('id', pId);
+      if (quiniela.modalidad !== 'sorteo') {
+        for (const pId of Object.keys(resultadosReales || {})) {
+          const l_val = marcadoresReales[pId]?.l;
+          const v_val = marcadoresReales[pId]?.v;
+          
+          await supabase.from('partidos').update({ 
+            resultado_real: resultadosReales[pId],
+            goles_local: (l_val !== undefined && l_val !== '') ? parseInt(l_val) : null,
+            goles_visitante: (v_val !== undefined && v_val !== '') ? parseInt(v_val) : null,
+            es_final: esFinalReal[pId] || false
+          }).eq('id', pId);
+        }
       }
       
-      await supabase.from('quinielas').update({ goles_totales_real: parseInt(golesReales), estado: 'cerrada' }).eq('id', quiniela.id);
+      const golesActualizar = golesReales !== '' ? parseInt(golesReales) : null;
+      await supabase.from('quinielas').update({ goles_totales_real: golesActualizar, estado: 'cerrada' }).eq('id', quiniela.id);
       
       if (ganadores.length > 0) {
         for (const ganador of ganadores) {
@@ -318,7 +351,7 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
         }
         toast.success(`🎉 ¡Jornada Cerrada!\nLos premios en efectivo han sido depositados.`, { id: idToast, duration: 6000 });
       } else {
-        toast.success(`🎉 ¡Jornada Cerrada Exitosamente!\nNo hubo ganadores para premiar.`, { id: idToast, duration: 5000 });
+        toast.success(`🎉 ¡Jornada Cerrada Exitosamente!\n${quiniela.modalidad === 'sorteo' ? 'Recuerda pagar el premio manualmente.' : 'No hubo ganadores.'}`, { id: idToast, duration: 5000 });
       }
 
       await cargarJornadas();
@@ -335,7 +368,6 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     setTimeout(() => window.print(), 200);
   };
 
-  // 🔥 NUEVA FUNCIÓN: ELIMINAR TICKET
   const eliminarTicket = async (ticketId: string, nombreJugador: string) => {
     if (operacionEnCurso.current) return;
     
@@ -346,16 +378,11 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     const idToast = toast.loading(`Eliminando boleto de ${nombreJugador}...`);
     
     try {
-      // 1. Por seguridad en cascada, primero eliminamos los pronósticos amarrados al ticket
       await supabase.from('pronosticos').delete().eq('ticket_id', ticketId);
-      
-      // 2. Eliminamos el ticket principal
       const { error } = await supabase.from('tickets').delete().eq('id', ticketId);
       if (error) throw error;
 
       toast.success('Boleto eliminado exitosamente.', { id: idToast });
-      
-      // 3. Refrescamos la vista
       await cargarJornadas();
     } catch (error: any) {
       console.error(error);
@@ -363,6 +390,71 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     } finally {
       operacionEnCurso.current = false;
     }
+  };
+
+  // 🔥 NUEVA FUNCIÓN CENTRAL: EJECUTAR SORTEO MUNDIAL
+  const ejecutarSorteoMundial = async (equiposIds: string[]) => {
+    if (!quiniela || operacionEnCurso.current) return;
+    
+    // Validamos que haya exactamente 8 tickets registrados
+    if (rankingAdmin.length !== 8) {
+      return toast.error(`La sala debe tener exactamente 8 participantes. Actuales: ${rankingAdmin.length}`);
+    }
+
+    if (equiposIds.length !== 8) {
+      return toast.error('Se requieren los IDs de los 8 equipos a sortear. Verifica la configuración de la jornada.');
+    }
+
+    const confirmar = window.confirm('🎲 ¿Estás seguro de realizar el sorteo? Esto asignará un equipo aleatorio a cada jugador y NO se puede deshacer.');
+    if (!confirmar) return;
+
+    operacionEnCurso.current = true;
+    const idToast = toast.loading('Mezclando esferas y asignando equipos...');
+
+    try {
+      // Algoritmo de Fisher-Yates para mezcla verdaderamente aleatoria
+      let equiposMezclados = [...equiposIds];
+      for (let i = equiposMezclados.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [equiposMezclados[i], equiposMezclados[j]] = [equiposMezclados[j], equiposMezclados[i]];
+      }
+
+      // Preparar actualizaciones masivas en paralelo
+      const promesas = rankingAdmin.map((ticket, index) => {
+        return supabase
+          .from('tickets')
+          .update({ equipo_asignado_id: equiposMezclados[index] })
+          .eq('id', ticket.id);
+      });
+
+      await Promise.all(promesas);
+
+      toast.success('¡Sorteo realizado con éxito!', { id: idToast });
+      
+      // Refrescamos para visualizar los equipos ya asignados
+      await cargarJornadas();
+    } catch (error: any) {
+      console.error(error);
+      toast.error('Ocurrió un error en el sorteo.', { id: idToast });
+    } finally {
+      operacionEnCurso.current = false;
+    }
+  };
+
+  // ⚡ NUEVO: Enviar resultados del Sorteo al grupo de WhatsApp
+  const compartirResultadoSorteo = () => {
+    if (!quiniela) return;
+    let texto = `🎲 *RESULTADOS DEL SORTEO: ${quiniela.nombre_jornada.toUpperCase()}* 🎲\n\n`;
+    
+    rankingAdmin.forEach((r, idx) => {
+       const eq = equipos.find(e => e.id === r.equipo_asignado_id);
+       texto += `👤 ${r.nombre.toUpperCase()} 👉 *${eq ? eq.nombre : 'Pendiente'}*\n`;
+    });
+    
+    texto += `\n🍀 ¡Mucha suerte a todos en el torneo!`;
+    navigator.clipboard.writeText(texto)
+      .then(() => toast.success('📋 ¡Resultados copiados! Pégalos en tu grupo de WhatsApp.'))
+      .catch(() => window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank'));
   };
 
   // --- LÓGICA EDICIÓN JORNADA ---
@@ -445,7 +537,11 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
   return {
     state: { cargando, vistaActual, equipos, quinielasAbiertas, quinielasCerradas, quiniela, partidos, resultadosReales, marcadoresReales, esFinalReal, golesReales, calificando, rankingAdmin, busquedaJugador, tipoImpresion, ticketAImprimir },
     setters: { setVistaActual, setGolesReales, setBusquedaJugador, setTicketAImprimir, setTipoImpresion },
-    actions: { cargarDetallesQuiniela, handleMarcadorExacto, handleToggleEsFinal, guardarYCalificar, compartirAvanceGrupo, enviarWhatsAppBoleto, cerrarJornadaDefinitivo, obtenerLogo, activarImpresion, eliminarTicket }, // Agregamos eliminarTicket
+    actions: { 
+      cargarDetallesQuiniela, handleMarcadorExacto, handleToggleEsFinal, guardarYCalificar, 
+      compartirAvanceGrupo, enviarWhatsAppBoleto, cerrarJornadaDefinitivo, obtenerLogo, 
+      activarImpresion, eliminarTicket, ejecutarSorteoMundial, compartirResultadoSorteo // 🔥 Añadidos
+    }, 
     edicionJornada: { editandoQuinielaId, editNombreJornada, editFechaCierre, editTipoPremiacion, editPartidos, guardandoEdicion, setEditandoQuinielaId, setEditNombreJornada, setEditFechaCierre, setEditTipoPremiacion, iniciarEdicionJornada, actualizarPartidoEditado, guardarCambiosJornada },
     edicionTicket: { editandoTicketId, editTicketNombre, editTicketGoles, editTicketSelecciones, guardandoEdicionTicket, setEditandoTicketId, abrirEdicionTicket, seleccionarOpcionEditTicket, guardarEdicionTicket },
     constantes: { PORCENTAJE_PREMIO, PORCENTAJE_ADMIN }

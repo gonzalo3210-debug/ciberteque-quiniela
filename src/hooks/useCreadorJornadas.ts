@@ -1,6 +1,7 @@
 // src/hooks/useCreadorJornadas.ts
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import toast from 'react-hot-toast'; // ⚡ NUEVO: Necesario para las notificaciones al clonar
 
 export interface PartidoInput {
   local: string;
@@ -9,6 +10,7 @@ export interface PartidoInput {
 }
 
 export type TipoPremiacion = 'unico' | 'top2' | 'top3' | 'promo_unico' | 'promo_top2';
+export type Modalidad = 'clasica' | 'marcador_exacto' | 'sorteo'; // 👈 ACTUALIZADO
 
 export function useCreadorJornadas() {
   // Estados del formulario
@@ -18,6 +20,13 @@ export function useCreadorJornadas() {
   const [tipoPremiacion, setTipoPremiacion] = useState<TipoPremiacion>('unico');
   const [partidosNuevos, setPartidosNuevos] = useState<PartidoInput[]>([{ local: '', visitante: '', fecha_hora: '' }]);
   
+  // Estados de configuración
+  const [modalidad, setModalidad] = useState<Modalidad>('clasica');
+  const [soloAdmins, setSoloAdmins] = useState(false);
+
+  // ⚡ NUEVO: Estado para guardar los IDs de los 8 equipos del Sorteo Mundial
+  const [equiposSorteo, setEquiposSorteo] = useState<string[]>([]);
+
   // Estados de control
   const [creando, setCreando] = useState(false);
   const [cargadoBorrador, setCargadoBorrador] = useState(false);
@@ -33,6 +42,10 @@ export function useCreadorJornadas() {
         if (datos.fechaCierre) setFechaCierre(datos.fechaCierre);
         if (datos.tipoPremiacion) setTipoPremiacion(datos.tipoPremiacion);
         if (datos.partidosNuevos && datos.partidosNuevos.length > 0) setPartidosNuevos(datos.partidosNuevos);
+        
+        if (datos.modalidad) setModalidad(datos.modalidad);
+        if (datos.soloAdmins !== undefined) setSoloAdmins(datos.soloAdmins);
+        if (datos.equiposSorteo) setEquiposSorteo(datos.equiposSorteo); // 👈 Cargar equipos de sorteo
       } catch (error) {
         console.error("Error leyendo borrador:", error);
       }
@@ -43,9 +56,9 @@ export function useCreadorJornadas() {
   // 2. Guardar borrador automáticamente al cambiar los datos
   useEffect(() => {
     if (!cargadoBorrador) return;
-    const datosBorrador = { nombreJornada, precioTicket, fechaCierre, tipoPremiacion, partidosNuevos };
+    const datosBorrador = { nombreJornada, precioTicket, fechaCierre, tipoPremiacion, partidosNuevos, modalidad, soloAdmins, equiposSorteo };
     localStorage.setItem('ciberteque_borrador_jornada', JSON.stringify(datosBorrador));
-  }, [nombreJornada, precioTicket, fechaCierre, tipoPremiacion, partidosNuevos, cargadoBorrador]);
+  }, [nombreJornada, precioTicket, fechaCierre, tipoPremiacion, partidosNuevos, modalidad, soloAdmins, equiposSorteo, cargadoBorrador]);
 
   // Funciones manipuladoras de partidos
   const agregarPartidoInput = () => {
@@ -71,12 +84,52 @@ export function useCreadorJornadas() {
     setPartidosNuevos(partidosNuevos.filter((_, i) => i !== index));
   };
 
+  // ⚡ NUEVO: Función para seleccionar/quitar equipos del Sorteo
+  const toggleEquipoSorteo = (equipoId: string) => {
+    setEquiposSorteo(prev => {
+      if (prev.includes(equipoId)) return prev.filter(id => id !== equipoId);
+      if (prev.length >= 8) {
+        toast.error('Ya seleccionaste el máximo de 8 equipos.');
+        return prev;
+      }
+      return [...prev, equipoId];
+    });
+  };
+
+  // ⚡ NUEVO: Función para Clonar Sorteo Anterior (Fricción Cero en ventas)
+  const clonarUltimoSorteo = async () => {
+    const idToast = toast.loading('Buscando última sala de sorteo...');
+    try {
+      const { data, error } = await supabase
+        .from('quinielas')
+        .select('precio_ticket, tipo_premiacion, equipos_sorteo')
+        .eq('modalidad', 'sorteo')
+        .order('fecha_cierre', { ascending: false })
+        .limit(1)
+        .single();
+        
+      if (error || !data) throw new Error('No se encontró ningún sorteo previo para clonar.');
+      if (!data.equipos_sorteo || data.equipos_sorteo.length !== 8) throw new Error('El sorteo anterior no tiene los 8 equipos completos.');
+
+      setPrecioTicket(data.precio_ticket.toString());
+      setTipoPremiacion(data.tipo_premiacion as TipoPremiacion);
+      setEquiposSorteo(data.equipos_sorteo);
+      
+      toast.success('¡Configuración y equipos clonados exitosamente!', { id: idToast });
+    } catch (error: any) {
+      toast.error(error.message, { id: idToast });
+    }
+  };
+
   const resetearFormulario = () => {
     setNombreJornada('');
     setFechaCierre('');
     setPrecioTicket('1');
     setTipoPremiacion('unico');
     setPartidosNuevos([{ local: '', visitante: '', fecha_hora: '' }]);
+    setModalidad('clasica'); 
+    setSoloAdmins(false); 
+    setEquiposSorteo([]); // 👈 Limpiar selección de sorteo
     localStorage.removeItem('ciberteque_borrador_jornada');
   };
 
@@ -84,6 +137,11 @@ export function useCreadorJornadas() {
   const crearJornadaCompleta = async () => {
     if (!nombreJornada || !fechaCierre) {
       return { success: false, message: "Ponle nombre a la jornada y fecha de cierre." };
+    }
+
+    // ⚡ NUEVO: Validación estricta para asegurar que la modalidad Sorteo tenga 8 equipos
+    if (modalidad === 'sorteo' && equiposSorteo.length !== 8) {
+      return { success: false, message: `Selecciona exactamente 8 equipos. Actualmente tienes ${equiposSorteo.length}.` };
     }
     
     setCreando(true);
@@ -94,29 +152,34 @@ export function useCreadorJornadas() {
         precio_ticket: parseInt(precioTicket), 
         fecha_cierre: fechaCierre, 
         tipo_premiacion: tipoPremiacion, 
-        estado: 'abierta' 
+        estado: 'abierta',
+        modalidad: modalidad, 
+        solo_admins: soloAdmins,
+        equipos_sorteo: modalidad === 'sorteo' ? equiposSorteo : [] // 👈 Solo se insertan si es Sorteo
       }]).select().single();
       
       if (qErr) throw qErr;
       
-      // 2. Ordenar y preparar partidos
-      const partidosOrdenados = [...partidosNuevos].sort((a, b) => {
-        if (a.fecha_hora && b.fecha_hora) return new Date(a.fecha_hora).getTime() - new Date(b.fecha_hora).getTime();
-        if (a.fecha_hora && !b.fecha_hora) return -1;
-        if (!a.fecha_hora && b.fecha_hora) return 1;
-        return 0;
-      });
+      // 2. Ordenar y preparar partidos (👈 ACTUALIZADO: Solo se ejecuta si NO es sorteo)
+      if (modalidad !== 'sorteo') {
+        const partidosOrdenados = [...partidosNuevos].sort((a, b) => {
+          if (a.fecha_hora && b.fecha_hora) return new Date(a.fecha_hora).getTime() - new Date(b.fecha_hora).getTime();
+          if (a.fecha_hora && !b.fecha_hora) return -1;
+          if (!a.fecha_hora && b.fecha_hora) return 1;
+          return 0;
+        });
 
-      const partidosData = partidosOrdenados.map(p => ({ 
-        quiniela_id: q.id, 
-        equipo_local: p.local, 
-        equipo_visitante: p.visitante, 
-        fecha_hora: p.fecha_hora || null 
-      }));
-      
-      // 3. Insertar Partidos
-      const { error: pErr } = await supabase.from('partidos').insert(partidosData);
-      if (pErr) throw pErr;
+        const partidosData = partidosOrdenados.map(p => ({ 
+          quiniela_id: q.id, 
+          equipo_local: p.local, 
+          equipo_visitante: p.visitante, 
+          fecha_hora: p.fecha_hora || null 
+        }));
+        
+        // 3. Insertar Partidos
+        const { error: pErr } = await supabase.from('partidos').insert(partidosData);
+        if (pErr) throw pErr;
+      }
 
       resetearFormulario();
       return { success: true, message: "¡Jornada publicada en CiberTeque con éxito!" };
@@ -130,9 +193,9 @@ export function useCreadorJornadas() {
   };
 
   return {
-    formulario: { nombreJornada, precioTicket, fechaCierre, tipoPremiacion, partidosNuevos },
-    setters: { setNombreJornada, setPrecioTicket, setFechaCierre, setTipoPremiacion },
-    acciones: { agregarPartidoInput, actualizarPartidoInput, moverPartido, eliminarPartido, crearJornadaCompleta },
+    formulario: { nombreJornada, precioTicket, fechaCierre, tipoPremiacion, partidosNuevos, modalidad, soloAdmins, equiposSorteo },
+    setters: { setNombreJornada, setPrecioTicket, setFechaCierre, setTipoPremiacion, setModalidad, setSoloAdmins },
+    acciones: { agregarPartidoInput, actualizarPartidoInput, moverPartido, eliminarPartido, crearJornadaCompleta, toggleEquipoSorteo, clonarUltimoSorteo },
     estado: { creando }
   };
 }

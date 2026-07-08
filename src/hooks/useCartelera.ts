@@ -1,11 +1,13 @@
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
+import { obtenerQuinielasActivas } from '@/lib/queries' // 👈 IMPORTAMOS NUESTRA NUEVA LÓGICA
 
 export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: number) => void) {
   const [quinielasActivas, setQuinielasActivas] = useState<any[]>([])
   const [quinielaActual, setQuinielaActual] = useState<any>(null)
   const [partidos, setPartidos] = useState<any[]>([])
-  const [equiposInfo, setEquiposInfo] = useState<any[]>([])
+  
+  const [mapaLogos, setMapaLogos] = useState<Record<string, string>>({})
   const [selecciones, setSelecciones] = useState<Record<string, string>>({})
   
   const [cargando, setCargando] = useState(true)
@@ -26,23 +28,25 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
         setCargando(true)
         setErrorCarga(null)
 
-        const { data: qData, error: qError } = await supabase
-          .from('quinielas')
-          .select(`
-            id, nombre_jornada, precio_ticket, fecha_cierre, tipo_premiacion,
-            partidos (id, equipo_local, equipo_visitante, fecha_hora)
-          `)
-          .eq('estado', 'abierta')
-          .order('fecha_cierre', { ascending: true })
+        // 🔥 USAMOS NUESTRA FUNCIÓN CENTRALIZADA
+        const { data: qData, error: qError } = await obtenerQuinielasActivas(usuarioActivo?.rol);
 
         if (qError) throw qError;
 
-        const { data: eData, error: eError } = await supabase.from('equipos').select('*')
+        const { data: eData, error: eError } = await supabase.from('equipos').select('nombre, logo_url')
         if (eError) throw eError;
-        if (eData) setEquiposInfo(eData)
+        
+        if (eData) {
+          const diccionarioLogos: Record<string, string> = {};
+          eData.forEach(eq => {
+            if (eq.nombre) {
+              diccionarioLogos[eq.nombre.toLowerCase().trim()] = eq.logo_url;
+            }
+          });
+          setMapaLogos(diccionarioLogos);
+        }
 
         if (qData && qData.length > 0) {
-          // 🔥 FILTRO ESTRICTO DE TIEMPO: Eliminamos las que ya caducaron aunque digan "abierta" en BD
           const ahora = new Date().getTime();
           const jornadasDisponibles = qData.filter(q => {
             const cierre = new Date(q.fecha_cierre ? q.fecha_cierre.substring(0, 16) : q.fecha_cierre).getTime();
@@ -71,9 +75,8 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
     if (usuarioActivo?.id) { 
         cargarJornadasAbiertas()
     }
-  }, [usuarioActivo?.id])
+  }, [usuarioActivo?.id, usuarioActivo?.rol])
 
-  // 🔥 SUSCRIPCIÓN INTELIGENTE: Si el admin la cierra, desaparece automáticamente de la vista
   useEffect(() => {
     if (!quinielaActual) return;
 
@@ -83,7 +86,10 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'quinielas', filter: `id=eq.${quinielaActual.id}` },
         (payload: any) => {
-          if (payload.new.estado !== 'abierta') {
+          // Si NO es admin y la vuelven privada, lo sacamos.
+          const ocultarPorPrivacidad = payload.new.solo_admins === true && usuarioActivo?.rol !== 'admin';
+
+          if (payload.new.estado !== 'abierta' || ocultarPorPrivacidad) {
             setQuinielasActivas(prev => {
                 const filtradas = prev.filter(q => q.id !== payload.new.id);
                 if (quinielaActual.id === payload.new.id) {
@@ -98,7 +104,7 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
       .subscribe();
 
     return () => { supabase.removeChannel(canalTiempoReal); };
-  }, [quinielaActual?.id]);
+  }, [quinielaActual?.id, usuarioActivo?.rol]);
 
   const cambiarQuinielaVisible = async (quiniela: any) => {
     setQuinielaActual(quiniela)
@@ -136,7 +142,6 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
   const guardarQuiniela = async () => {
     if (peticionEnCurso.current) return { error: 'Tu jugada ya se está procesando...' }
     
-    // 🔥 VERIFICACIÓN FINAL: Justo antes de guardar, comprobamos el tiempo real de nuevo
     const cierre = new Date(quinielaActual.fecha_cierre ? quinielaActual.fecha_cierre.substring(0, 16) : quinielaActual.fecha_cierre).getTime();
     if (new Date().getTime() > cierre) {
         return { error: '¡El tiempo límite acaba de expirar! La jornada ya no admite jugadas.' }
@@ -218,8 +223,7 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
 
   const obtenerLogo = (nombreEquipo: string) => {
     if (!nombreEquipo) return null;
-    const equipo = equiposInfo.find(e => e.nombre.toLowerCase().trim() === nombreEquipo.toLowerCase().trim())
-    return equipo?.logo_url || null
+    return mapaLogos[nombreEquipo.toLowerCase().trim()] || null;
   }
 
   return {
