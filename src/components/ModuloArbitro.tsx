@@ -1,10 +1,11 @@
 'use client'
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useArbitro } from '@/hooks/useArbitro'
 import PlantillaTicketsBlanco from '@/components/impresion/PlantillaTicketsBlanco';
 import PlantillaReciboJugada from '@/components/impresion/PlantillaReciboJugada';
 import PlantillaSabanaGeneral from '@/components/impresion/PlantillaSabanaGeneral';
 import PlantillaTablaResultados from '@/components/impresion/PlantillaTablaResultados';
+import toast from 'react-hot-toast';
 
 interface ModuloArbitroProps {
   actualizarSaldoGlobal?: (id: string, nuevo: number) => void;
@@ -14,12 +15,51 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
   const arbitro = useArbitro(actualizarSaldoGlobal);
   const { state: s, setters: set, actions: a, edicionJornada: ej, edicionTicket: et, constantes: c } = arbitro;
 
-  // ESTADO DE UX: Loader para dar tiempo de renderizado a las imágenes antes de imprimir
+  // ESTADO DE UX: Loader para impresión
   const [cargandoImpresion, setCargandoImpresion] = useState(false);
 
-  // ⚡ NUEVOS SELECTORES PARA CONTROL DE MODALIDAD
+  // ⚡ ESTADOS DE ANIMACIÓN DEL SORTEO
+  const [faseSorteo, setFaseSorteo] = useState<'inactivo' | 'preparando' | 'girando' | 'revelando'>('inactivo');
+  const [tickAnimacion, setTickAnimacion] = useState(0);
+
   const esSorteo = s.quiniela?.modalidad === 'sorteo';
   const sorteoRealizado = s.rankingAdmin?.some((r: any) => r.equipo_asignado_id);
+  const equiposEnBombo = useMemo(() => s.equipos?.filter(e => s.quiniela?.equipos_sorteo?.includes(e.id)) || [], [s.equipos, s.quiniela?.equipos_sorteo]);
+
+  // Motor de Animación de Alta Velocidad (Efecto Ruleta)
+  useEffect(() => {
+    let intervalo: NodeJS.Timeout;
+    if (faseSorteo === 'girando' || faseSorteo === 'revelando') {
+      intervalo = setInterval(() => {
+        setTickAnimacion(prev => prev + 1);
+      }, 50); // Velocidad de cambio de logos (50ms)
+    }
+    return () => clearInterval(intervalo);
+  }, [faseSorteo]);
+
+  const iniciarSorteoAnimado = () => {
+    if (s.rankingAdmin.length !== 8) return toast.error('Se requieren exactamente 8 jugadores.');
+    
+    // Inicia el Overlay
+    setFaseSorteo('preparando');
+    
+    setTimeout(() => {
+      setFaseSorteo('girando'); // Arranca la ruleta visual
+      
+      // Llamada real a la BD en segundo plano mientras gira visualmente
+      a.ejecutarSorteoMundial(s.quiniela.equipos_sorteo || []).then(() => {
+        // Le damos 3.5 segundos de suspenso visual obligado antes de detener la ruleta
+        setTimeout(() => {
+          setFaseSorteo('revelando');
+          setTimeout(() => {
+            setFaseSorteo('inactivo');
+          }, 3000); // Muestra el resultado final 3 segundos antes de cerrar el modal
+        }, 3500); 
+      }).catch(() => {
+        setFaseSorteo('inactivo');
+      });
+    }, 1000);
+  };
 
   const { totalBoletosAdmin, precioBoletoPesos, cajaTotalPesos, cajaPremioPesos, cajaCiberPesos, ganadorActualAdmin } = useMemo(() => {
     const total = s.rankingAdmin?.length || 0;
@@ -59,14 +99,9 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
 
   const listaQuinielasMostrar = s.vistaActual === 'activas' ? s.quinielasAbiertas : s.quinielasCerradas;
 
-  // FUNCIÓN ENVOLTORIO UX: Maneja el tiempo de espera para renderizado antes de imprimir
   const ejecutarImpresionUX = (tipo: string, payload?: any) => {
     setCargandoImpresion(true);
-    
-    if (tipo === 'recibo' && payload) {
-      set.setTicketAImprimir(payload);
-    }
-
+    if (tipo === 'recibo' && payload) set.setTicketAImprimir(payload);
     setTimeout(() => {
       a.activarImpresion(tipo as any);
       setCargandoImpresion(false);
@@ -88,6 +123,48 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
 
   return (
     <>
+      {/* 🚀 OVERLAY DEL SORTEO EN VIVO (ANIMACIÓN) */}
+      {faseSorteo !== 'inactivo' && (
+        <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md z-[100] flex flex-col items-center justify-center p-4 animate-in fade-in duration-300">
+          <h2 className="text-3xl md:text-5xl font-black text-white uppercase tracking-[0.2em] mb-2 drop-shadow-[0_0_15px_rgba(59,130,246,0.8)]">
+            {faseSorteo === 'preparando' ? 'Preparando Bombo...' : faseSorteo === 'girando' ? '🎰 Sorteando Equipos...' : '✨ ¡Asignaciones Listas! ✨'}
+          </h2>
+          <p className="text-blue-400 font-bold tracking-widest uppercase text-sm mb-8 animate-pulse">Torneo: {s.quiniela?.nombre_jornada}</p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-5xl">
+            {s.rankingAdmin.map((jugador: any, idx: number) => {
+              const eqReal = jugador.equipo_asignado_id ? s.equipos.find((e:any) => e.id === jugador.equipo_asignado_id) : null;
+              const eqRuleta = equiposEnBombo.length > 0 ? equiposEnBombo[(tickAnimacion + idx * 5) % equiposEnBombo.length] : null;
+              
+              const equipoMostrar = faseSorteo === 'revelando' ? eqReal : eqRuleta;
+
+              return (
+                <div key={jugador.id} className={`bg-slate-900 border-2 p-4 md:p-6 rounded-2xl flex justify-between items-center transform transition-all duration-75 ${faseSorteo === 'revelando' ? 'border-green-500 shadow-[0_0_30px_rgba(34,197,94,0.3)] scale-100' : 'border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.5)] scale-[1.02]'}`}>
+                  <div className="flex flex-col flex-1 truncate pr-4">
+                    <span className="text-[10px] md:text-xs text-slate-400 font-black uppercase tracking-widest mb-1">Esfera {idx + 1}</span>
+                    <span className="font-black text-white text-lg md:text-xl uppercase truncate">{jugador.nombre}</span>
+                  </div>
+                  
+                  <div className="flex items-center gap-4 shrink-0 border-l-2 border-slate-700/50 pl-4 h-full min-w-[140px] justify-end">
+                    {equipoMostrar && (
+                      <>
+                        <span className={`font-black uppercase text-sm md:text-base text-right leading-tight truncate max-w-[100px] ${faseSorteo === 'revelando' ? 'text-green-400' : 'text-blue-400'}`}>
+                          {equipoMostrar.nombre}
+                        </span>
+                        <div className={`w-14 h-14 md:w-16 md:h-16 bg-slate-950 rounded-full p-2 flex items-center justify-center shrink-0 border-2 ${faseSorteo === 'revelando' ? 'border-green-500 shadow-[0_0_20px_rgba(34,197,94,0.5)]' : 'border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.8)]'}`}>
+                          <img src={equipoMostrar.logo_url} className="w-full h-full object-contain drop-shadow-lg" alt="" />
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* --- INTERFAZ PRINCIPAL DEL ÁRBITRO --- */}
       <div className="animate-in fade-in duration-300 space-y-4 w-full max-w-4xl mx-auto print:hidden">
         
         <div className="flex bg-slate-900 rounded-xl border border-slate-800 p-1 mb-4 shadow-sm">
@@ -113,7 +190,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
           <div className="flex flex-col items-center justify-center bg-slate-900/50 rounded-xl border border-slate-800 py-16 animate-in zoom-in-95">
             <span className="text-4xl mb-3 opacity-50">📂</span>
             <p className="text-center text-slate-500 text-xs font-bold uppercase tracking-widest">
-              {s.vistaActual === 'activas' ? 'No hay jornada abierta actualmente.' : 'No hay jornadas cerradas en el historial.'}
+              {s.vistaActual === 'activas' ? 'No hay jornada abierta.' : 'No hay jornadas cerradas.'}
             </p>
           </div>
         ) : (
@@ -164,37 +241,38 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
               🏆 Formato: <span className={`${esCualquierPromo ? 'text-white' : 'text-blue-400'} font-black`}>{s.quiniela.tipo_premiacion}</span>
             </div>
 
-            {/* ⚡ VISTA CONDICIONAL: BOMBO VIRTUAL VS TABLA DE RESULTADOS */}
+            {/* VISTA CONDICIONAL: BOMBO VIRTUAL VS TABLA TRADICIONAL */}
             {esSorteo ? (
               <div className="bg-blue-950/20 border border-blue-900/50 rounded-xl p-4 md:p-6 shadow-inner mt-4">
                 <h3 className="text-blue-400 font-black uppercase text-center text-lg md:text-xl mb-6 tracking-widest flex items-center justify-center gap-2"><span>🎲</span> Bombo Virtual (Sorteo Mundial)</h3>
                 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
                   {s.rankingAdmin.map((jugador: any, idx: number) => {
                     const eqSorteado = jugador.equipo_asignado_id ? s.equipos.find((e:any) => e.id === jugador.equipo_asignado_id) : null;
+                    
                     return (
-                      <div key={jugador.id} className="bg-slate-900 border border-slate-700 p-3 rounded-lg flex justify-between items-center transition-all hover:border-slate-500">
-                        <div className="flex flex-col flex-1 truncate pr-2">
-                          <span className="text-[10px] text-slate-500 font-black uppercase">Esfera {idx + 1}</span>
-                          <span className="font-bold text-white text-sm uppercase truncate pr-2" title={jugador.nombre}>{jugador.nombre}</span>
-                          <div className="flex items-center gap-2 mt-1">
-                            <button onClick={() => a.enviarWhatsAppBoleto(jugador)} className="text-[10px] text-green-400 hover:text-green-300 font-bold uppercase transition-colors">📲 Enviar WA</button>
+                      <div key={jugador.id} className="bg-slate-900 border border-slate-700 p-4 rounded-xl flex justify-between items-center hover:border-slate-500 transition-colors">
+                        <div className="flex flex-col flex-1 truncate pr-3">
+                          <span className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Esfera {idx + 1}</span>
+                          <span className="font-black text-white text-sm uppercase truncate" title={jugador.nombre}>{jugador.nombre}</span>
+                          <div className="flex items-center gap-3 mt-2">
+                            <button onClick={() => a.enviarWhatsAppBoleto(jugador)} className="text-[9px] text-green-400 hover:text-green-300 font-bold uppercase transition-colors flex items-center gap-1"><span>📲</span> Notificar</button>
                             {!esHistoricoLiquidado && !sorteoRealizado && (
-                              <button onClick={() => a.eliminarTicket(jugador.id, jugador.nombre)} className="text-[10px] text-red-500 hover:text-red-400 font-bold uppercase transition-colors">🗑️ Borrar</button>
+                              <button onClick={() => a.eliminarTicket(jugador.id, jugador.nombre)} className="text-[9px] text-red-500 hover:text-red-400 font-bold uppercase transition-colors flex items-center gap-1"><span>🗑️</span> Borrar</button>
                             )}
                           </div>
                         </div>
                         
-                        <div className="flex items-center gap-2 shrink-0 border-l border-slate-700 pl-3">
+                        <div className="flex items-center gap-3 shrink-0 border-l border-slate-700/50 pl-4 h-full min-w-[120px] justify-end">
                           {eqSorteado ? (
                             <>
-                              <span className="font-black text-blue-400 uppercase text-xs text-right w-[80px] leading-tight">{eqSorteado.nombre}</span>
-                              <div className="w-10 h-10 bg-slate-950 border border-slate-800 rounded-full p-1.5 flex items-center justify-center shrink-0 shadow-lg">
-                                <img src={eqSorteado.logo_url} className="w-full h-full object-contain drop-shadow-md" alt="" onError={(evt:any)=>{evt.target.src='https://a.espncdn.com/i/teamlogos/default-soccer-35.png'}} />
+                              <span className="font-black text-blue-400 uppercase text-xs md:text-sm text-right leading-tight max-w-[80px] truncate">{eqSorteado.nombre}</span>
+                              <div className="w-10 h-10 md:w-12 md:h-12 bg-slate-950 border border-slate-800 rounded-full p-1.5 flex items-center justify-center shrink-0 shadow-lg">
+                                <img src={eqSorteado.logo_url} className="w-full h-full object-contain" alt="" onError={(evt:any)=>{evt.target.src='https://a.espncdn.com/i/teamlogos/default-soccer-35.png'}} />
                               </div>
                             </>
                           ) : (
-                            <span className="text-[10px] text-slate-500 uppercase font-black px-2 py-1 bg-slate-950 rounded border border-slate-800 animate-pulse">Buscando ❓</span>
+                            <span className="text-[9px] text-slate-500 uppercase font-black px-2 py-1 bg-slate-950 rounded border border-slate-800 flex items-center gap-1"><span className="animate-pulse">⏳</span> Pendiente</span>
                           )}
                         </div>
                       </div>
@@ -203,31 +281,41 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                   
                   {/* LUGARES VACÍOS PLACEHOLDER */}
                   {Array.from({ length: 8 - s.rankingAdmin.length }).map((_, i) => (
-                    <div key={`empty-${i}`} className="bg-slate-950/50 border border-slate-800 border-dashed p-3 rounded-lg flex justify-between items-center opacity-50">
+                    <div key={`empty-${i}`} className="bg-slate-950/50 border-2 border-slate-800 border-dashed p-4 rounded-xl flex justify-between items-center opacity-40">
                       <div className="flex flex-col">
                          <span className="text-[10px] text-slate-600 font-black uppercase">Esfera {s.rankingAdmin.length + i + 1}</span>
                          <span className="text-xs font-bold text-slate-500 uppercase mt-0.5">Lugar Disponible</span>
                       </div>
-                      <div className="w-8 h-8 rounded-full border-2 border-slate-800 border-dashed"></div>
+                      <div className="w-10 h-10 rounded-full border-2 border-slate-700 border-dashed flex items-center justify-center"></div>
                     </div>
                   ))}
                 </div>
 
-                {/* BOTON MAESTRO DEL SORTEO */}
                 {!esHistoricoLiquidado && (
-                  <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-3 max-w-2xl mx-auto">
                     {!sorteoRealizado ? (
                       <button 
-                         onClick={() => a.ejecutarSorteoMundial(s.quiniela.equipos_sorteo || [])}
+                         onClick={iniciarSorteoAnimado}
                          disabled={s.rankingAdmin.length !== 8 || s.calificando}
-                         className={`w-full py-4 rounded-xl font-black uppercase tracking-[0.2em] transition-all ${s.rankingAdmin.length === 8 ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_20px_rgba(37,99,235,0.4)] hover:scale-[1.01] active:scale-95' : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'}`}
+                         className={`w-full py-4 rounded-xl font-black uppercase tracking-[0.2em] transition-all text-sm ${
+                           s.rankingAdmin.length === 8 ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_20px_rgba(37,99,235,0.5)] hover:scale-[1.02] active:scale-95' 
+                           : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
+                         }`}
                       >
-                         {s.calificando ? 'Procesando...' : s.rankingAdmin.length === 8 ? '🎲 Ejecutar Sorteo Aleatorio' : `Esperando Jugadores (${s.rankingAdmin.length}/8)`}
+                         {s.calificando ? 'Procesando BD...' : s.rankingAdmin.length === 8 ? '🎰 INICIAR SORTEO EN VIVO' : `Faltan Jugadores (${s.rankingAdmin.length}/8)`}
                       </button>
                     ) : (
-                      <button onClick={a.compartirResultadoSorteo} className="w-full py-3 rounded-xl font-black uppercase tracking-widest bg-green-600 hover:bg-green-500 text-white transition-all shadow-[0_0_15px_rgba(22,163,74,0.3)]">
-                        📲 Compartir Resultados Oficiales en WhatsApp
-                      </button>
+                      <>
+                        <button onClick={a.compartirResultadoSorteo} className="w-full py-3.5 rounded-xl font-black uppercase tracking-widest bg-green-600 hover:bg-green-500 text-white transition-all shadow-md active:scale-95">
+                          📢 Enviar Resultados al Grupo
+                        </button>
+                        <div className="border-t border-blue-900/50 pt-4 mt-2">
+                           <p className="text-center text-[10px] text-blue-400 font-bold uppercase mb-3">¿El torneo ya terminó en la vida real?</p>
+                           <button onClick={() => toast.error('Implementaremos la lógica de declarar campeón en el siguiente paso.')} className="w-full py-3.5 rounded-xl font-black text-[10px] uppercase text-white transition-all bg-amber-600 hover:bg-amber-500 shadow-[0_0_15px_rgba(217,119,6,0.3)] active:scale-95">
+                             🏆 Declarar Campeón y Pagar Premio
+                           </button>
+                        </div>
+                      </>
                     )}
                   </div>
                 )}
@@ -340,30 +428,26 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                     )
                   })}
                 </div>
+
+                {/* SECCIÓN FINAL (CERRAR JORNADA TRADICIONAL) */}
+                {!esHistoricoLiquidado && (
+                  <div className="flex flex-col md:flex-row items-center gap-3 border-t border-slate-800 pt-4 mt-2">
+                    <div className="w-full md:w-1/3 p-3 bg-red-950/20 border border-red-900/40 rounded-xl text-center flex flex-col justify-center items-center gap-1.5">
+                      <label className="text-red-500 font-black uppercase text-[9px] tracking-widest">Total Goles Oficial</label>
+                      <input type="number" min="0" value={s.golesReales} onChange={(e) => set.setGolesReales(e.target.value)} className="w-20 bg-slate-950 border border-red-900/50 rounded-lg px-2 py-1 text-center text-xl font-black text-white focus:outline-none focus:ring-1 focus:ring-red-500" />
+                    </div>
+                    
+                    <div className="w-full md:w-2/3 flex gap-2">
+                      <button onClick={a.guardarYCalificar} disabled={s.calificando} className="flex-1 py-3 rounded-xl font-bold text-[10px] uppercase bg-slate-800 hover:bg-slate-700 text-white transition-colors">💾 Guardar Avance</button>
+                      <button onClick={a.cerrarJornadaDefinitivo} disabled={s.calificando || totalBoletosAdmin === 0} className={`flex-1 py-3 rounded-xl font-black text-[10px] uppercase text-white transition-transform active:scale-95 ${esCualquierPromo ? 'bg-purple-600 hover:bg-purple-500 shadow-[0_0_15px_rgba(147,51,234,0.3)]' : 'bg-red-600 hover:bg-red-500 shadow-[0_0_15px_rgba(220,38,38,0.3)]'} disabled:opacity-50 disabled:active:scale-100`}>
+                        {esCualquierPromo ? '🎁 Cerrar y Pagar' : '🏆 Cerrar y Liquidar'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </>
             )}
 
-            {/* SECCIÓN FINAL (CERRAR JORNADA) */}
-            {!esHistoricoLiquidado && (
-              <div className="flex flex-col md:flex-row items-center gap-3 border-t border-slate-800 pt-4 mt-2">
-                {!esSorteo && (
-                  <div className="w-full md:w-1/3 p-3 bg-red-950/20 border border-red-900/40 rounded-xl text-center flex flex-col justify-center items-center gap-1.5">
-                    <label className="text-red-500 font-black uppercase text-[9px] tracking-widest">Total Goles Oficial</label>
-                    <input type="number" min="0" value={s.golesReales} onChange={(e) => set.setGolesReales(e.target.value)} className="w-20 bg-slate-950 border border-red-900/50 rounded-lg px-2 py-1 text-center text-xl font-black text-white focus:outline-none focus:ring-1 focus:ring-red-500" />
-                  </div>
-                )}
-                
-                <div className={`w-full ${esSorteo ? 'md:w-full' : 'md:w-2/3'} flex gap-2`}>
-                  {!esSorteo && (
-                    <button onClick={a.guardarYCalificar} disabled={s.calificando} className="flex-1 py-3 rounded-xl font-bold text-[10px] uppercase bg-slate-800 hover:bg-slate-700 text-white transition-colors">💾 Guardar Avance</button>
-                  )}
-                  <button onClick={a.cerrarJornadaDefinitivo} disabled={s.calificando || totalBoletosAdmin === 0} className={`flex-1 py-3 rounded-xl font-black text-[10px] uppercase text-white transition-transform active:scale-95 ${esSorteo ? 'bg-slate-700 hover:bg-slate-600 border border-slate-600' : esCualquierPromo ? 'bg-purple-600 hover:bg-purple-500 shadow-[0_0_15px_rgba(147,51,234,0.3)]' : 'bg-red-600 hover:bg-red-500 shadow-[0_0_15px_rgba(220,38,38,0.3)]'} disabled:opacity-50 disabled:active:scale-100`}>
-                    {esSorteo ? '🔒 Cerrar Sala y Archivar' : esCualquierPromo ? '🎁 Cerrar y Pagar' : '🏆 Cerrar y Liquidar'}
-                  </button>
-                </div>
-              </div>
-            )}
-            
             {esHistoricoLiquidado && !esSorteo && (
               <div className="mt-4 p-4 bg-slate-900 border border-slate-800 rounded-xl text-center">
                 <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest block mb-1">Goles Totales Oficiales</span>
@@ -386,7 +470,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
         </div>
       )}
 
-      {s.calificando && (
+      {s.calificando && faseSorteo === 'inactivo' && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center">
           <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
           <p className="text-white font-black tracking-widest uppercase animate-pulse">Procesando Datos...</p>
@@ -492,7 +576,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
         </div>
       )}
 
-      {/* VISTAS DE IMPRESIÓN (OCULTAS EN PANTALLA, VISIBLES EN PAPEL) */}
+      {/* VISTAS DE IMPRESIÓN */}
       {s.tipoImpresion === 'tickets' && (
         <PlantillaTicketsBlanco quiniela={s.quiniela} partidos={s.partidos} obtenerLogo={a.obtenerLogo} />
       )}

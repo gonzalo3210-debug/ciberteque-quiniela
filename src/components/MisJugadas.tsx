@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
-import { useSincronizacionRealtime } from '@/hooks/useSincronizacionRealtime' // 👈 Importamos nuestro motor de tiempo real
+import { useSincronizacionRealtime } from '@/hooks/useSincronizacionRealtime'
 
 export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
   const [gruposActivos, setGruposActivos] = useState<any[]>([])
@@ -11,21 +11,19 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
   
   const [vistaActual, setVistaActual] = useState<'activas' | 'historial'>('activas')
 
-  // 🔥 ESTADOS PARA EL MODAL DE EDICIÓN
   const [ticketEditando, setTicketEditando] = useState<any>(null)
   const [nuevasSelecciones, setNuevasSelecciones] = useState<Record<string, string>>({})
   const [nuevosGoles, setNuevosGoles] = useState<number | ''>('')
   const [guardandoEdicion, setGuardandoEdicion] = useState(false)
   
-  // Candado anti-doble clic
   const procesandoEdicionRef = useRef(false)
 
-  // 🛠️ MODIFICACIÓN: Agregamos el parámetro para que las actualizaciones en tiempo real no parpadeen la pantalla
   const cargarHistorial = async (esCargaSilenciosa = false) => {
     if (!esCargaSilenciosa) setCargando(true)
     
     try {
-      const { data: eqData } = await supabase.from('equipos').select('nombre, logo_url')
+      // ⚡ MODIFICACIÓN: Agregamos 'id' a la consulta de equipos para poder cruzar el equipo_asignado_id del sorteo
+      const { data: eqData } = await supabase.from('equipos').select('id, nombre, logo_url')
       if (eqData) setEquipos(eqData)
 
       const { data, error } = await supabase
@@ -35,7 +33,8 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
           fecha_creacion,
           puntos_totales,
           prediccion_goles_total,
-          quinielas (id, nombre_jornada, goles_totales_real, estado, fecha_cierre),
+          equipo_asignado_id,
+          quinielas (id, nombre_jornada, modalidad, goles_totales_real, estado, fecha_cierre),
           pronosticos (
             id,
             eleccion_usuario,
@@ -46,8 +45,9 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
         .order('fecha_creacion', { ascending: false })
 
       if (data) {
-        const activos = data.filter(t => t.quinielas?.estado === 'abierta' || (t.quinielas?.estado === 'cerrada' && t.quinielas?.goles_totales_real === null))
-        const completados = data.filter(t => t.quinielas?.estado === 'cerrada' && t.quinielas?.goles_totales_real !== null)
+        // ⚡ MODIFICACIÓN: Si es sorteo, se va a histórico solo con estar 'cerrada' (no necesita goles reales)
+        const activos = data.filter(t => t.quinielas?.estado === 'abierta' || (t.quinielas?.estado === 'cerrada' && t.quinielas?.modalidad !== 'sorteo' && t.quinielas?.goles_totales_real === null))
+        const completados = data.filter(t => (t.quinielas?.estado === 'cerrada' && t.quinielas?.modalidad === 'sorteo') || (t.quinielas?.estado === 'cerrada' && t.quinielas?.goles_totales_real !== null))
         
         const gruposA = agruparTicketsPorQuiniela(activos)
         const gruposC = agruparTicketsPorQuiniela(completados)
@@ -65,12 +65,10 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
     }
   }
 
-  // Carga inicial
   useEffect(() => {
     cargarHistorial()
   }, [usuarioId])
 
-  // 📡 CONEXIÓN WEB-SOCKETS: Escuchamos todo silenciosamente
   const recargaSilenciosa = () => cargarHistorial(true)
   useSincronizacionRealtime('quinielas', recargaSilenciosa, false)
   useSincronizacionRealtime('partidos', recargaSilenciosa, false)
@@ -95,6 +93,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
 
         grupos[qId] = {
           nombre_jornada: ticket.quinielas?.nombre_jornada,
+          modalidad: ticket.quinielas?.modalidad, // ⚡ Agregamos modalidad
           estado: ticket.quinielas?.estado,
           goles_reales: ticket.quinielas?.goles_totales_real !== null ? ticket.quinielas?.goles_totales_real : (hayGoles ? golesEnVivo : null),
           fecha_cierre: ticket.quinielas?.fecha_cierre,
@@ -127,6 +126,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
       
       grupos[qId].tickets.push({
         id: ticket.id,
+        equipo_asignado_id: ticket.equipo_asignado_id, // ⚡ Agregamos ID de Sorteo
         fecha: ticket.fecha_creacion,
         puntos: ticket.puntos_totales,
         goles: ticket.prediccion_goles_total,
@@ -160,7 +160,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
   }
 
   const guardarEdicion = async () => {
-    // Candado anti-doble clic
     if (procesandoEdicionRef.current) return;
     
     procesandoEdicionRef.current = true;
@@ -187,7 +186,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
 
       alert('¡Boleto actualizado con éxito!')
       setTicketEditando(null)
-      // Recarga silenciosa para no mostrar el skeleton loading
       await cargarHistorial(true) 
 
     } catch (error) {
@@ -213,152 +211,185 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
     const yaPasoLaHora = grupo.fecha_cierre ? (ahora > fechaCierreObj) : false;
     const yaHayResultados = grupo.partidos.some((p: any) => p.real !== null);
     
-    // Sólo se puede editar si no ha pasado la hora Y no hay resultados.
     const sePuedeEditar = esActivo && !yaPasoLaHora && !yaHayResultados;
-
     const estaEnJuego = esActivo && (yaPasoLaHora || yaHayResultados);
+    const esSorteo = grupo.modalidad === 'sorteo'; // ⚡ Detectamos si es sorteo
 
     return (
-      <div className={`bg-slate-900 border rounded-xl overflow-hidden shadow-xl transition-all mb-6 ${esActivo ? 'border-amber-600/40 shadow-[0_0_15px_rgba(217,119,6,0.1)]' : 'border-slate-700 opacity-95'}`}>
+      <div className={`bg-slate-900 border rounded-xl overflow-hidden shadow-xl transition-all mb-6 ${esActivo ? (esSorteo ? 'border-blue-600/40 shadow-[0_0_15px_rgba(37,99,235,0.1)]' : 'border-amber-600/40 shadow-[0_0_15px_rgba(217,119,6,0.1)]') : 'border-slate-700 opacity-95'}`}>
         
-        <div className={`px-4 py-3 border-b flex flex-col sm:flex-row justify-between items-center gap-2 ${esActivo ? 'bg-gradient-to-r from-amber-900/20 to-slate-900 border-amber-800/40' : 'bg-slate-950 border-slate-700'}`}>
+        {/* CABECERA */}
+        <div className={`px-4 py-3 border-b flex flex-col sm:flex-row justify-between items-center gap-2 ${esActivo ? (esSorteo ? 'bg-gradient-to-r from-blue-900/20 to-slate-900 border-blue-800/40' : 'bg-gradient-to-r from-amber-900/20 to-slate-900 border-amber-800/40') : 'bg-slate-950 border-slate-700'}`}>
           <div className="flex items-center gap-3 w-full sm:w-auto">
-            <span className="text-2xl drop-shadow-md">{esActivo ? (estaEnJuego ? '⚔️' : '🔥') : '✅'}</span>
+            <span className="text-2xl drop-shadow-md">{esActivo ? (esSorteo ? '🎲' : (estaEnJuego ? '⚔️' : '🔥')) : '✅'}</span>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className={`font-black uppercase tracking-widest text-sm md:text-base ${esActivo ? 'text-amber-500' : 'text-slate-300'}`}>{grupo.nombre_jornada}</h3>
-                {estaEnJuego && <span className="bg-red-600/20 text-red-400 border border-red-900/50 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest animate-pulse">En Juego</span>}
+                <h3 className={`font-black uppercase tracking-widest text-sm md:text-base ${esActivo ? (esSorteo ? 'text-blue-400' : 'text-amber-500') : 'text-slate-300'}`}>{grupo.nombre_jornada}</h3>
+                {estaEnJuego && !esSorteo && <span className="bg-red-600/20 text-red-400 border border-red-900/50 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest animate-pulse">En Juego</span>}
               </div>
-              <p className="text-[10px] text-slate-500 font-bold uppercase mt-0.5">{grupo.tickets.length} {grupo.tickets.length === 1 ? 'Boleto' : 'Boletos'} participando</p>
+              <p className="text-[10px] text-slate-500 font-bold uppercase mt-0.5">Tienes {grupo.tickets.length} {grupo.tickets.length === 1 ? (esSorteo ? 'Pase' : 'Boleto') : (esSorteo ? 'Pases' : 'Boletos')} aquí</p>
             </div>
           </div>
 
-          <div className={`px-3 py-1.5 rounded-lg border flex items-center gap-2 w-full sm:w-auto justify-center ${esActivo ? 'bg-slate-950 border-amber-900/50' : 'bg-slate-900 border-slate-700'}`}>
-             <span className="text-[9px] uppercase tracking-widest font-bold text-slate-400">Total Goles Real:</span>
-             <span className={`text-sm font-black drop-shadow-md ${esActivo ? 'text-amber-400' : 'text-blue-400'}`}>
-               {grupo.goles_reales !== null ? grupo.goles_reales : '?'}
-             </span>
-          </div>
+          {!esSorteo && (
+            <div className={`px-3 py-1.5 rounded-lg border flex items-center gap-2 w-full sm:w-auto justify-center ${esActivo ? 'bg-slate-950 border-amber-900/50' : 'bg-slate-900 border-slate-700'}`}>
+               <span className="text-[9px] uppercase tracking-widest font-bold text-slate-400">Total Goles Real:</span>
+               <span className={`text-sm font-black drop-shadow-md ${esActivo ? 'text-amber-400' : 'text-blue-400'}`}>
+                 {grupo.goles_reales !== null ? grupo.goles_reales : '?'}
+               </span>
+            </div>
+          )}
         </div>
         
-        <div className="overflow-x-auto">
-          <table className="w-full text-left whitespace-nowrap">
-            <thead className="bg-slate-950/50 text-slate-400 border-b border-slate-700">
-              <tr>
-                <th className="px-2 py-2 font-bold uppercase text-[9px] tracking-wider text-center w-48 min-w-[160px]">Partido</th>
-                <th className="px-2 py-2 font-bold uppercase text-[9px] tracking-wider text-center border-r border-slate-800 bg-slate-950 sticky left-0 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.2)]">Real</th>
-                {grupo.tickets.map((t: any, idx: number) => (
-                  <th key={t.id} className={`px-2 py-2 font-black uppercase text-[9px] text-center border-r border-slate-800/50 ${esActivo ? 'text-amber-500' : 'text-blue-400'}`}>
-                    <div className="flex flex-col items-center justify-center gap-1">
-                      <span>J{idx + 1}</span>
-                      {sePuedeEditar && (
-                        <button 
-                          onClick={() => abrirModalEdicion(grupo, t)} 
-                          className="bg-slate-800 hover:bg-amber-600 hover:text-white text-slate-400 border border-slate-700 px-2 py-0.5 rounded text-[8px] transition-all"
-                          title="Editar selecciones"
-                        >
-                          ✏️ Editar
-                        </button>
+        {/* ⚡ CONTENIDO: CONDICIONAL (SORTEO VS TRADICIONAL) */}
+        {esSorteo ? (
+          <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 bg-blue-950/10">
+            {grupo.tickets.map((t: any, idx: number) => {
+              // Buscamos el equipo real asignado a este ticket
+              const eqSorteado = t.equipo_asignado_id ? equipos.find((e:any) => e.id === t.equipo_asignado_id) : null;
+              
+              return (
+                <div key={t.id} className="bg-slate-900 border border-slate-700 p-4 rounded-xl flex justify-between items-center shadow-inner hover:border-blue-500/50 transition-colors">
+                   <div className="flex flex-col">
+                      <span className="text-[9px] md:text-[10px] text-slate-500 font-black uppercase tracking-widest mb-0.5">Pase #{idx + 1}</span>
+                      <span className="font-bold text-slate-300 text-xs uppercase">Acceso Virtual</span>
+                   </div>
+                   <div className="flex items-center gap-3 shrink-0 border-l border-slate-700/50 pl-4">
+                      {eqSorteado ? (
+                        <>
+                           <span className="font-black text-amber-400 uppercase text-xs md:text-sm text-right leading-tight max-w-[90px] truncate drop-shadow-md">{eqSorteado.nombre}</span>
+                           <div className="w-10 h-10 md:w-12 md:h-12 bg-slate-950 border border-slate-800 rounded-full p-1.5 flex items-center justify-center shrink-0 shadow-lg">
+                              <img src={eqSorteado.logo_url} className="w-full h-full object-contain" alt="" />
+                           </div>
+                        </>
+                      ) : (
+                        <span className="text-[9px] text-slate-500 uppercase font-black px-2 py-1.5 bg-slate-950 rounded-lg border border-slate-800 flex items-center gap-1 shadow-inner"><span className="animate-pulse">⏳</span> Pendiente</span>
                       )}
-                    </div>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/50">
-              {grupo.partidos.map((p: any, pIdx: number) => {
-                const tieneGoles = p.goles_local !== null && p.goles_visitante !== null;
-                const enVivo = tieneGoles && !p.es_final;
-                
-                return (
-                  <tr key={pIdx} className="hover:bg-slate-800/40 transition-colors">
-                    <td className="px-2 py-1.5">
-                      <div className="flex items-center justify-between text-[9px] sm:text-[10px] font-bold uppercase text-slate-300">
-                        <div className="flex items-center gap-1 w-[45%] justify-end">
-                          <span className="truncate text-right">{p.local}</span>
-                          <img src={obtenerLogo(p.local)} alt="" className="w-3.5 h-3.5 md:w-4 md:h-4 object-contain" />
-                        </div>
-                        <span className="text-[8px] text-slate-600 italic px-0.5">VS</span>
-                        <div className="flex items-center gap-1 w-[45%] justify-start">
-                          <img src={obtenerLogo(p.visitante)} alt="" className="w-3.5 h-3.5 md:w-4 md:h-4 object-contain" />
-                          <span className="truncate text-left">{p.visitante}</span>
-                        </div>
+                   </div>
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left whitespace-nowrap">
+              <thead className="bg-slate-950/50 text-slate-400 border-b border-slate-700">
+                <tr>
+                  <th className="px-2 py-2 font-bold uppercase text-[9px] tracking-wider text-center w-48 min-w-[160px]">Partido</th>
+                  <th className="px-2 py-2 font-bold uppercase text-[9px] tracking-wider text-center border-r border-slate-800 bg-slate-950 sticky left-0 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.2)]">Real</th>
+                  {grupo.tickets.map((t: any, idx: number) => (
+                    <th key={t.id} className={`px-2 py-2 font-black uppercase text-[9px] text-center border-r border-slate-800/50 ${esActivo ? 'text-amber-500' : 'text-blue-400'}`}>
+                      <div className="flex flex-col items-center justify-center gap-1">
+                        <span>J{idx + 1}</span>
+                        {sePuedeEditar && (
+                          <button 
+                            onClick={() => abrirModalEdicion(grupo, t)} 
+                            className="bg-slate-800 hover:bg-amber-600 hover:text-white text-slate-400 border border-slate-700 px-2 py-0.5 rounded text-[8px] transition-all"
+                            title="Editar selecciones"
+                          >
+                            ✏️ Editar
+                          </button>
+                        )}
                       </div>
-                    </td>
-                    
-                    <td className="px-1 py-1.5 text-center border-r border-slate-800 bg-slate-950/40 sticky left-0 z-10">
-                      {p.real ? (
-                        <div className="flex flex-col items-center gap-0.5 justify-center">
-                          {tieneGoles && (
-                            <span className="text-[10px] font-black text-white leading-none">
-                              {p.goles_local}-{p.goles_visitante}
-                            </span>
-                          )}
-                          <div className="flex items-center gap-1">
-                            <span className={`inline-block w-4 h-4 text-[8px] leading-4 rounded-full font-black shadow-inner ${p.real==='L'?'bg-blue-900 text-blue-300':p.real==='E'?'bg-slate-700 text-slate-300':'bg-red-900 text-red-300'}`}>
-                              {p.real}
-                            </span>
-                            {enVivo && (
-                              <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_5px_rgba(239,68,68,0.8)]" title="Partido en Vivo"></span>
-                            )}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/50">
+                {grupo.partidos.map((p: any, pIdx: number) => {
+                  const tieneGoles = p.goles_local !== null && p.goles_visitante !== null;
+                  const enVivo = tieneGoles && !p.es_final;
+                  
+                  return (
+                    <tr key={pIdx} className="hover:bg-slate-800/40 transition-colors">
+                      <td className="px-2 py-1.5">
+                        <div className="flex items-center justify-between text-[9px] sm:text-[10px] font-bold uppercase text-slate-300">
+                          <div className="flex items-center gap-1 w-[45%] justify-end">
+                            <span className="truncate text-right">{p.local}</span>
+                            <img src={obtenerLogo(p.local)} alt="" className="w-3.5 h-3.5 md:w-4 md:h-4 object-contain" />
+                          </div>
+                          <span className="text-[8px] text-slate-600 italic px-0.5">VS</span>
+                          <div className="flex items-center gap-1 w-[45%] justify-start">
+                            <img src={obtenerLogo(p.visitante)} alt="" className="w-3.5 h-3.5 md:w-4 md:h-4 object-contain" />
+                            <span className="truncate text-left">{p.visitante}</span>
                           </div>
                         </div>
-                      ) : (
-                        <span className="text-slate-600 font-mono text-[10px]">-</span>
-                      )}
-                    </td>
-
-                    {grupo.tickets.map((t: any) => {
-                      const pick = t.selecciones[p.id];
-                      let color = 'bg-slate-800 text-slate-300';
+                      </td>
                       
-                      if (p.real) {
-                        if (pick === p.real) color = 'bg-green-600 text-white shadow-[0_0_8px_rgba(34,197,94,0.3)] border border-green-500'; 
-                        else color = 'bg-red-950/60 text-red-500/50 border border-red-900/30'; 
-                      } else {
-                        if (pick === 'E') color = 'bg-slate-700 text-slate-300 border border-slate-600';
-                        else color = 'bg-blue-900/60 text-blue-300 border border-blue-800';
-                      }
+                      <td className="px-1 py-1.5 text-center border-r border-slate-800 bg-slate-950/40 sticky left-0 z-10">
+                        {p.real ? (
+                          <div className="flex flex-col items-center gap-0.5 justify-center">
+                            {tieneGoles && (
+                              <span className="text-[10px] font-black text-white leading-none">
+                                {p.goles_local}-{p.goles_visitante}
+                              </span>
+                            )}
+                            <div className="flex items-center gap-1">
+                              <span className={`inline-block w-4 h-4 text-[8px] leading-4 rounded-full font-black shadow-inner ${p.real==='L'?'bg-blue-900 text-blue-300':p.real==='E'?'bg-slate-700 text-slate-300':'bg-red-900 text-red-300'}`}>
+                                {p.real}
+                              </span>
+                              {enVivo && (
+                                <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_5px_rgba(239,68,68,0.8)]" title="Partido en Vivo"></span>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-slate-600 font-mono text-[10px]">-</span>
+                        )}
+                      </td>
 
-                      return (
-                        <td key={`${t.id}-${p.id}`} className="px-1 py-1.5 text-center border-r border-slate-800/50">
-                          <span className={`inline-block w-5 h-5 text-[9px] leading-5 rounded-md font-black transition-all ${color}`}>
-                            {pick}
-                          </span>
-                        </td>
-                      )
-                    })}
-                  </tr>
-                )
-              })}
-            </tbody>
-            
-            <tfoot className="bg-slate-950 border-t-2 border-slate-700">
-              <tr>
-                <td colSpan={2} className="px-2 py-2 text-right font-bold uppercase text-[8px] md:text-[9px] text-slate-500 border-r border-slate-800">
-                  Desempate (Total Goles)
-                </td>
-                {grupo.tickets.map((t: any) => (
-                  <td key={`goles-${t.id}`} className="px-2 py-2 text-center font-mono font-bold text-slate-300 border-r border-slate-800/50 text-[10px]">
-                    {t.goles || 0}
+                      {grupo.tickets.map((t: any) => {
+                        const pick = t.selecciones[p.id];
+                        let color = 'bg-slate-800 text-slate-300';
+                        
+                        if (p.real) {
+                          if (pick === p.real) color = 'bg-green-600 text-white shadow-[0_0_8px_rgba(34,197,94,0.3)] border border-green-500'; 
+                          else color = 'bg-red-950/60 text-red-500/50 border border-red-900/30'; 
+                        } else {
+                          if (pick === 'E') color = 'bg-slate-700 text-slate-300 border border-slate-600';
+                          else color = 'bg-blue-900/60 text-blue-300 border border-blue-800';
+                        }
+
+                        return (
+                          <td key={`${t.id}-${p.id}`} className="px-1 py-1.5 text-center border-r border-slate-800/50">
+                            <span className={`inline-block w-5 h-5 text-[9px] leading-5 rounded-md font-black transition-all ${color}`}>
+                              {pick}
+                            </span>
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  )
+                })}
+              </tbody>
+              
+              <tfoot className="bg-slate-950 border-t-2 border-slate-700">
+                <tr>
+                  <td colSpan={2} className="px-2 py-2 text-right font-bold uppercase text-[8px] md:text-[9px] text-slate-500 border-r border-slate-800">
+                    Desempate (Total Goles)
                   </td>
-                ))}
-              </tr>
-              <tr className="bg-slate-900/50">
-                <td colSpan={2} className="px-2 py-2.5 text-right font-black uppercase text-[9px] md:text-[10px] text-slate-300 border-r border-slate-800">
-                  Puntos Totales
-                </td>
-                {grupo.tickets.map((t: any) => (
-                  <td key={`puntos-${t.id}`} className="px-2 py-2.5 text-center border-r border-slate-800/50">
-                    <span className={`text-sm font-black drop-shadow-md block ${esActivo ? 'text-amber-500' : 'text-green-500'}`}>
-                      {t.puntos || 0}
-                    </span>
+                  {grupo.tickets.map((t: any) => (
+                    <td key={`goles-${t.id}`} className="px-2 py-2 text-center font-mono font-bold text-slate-300 border-r border-slate-800/50 text-[10px]">
+                      {t.goles || 0}
+                    </td>
+                  ))}
+                </tr>
+                <tr className="bg-slate-900/50">
+                  <td colSpan={2} className="px-2 py-2.5 text-right font-black uppercase text-[9px] md:text-[10px] text-slate-300 border-r border-slate-800">
+                    Puntos Totales
                   </td>
-                ))}
-              </tr>
-            </tfoot>
-          </table>
-        </div>
+                  {grupo.tickets.map((t: any) => (
+                    <td key={`puntos-${t.id}`} className="px-2 py-2.5 text-center border-r border-slate-800/50">
+                      <span className={`text-sm font-black drop-shadow-md block ${esActivo ? 'text-amber-500' : 'text-green-500'}`}>
+                        {t.puntos || 0}
+                      </span>
+                    </td>
+                  ))}
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
       </div>
     )
   }
@@ -413,7 +444,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
         )}
       </div>
 
-      {/* 🚀 MODAL DE EDICIÓN FLOTANTE CON CAMPO DE GOLES */}
+      {/* 🚀 MODAL DE EDICIÓN FLOTANTE CON CAMPO DE GOLES (Se mantiene igual, solo aplica a los tradicionales) */}
       {ticketEditando && (
         <div className="fixed inset-0 z-[100] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-amber-600/50 max-w-md w-full p-4 md:p-6 rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
@@ -465,7 +496,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
               })}
             </div>
 
-            {/* SECCIÓN: Total de Goles (Desempate) */}
             <div className="bg-slate-950 border border-slate-800 p-3 rounded-lg mb-4 shrink-0 flex justify-between items-center">
               <div>
                 <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest">Total de Goles</h4>
