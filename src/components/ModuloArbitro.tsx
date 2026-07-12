@@ -244,19 +244,49 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
             {/* VISTA CONDICIONAL: BOMBO VIRTUAL VS TABLA TRADICIONAL */}
             {esSorteo ? (
               <div className="bg-blue-950/20 border border-blue-900/50 rounded-xl p-4 md:p-6 shadow-inner mt-4">
-                <h3 className="text-blue-400 font-black uppercase text-center text-lg md:text-xl mb-6 tracking-widest flex items-center justify-center gap-2"><span>🎲</span> Bombo Virtual (Sorteo Mundial)</h3>
+                <div className="flex flex-col md:flex-row items-center justify-between mb-6 gap-3">
+                  <h3 className="text-blue-400 font-black uppercase text-lg md:text-xl tracking-widest flex items-center gap-2">
+                    <span>🎲</span> Bombo Virtual (Sorteo)
+                  </h3>
+                  
+                  {/* ESTADÍSTICAS DE SUPERVIVENCIA (Sugerencia de Ingeniería UX) */}
+                  {sorteoRealizado && (
+                    <div className="flex gap-2 text-[10px] font-black uppercase tracking-widest">
+                      <div className="bg-green-950/40 border border-green-900/50 text-green-400 px-3 py-1.5 rounded-lg shadow-inner">
+                        Vivos: {s.rankingAdmin.filter((r: any) => !r.estaEliminado).length}
+                      </div>
+                      <div className="bg-red-950/40 border border-red-900/50 text-red-400 px-3 py-1.5 rounded-lg shadow-inner">
+                        Eliminados: {s.rankingAdmin.filter((r: any) => r.estaEliminado).length}
+                      </div>
+                    </div>
+                  )}
+                </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
                   {s.rankingAdmin.map((jugador: any, idx: number) => {
                     const eqSorteado = jugador.equipo_asignado_id ? s.equipos.find((e:any) => e.id === jugador.equipo_asignado_id) : null;
                     
                     return (
-                      <div key={jugador.id} className="bg-slate-900 border border-slate-700 p-4 rounded-xl flex justify-between items-center hover:border-slate-500 transition-colors">
+                      <div key={jugador.id} className={`bg-slate-900 border p-4 rounded-xl flex justify-between items-center transition-all duration-300 ${jugador.estaEliminado ? 'border-red-900/40 opacity-50 grayscale scale-[0.98]' : 'border-slate-700 hover:border-slate-500 shadow-md'}`}>
                         <div className="flex flex-col flex-1 truncate pr-3">
                           <span className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Esfera {idx + 1}</span>
-                          <span className="font-black text-white text-sm uppercase truncate" title={jugador.nombre}>{jugador.nombre}</span>
-                          <div className="flex items-center gap-3 mt-2">
-                            <button onClick={() => a.enviarWhatsAppBoleto(jugador)} className="text-[9px] text-green-400 hover:text-green-300 font-bold uppercase transition-colors flex items-center gap-1"><span>📲</span> Notificar</button>
+                          <span className={`font-black text-sm uppercase truncate ${jugador.estaEliminado ? 'text-slate-400 line-through' : 'text-white'}`} title={jugador.nombre}>{jugador.nombre}</span>
+                          
+                          <div className="flex flex-wrap items-center gap-3 mt-2">
+                            <button onClick={() => a.enviarWhatsAppBoleto(jugador)} className="text-[9px] text-blue-400 hover:text-blue-300 font-bold uppercase transition-colors flex items-center gap-1">
+                              <span>📲</span> Notificar
+                            </button>
+                            
+                            {/* ⚡ BOTONES RÁPIDOS DE ELIMINACIÓN Y REVIVIR */}
+                            {sorteoRealizado && !esHistoricoLiquidado && (
+                               <button 
+                                 onClick={() => a.toggleEstadoSupervivencia(jugador.id, jugador.estaEliminado, jugador.nombre)} 
+                                 className={`text-[9px] font-bold uppercase transition-colors flex items-center gap-1 bg-slate-950 px-2 py-0.5 rounded border ${jugador.estaEliminado ? 'text-green-500 border-green-900/50 hover:bg-green-900/20' : 'text-red-500 border-red-900/50 hover:bg-red-900/20'}`}
+                               >
+                                 {jugador.estaEliminado ? '🟢 Revivir' : '💀 Eliminar'}
+                               </button>
+                            )}
+
                             {!esHistoricoLiquidado && !sorteoRealizado && (
                               <button onClick={() => a.eliminarTicket(jugador.id, jugador.nombre)} className="text-[9px] text-red-500 hover:text-red-400 font-bold uppercase transition-colors flex items-center gap-1"><span>🗑️</span> Borrar</button>
                             )}
@@ -266,8 +296,8 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                         <div className="flex items-center gap-3 shrink-0 border-l border-slate-700/50 pl-4 h-full min-w-[120px] justify-end">
                           {eqSorteado ? (
                             <>
-                              <span className="font-black text-blue-400 uppercase text-xs md:text-sm text-right leading-tight max-w-[80px] truncate">{eqSorteado.nombre}</span>
-                              <div className="w-10 h-10 md:w-12 md:h-12 bg-slate-950 border border-slate-800 rounded-full p-1.5 flex items-center justify-center shrink-0 shadow-lg">
+                              <span className={`font-black uppercase text-xs md:text-sm text-right leading-tight max-w-[80px] truncate ${jugador.estaEliminado ? 'text-slate-600' : 'text-blue-400'}`}>{eqSorteado.nombre}</span>
+                              <div className={`w-10 h-10 md:w-12 md:h-12 bg-slate-950 border rounded-full p-1.5 flex items-center justify-center shrink-0 shadow-lg transition-colors ${jugador.estaEliminado ? 'border-red-900/30 opacity-60' : 'border-slate-800'}`}>
                                 <img src={eqSorteado.logo_url} className="w-full h-full object-contain" alt="" onError={(evt:any)=>{evt.target.src='https://a.espncdn.com/i/teamlogos/default-soccer-35.png'}} />
                               </div>
                             </>
@@ -311,7 +341,8 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                         </button>
                         <div className="border-t border-blue-900/50 pt-4 mt-2">
                            <p className="text-center text-[10px] text-blue-400 font-bold uppercase mb-3">¿El torneo ya terminó en la vida real?</p>
-                           <button onClick={() => toast.error('Implementaremos la lógica de declarar campeón en el siguiente paso.')} className="w-full py-3.5 rounded-xl font-black text-[10px] uppercase text-white transition-all bg-amber-600 hover:bg-amber-500 shadow-[0_0_15px_rgba(217,119,6,0.3)] active:scale-95">
+                           {/* ⚡ CONEXIÓN A LA FUNCIÓN REAL DE CIERRE */}
+                           <button onClick={a.cerrarJornadaDefinitivo} className="w-full py-3.5 rounded-xl font-black text-[10px] uppercase text-white transition-all bg-amber-600 hover:bg-amber-500 shadow-[0_0_15px_rgba(217,119,6,0.3)] active:scale-95">
                              🏆 Declarar Campeón y Pagar Premio
                            </button>
                         </div>
