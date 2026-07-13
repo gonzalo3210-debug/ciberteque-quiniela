@@ -14,13 +14,13 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
   const [guardando, setGuardando] = useState(false)
   const [errorCarga, setErrorCarga] = useState<string | null>(null)
   
+  // Para modalidad clásica (L,E,V) seguimos usando estado manual.
   const [golesTotales, setGolesTotales] = useState<string>('')
   
   const [mostrarReglas, setMostrarReglas] = useState(false) 
   const [aceptoReglas, setAceptoReglas] = useState(false) 
   const [yaParticipo, setYaParticipo] = useState(false) 
 
-  // ⚡ NUEVOS ESTADOS PARA MULTI-TICKET EN SORTEO
   const [lugaresDisponibles, setLugaresDisponibles] = useState<number>(8)
   const [cantidadBoletos, setCantidadBoletos] = useState<number>(1)
 
@@ -98,7 +98,6 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
           }
         }
       )
-      // ⚡ REACCIONAR A NUEVOS TICKETS VENDIDOS EN TIEMPO REAL PARA ACTUALIZAR STOCK
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'tickets', filter: `quiniela_id=eq.${quinielaActual.id}` },
@@ -113,13 +112,11 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
     return () => { supabase.removeChannel(canalTiempoReal); };
   }, [quinielaActual?.id, usuarioActivo?.rol]);
 
-  // Función separada para modularidad
   const obtenerCupoSorteo = async (quinielaId: string) => {
       const { count } = await supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('quiniela_id', quinielaId);
       const ocupados = count || 0;
       const libres = Math.max(0, 8 - ocupados);
       setLugaresDisponibles(libres);
-      // Si el cliente tenía seleccionado 3 boletos y ya solo quedan 2, le ajustamos la UI
       setCantidadBoletos(prev => Math.min(prev, libres === 0 ? 1 : libres)); 
   }
 
@@ -136,7 +133,7 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
     setSelecciones({}) 
     setGolesTotales('')
     setAceptoReglas(false) 
-    setCantidadBoletos(1) // Reseteamos cantidad
+    setCantidadBoletos(1)
 
     if (quiniela.modalidad === 'sorteo') {
         await obtenerCupoSorteo(quiniela.id);
@@ -146,16 +143,26 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
         const { data: ticketsPrevios } = await supabase
         .from('tickets').select('id').eq('usuario_id', usuarioActivo.id).eq('quiniela_id', quiniela.id)
 
-        // Si NO es sorteo y ya participó, lo bloqueamos (Clásica). Si ES sorteo, no lo bloqueamos (puede comprar múltiples).
         setYaParticipo(ticketsPrevios && ticketsPrevios.length > 0 ? true : false)
     }
   }
 
   const esGratis = quinielaActual?.precio_ticket === 0;
   const esSorteo = quinielaActual?.modalidad === 'sorteo';
+  const esMarcadorExacto = quinielaActual?.modalidad === 'marcador_exacto';
   
-  // ⚡ NUEVA LÓGICA DE BLOQUEO: Bloquea si es Clásica y ya participó. Si es Sorteo, bloquea solo si la sala está llena.
-  const bloqueadoPorParticipacion = (!esSorteo && yaParticipo) || (esSorteo && lugaresDisponibles === 0);
+  const bloqueadoPorParticipacion = (esGratis && yaParticipo) || (esSorteo && lugaresDisponibles === 0);
+
+  // ⚡ INGENIERÍA: CÁLCULO DERIVADO DE GOLES EN TIEMPO REAL
+  const golesAutomaticos = Object.values(selecciones).reduce((acc, val) => {
+    if (!val) return acc;
+    const [l, v] = val.split('-');
+    const numL = parseInt(l);
+    const numV = parseInt(v);
+    if (!isNaN(numL)) acc += numL;
+    if (!isNaN(numV)) acc += numV;
+    return acc;
+  }, 0);
 
   const seleccionarOpcion = (partidoId: string, opcion: string) => {
     if (bloqueadoPorParticipacion) return 
@@ -168,11 +175,26 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
     const cierre = new Date(quinielaActual.fecha_cierre ? quinielaActual.fecha_cierre.substring(0, 16) : quinielaActual.fecha_cierre).getTime();
     if (new Date().getTime() > cierre) return { error: '¡El tiempo límite acaba de expirar!' }
 
-    if (bloqueadoPorParticipacion) return { error: esSorteo ? 'La sala está llena.' : 'Solo se permite 1 participación.' }
+    if (bloqueadoPorParticipacion) {
+        if (esSorteo) return { error: 'La sala está llena.' }
+        if (esGratis) return { error: 'Promoción limitada a 1 boleto por cuenta.' }
+    }
+    
     if (!aceptoReglas) return { error: 'Debes aceptar el reglamento.' }
-    if (!esSorteo && golesTotales === '') return { error: 'Por favor, anota el total de goles.' }
+    
+    if (!esSorteo) {
+        // Validaciones estrictas unificadas
+        const todasSeleccionadas = partidos.every(p => selecciones[p.id] && selecciones[p.id].trim() !== '');
+        if (!todasSeleccionadas) return { error: 'Debes pronosticar todos los partidos antes de pagar.' }
 
-    // Validación concurrente de cupo justo antes de cobrar
+        if (esMarcadorExacto) {
+            const formatoCorrecto = partidos.every(p => /^\d+-\d+$/.test(selecciones[p.id]?.trim()));
+            if (!formatoCorrecto) return { error: 'Por favor ingresa los goles de ambos equipos en todos los partidos.' }
+        } else {
+            if (golesTotales === '') return { error: 'Por favor, anota el total de goles de desempate.' }
+        }
+    }
+
     if (esSorteo) {
        const { count } = await supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('quiniela_id', quinielaActual.id);
        const libresActuales = Math.max(0, 8 - (count || 0));
@@ -194,7 +216,6 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
     setGuardando(true)
 
     try {
-      // 1. ⚡ BULK INSERT PARA SORTEOS
       const ticketsAGuardar = esSorteo 
         ? Array.from({ length: cantidadBoletos }).map(() => ({
             usuario_id: usuarioActivo.id, 
@@ -206,26 +227,24 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
             usuario_id: usuarioActivo.id, 
             quiniela_id: quinielaActual.id, 
             metodo_ingreso: 'digital',
-            prediccion_goles_total: parseInt(golesTotales) || 0
+            // ⚡ INGENIERÍA: Si es marcador exacto inyectamos la suma automática
+            prediccion_goles_total: esMarcadorExacto ? golesAutomaticos : (parseInt(golesTotales) || 0)
           }];
 
       const { data: ticketsCreados, error: ticketError } = await supabase.from('tickets').insert(ticketsAGuardar).select();
       if (ticketError) throw ticketError;
 
-      // 2. Insertar pronósticos SOLO si no es sorteo (toma el único ticket creado)
       if (!esSorteo && ticketsCreados && ticketsCreados.length > 0) {
-          const seleccionesFinales = { ...selecciones }
-          partidos.forEach(p => { if (!seleccionesFinales[p.id]) seleccionesFinales[p.id] = 'E' })
-          
-          const pronosticosAGuardar = Object.keys(seleccionesFinales).map(partidoId => ({
-            ticket_id: ticketsCreados[0].id, partido_id: partidoId, eleccion_usuario: seleccionesFinales[partidoId]
+          const pronosticosAGuardar = Object.keys(selecciones).map(partidoId => ({
+            ticket_id: ticketsCreados[0].id, 
+            partido_id: partidoId, 
+            eleccion_usuario: selecciones[partidoId].trim()
           }))
 
           const { error: pronoError } = await supabase.from('pronosticos').insert(pronosticosAGuardar)
           if (pronoError) throw pronoError
       }
 
-      // 3. Cobro transaccional
       if (costoTotal > 0) {
         let costoPendiente = costoTotal;
         let nuevoCreditos = Number(usuarioActivo.creditos_disponibles || 0);
@@ -274,6 +293,9 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
   }
 
   return {
-    cargando, errorCarga, quinielasActivas, quinielaActual, partidos, selecciones, golesTotales, guardando, mostrarReglas, aceptoReglas, yaParticipo, esGratis, esSorteo, bloqueadoPorParticipacion, lugaresDisponibles, cantidadBoletos, setCantidadBoletos, setGolesTotales, setMostrarReglas, setAceptoReglas, cambiarQuinielaVisible, seleccionarOpcion, guardarQuiniela, obtenerLogo
+    cargando, errorCarga, quinielasActivas, quinielaActual, partidos, selecciones, golesTotales, guardando, 
+    mostrarReglas, aceptoReglas, yaParticipo, esGratis, esSorteo, esMarcadorExacto, bloqueadoPorParticipacion, 
+    lugaresDisponibles, cantidadBoletos, golesAutomaticos, // ⚡ Exportamos la nueva variable
+    setCantidadBoletos, setGolesTotales, setMostrarReglas, setAceptoReglas, cambiarQuinielaVisible, seleccionarOpcion, guardarQuiniela, obtenerLogo
   }
 }

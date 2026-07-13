@@ -22,7 +22,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
     if (!esCargaSilenciosa) setCargando(true)
     
     try {
-      // ⚡ MODIFICACIÓN: Agregamos 'id' a la consulta de equipos para poder cruzar el equipo_asignado_id del sorteo
       const { data: eqData } = await supabase.from('equipos').select('id, nombre, logo_url')
       if (eqData) setEquipos(eqData)
 
@@ -45,7 +44,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
         .order('fecha_creacion', { ascending: false })
 
       if (data) {
-        // ⚡ MODIFICACIÓN: Si es sorteo, se va a histórico solo con estar 'cerrada' (no necesita goles reales)
         const activos = data.filter(t => t.quinielas?.estado === 'abierta' || (t.quinielas?.estado === 'cerrada' && t.quinielas?.modalidad !== 'sorteo' && t.quinielas?.goles_totales_real === null))
         const completados = data.filter(t => (t.quinielas?.estado === 'cerrada' && t.quinielas?.modalidad === 'sorteo') || (t.quinielas?.estado === 'cerrada' && t.quinielas?.goles_totales_real !== null))
         
@@ -93,7 +91,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
 
         grupos[qId] = {
           nombre_jornada: ticket.quinielas?.nombre_jornada,
-          modalidad: ticket.quinielas?.modalidad, // ⚡ Agregamos modalidad
+          modalidad: ticket.quinielas?.modalidad, 
           estado: ticket.quinielas?.estado,
           goles_reales: ticket.quinielas?.goles_totales_real !== null ? ticket.quinielas?.goles_totales_real : (hayGoles ? golesEnVivo : null),
           fecha_cierre: ticket.quinielas?.fecha_cierre,
@@ -126,7 +124,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
       
       grupos[qId].tickets.push({
         id: ticket.id,
-        equipo_asignado_id: ticket.equipo_asignado_id, // ⚡ Agregamos ID de Sorteo
+        equipo_asignado_id: ticket.equipo_asignado_id, 
         fecha: ticket.fecha_creacion,
         puntos: ticket.puntos_totales,
         goles: ticket.prediccion_goles_total,
@@ -148,10 +146,12 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
     return equipo?.logo_url || 'https://a.espncdn.com/i/teamlogos/default-soccer-35.png'
   }
 
+  // ⚡ INGENIERÍA: Ahora pasamos la modalidad al estado de edición
   const abrirModalEdicion = (grupo: any, ticket: any) => {
     setTicketEditando({
       ticketId: ticket.id,
       quinielaNombre: grupo.nombre_jornada,
+      modalidad: grupo.modalidad, 
       partidos: grupo.partidos,
       pronosticosIds: ticket.pronosticosIds
     })
@@ -159,8 +159,30 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
     setNuevosGoles(ticket.goles || 0) 
   }
 
+  // ⚡ INGENIERÍA: Cálculo en tiempo real de goles exactos para edición
+  const golesAutomaticosEdicion = ticketEditando?.modalidad === 'marcador_exacto' 
+    ? Object.values(nuevasSelecciones).reduce((acc: number, val: string) => {
+        if (!val) return acc;
+        const [l, v] = val.split('-');
+        const numL = parseInt(l);
+        const numV = parseInt(v);
+        if (!isNaN(numL)) acc += numL;
+        if (!isNaN(numV)) acc += numV;
+        return acc;
+      }, 0)
+    : 0;
+
+  // ⚡ INGENIERÍA: Validación estricta para evitar guardar marcadores incompletos
+  const esEdicionValida = () => {
+    if (!ticketEditando) return false;
+    if (ticketEditando.modalidad === 'marcador_exacto') {
+      return ticketEditando.partidos.every((p: any) => /^\d+-\d+$/.test(nuevasSelecciones[p.id]?.trim()));
+    }
+    return true; // Clásica siempre es válida si tiene L, E, V
+  }
+
   const guardarEdicion = async () => {
-    if (procesandoEdicionRef.current) return;
+    if (procesandoEdicionRef.current || !esEdicionValida()) return;
     
     procesandoEdicionRef.current = true;
     setGuardandoEdicion(true)
@@ -176,7 +198,11 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
       const { error: errorPronosticos } = await supabase.from('pronosticos').upsert(pronosticosActualizados)
       if (errorPronosticos) throw errorPronosticos
 
-      const golesParseados = nuevosGoles === '' ? 0 : Number(nuevosGoles)
+      // ⚡ INGENIERÍA: Inyectamos los goles automáticos si es exacto
+      const golesParseados = ticketEditando.modalidad === 'marcador_exacto' 
+        ? golesAutomaticosEdicion 
+        : (nuevosGoles === '' ? 0 : Number(nuevosGoles));
+
       const { error: errorTicket } = await supabase
         .from('tickets')
         .update({ prediccion_goles_total: golesParseados })
@@ -213,7 +239,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
     
     const sePuedeEditar = esActivo && !yaPasoLaHora && !yaHayResultados;
     const estaEnJuego = esActivo && (yaPasoLaHora || yaHayResultados);
-    const esSorteo = grupo.modalidad === 'sorteo'; // ⚡ Detectamos si es sorteo
+    const esSorteo = grupo.modalidad === 'sorteo'; 
 
     return (
       <div className={`bg-slate-900 border rounded-xl overflow-hidden shadow-xl transition-all mb-6 ${esActivo ? (esSorteo ? 'border-blue-600/40 shadow-[0_0_15px_rgba(37,99,235,0.1)]' : 'border-amber-600/40 shadow-[0_0_15px_rgba(217,119,6,0.1)]') : 'border-slate-700 opacity-95'}`}>
@@ -241,11 +267,10 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
           )}
         </div>
         
-        {/* ⚡ CONTENIDO: CONDICIONAL (SORTEO VS TRADICIONAL) */}
+        {/* CONTENIDO: CONDICIONAL (SORTEO VS TRADICIONAL) */}
         {esSorteo ? (
           <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 bg-blue-950/10">
             {grupo.tickets.map((t: any, idx: number) => {
-              // Buscamos el equipo real asignado a este ticket
               const eqSorteado = t.equipo_asignado_id ? equipos.find((e:any) => e.id === t.equipo_asignado_id) : null;
               
               return (
@@ -346,13 +371,18 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
                           if (pick === p.real) color = 'bg-green-600 text-white shadow-[0_0_8px_rgba(34,197,94,0.3)] border border-green-500'; 
                           else color = 'bg-red-950/60 text-red-500/50 border border-red-900/30'; 
                         } else {
-                          if (pick === 'E') color = 'bg-slate-700 text-slate-300 border border-slate-600';
-                          else color = 'bg-blue-900/60 text-blue-300 border border-blue-800';
+                          // Ajuste visual: Si es exacto pero no hay real, se muestra grisáceo
+                          if (pick === 'L' || pick === 'E' || pick === 'V') {
+                              if (pick === 'E') color = 'bg-slate-700 text-slate-300 border border-slate-600';
+                              else color = 'bg-blue-900/60 text-blue-300 border border-blue-800';
+                          } else {
+                              color = 'bg-slate-800 text-slate-300 border border-slate-700'; // Estilo base para X-Y
+                          }
                         }
 
                         return (
                           <td key={`${t.id}-${p.id}`} className="px-1 py-1.5 text-center border-r border-slate-800/50">
-                            <span className={`inline-block w-5 h-5 text-[9px] leading-5 rounded-md font-black transition-all ${color}`}>
+                            <span className={`inline-block px-1.5 py-0.5 min-w-[20px] text-[9px] leading-4 rounded-md font-black transition-all ${color}`}>
                               {pick}
                             </span>
                           </td>
@@ -444,7 +474,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
         )}
       </div>
 
-      {/* 🚀 MODAL DE EDICIÓN FLOTANTE CON CAMPO DE GOLES (Se mantiene igual, solo aplica a los tradicionales) */}
+      {/* 🚀 MODAL DE EDICIÓN FLOTANTE */}
       {ticketEditando && (
         <div className="fixed inset-0 z-[100] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-amber-600/50 max-w-md w-full p-4 md:p-6 rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
@@ -454,14 +484,24 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
                 <h3 className="text-sm md:text-base font-black text-white uppercase tracking-tight flex items-center gap-2">
                   <span>✏️</span> Editando Boleto
                 </h3>
-                <p className="text-[9px] text-amber-500 font-bold uppercase mt-1">{ticketEditando.quinielaNombre}</p>
+                <p className="text-[9px] text-amber-500 font-bold uppercase mt-1">
+                  {ticketEditando.quinielaNombre} 
+                  {ticketEditando.modalidad === 'marcador_exacto' && <span className="ml-1 text-green-400 opacity-80">(Marcador Exacto)</span>}
+                </p>
               </div>
               <button onClick={() => setTicketEditando(null)} className="text-slate-500 hover:text-slate-300 font-bold font-mono text-xl">✕</button>
             </div>
 
             <div className="overflow-y-auto pr-1 space-y-2.5 mb-4 flex-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-slate-900 [&::-webkit-scrollbar-thumb]:bg-slate-700 [&::-webkit-scrollbar-thumb]:rounded-full">
               {ticketEditando.partidos.map((p: any) => {
-                const seleccionActual = nuevasSelecciones[p.id]
+                const seleccionActual = nuevasSelecciones[p.id] || ''
+                const esExacto = ticketEditando.modalidad === 'marcador_exacto'
+                
+                // Extraemos goles si es modalidad exacta
+                const [golesL, golesV] = esExacto ? seleccionActual.split('-') : ['', '']
+                const valL = golesL !== undefined ? golesL : ''
+                const valV = golesV !== undefined ? golesV : ''
+
                 return (
                   <div key={p.id} className="bg-slate-950 border border-slate-800 p-2 md:p-3 rounded-lg flex flex-col gap-2">
                     <div className="flex justify-between items-center text-[10px] md:text-xs font-bold uppercase text-slate-300 w-full">
@@ -476,50 +516,87 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
                       </div>
                     </div>
 
-                    <div className="flex gap-1.5 w-full mt-1">
-                      {['L', 'E', 'V'].map(opc => (
-                        <button
-                          key={opc}
-                          onClick={() => setNuevasSelecciones({ ...nuevasSelecciones, [p.id]: opc })}
-                          className={`flex-1 py-1.5 rounded text-[10px] md:text-xs font-black transition-all border ${
-                            seleccionActual === opc 
-                            ? 'bg-amber-600 border-amber-500 text-white shadow-[0_0_10px_rgba(217,119,6,0.3)] scale-105' 
-                            : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300 hover:bg-slate-700'
-                          }`}
-                        >
-                          {opc}
-                        </button>
-                      ))}
+                    <div className="flex gap-1.5 w-full mt-1 justify-center">
+                      {esExacto ? (
+                        // ⚡ RENDERIZADO CONDICIONAL: INPUTS NUMÉRICOS
+                        <div className="flex items-center justify-center gap-1.5 w-full max-w-[150px]">
+                          <input
+                            type="number"
+                            min="0"
+                            placeholder="L"
+                            value={valL}
+                            onChange={(e) => setNuevasSelecciones({ ...nuevasSelecciones, [p.id]: `${e.target.value}-${valV}` })}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-md p-1.5 text-center text-sm font-black text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 shadow-inner transition-all"
+                          />
+                          <span className="text-slate-500 font-bold text-xs">-</span>
+                          <input
+                            type="number"
+                            min="0"
+                            placeholder="V"
+                            value={valV}
+                            onChange={(e) => setNuevasSelecciones({ ...nuevasSelecciones, [p.id]: `${valL}-${e.target.value}` })}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-md p-1.5 text-center text-sm font-black text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 shadow-inner transition-all"
+                          />
+                        </div>
+                      ) : (
+                        // RENDERIZADO TRADICIONAL: BOTONES L-E-V
+                        ['L', 'E', 'V'].map(opc => (
+                          <button
+                            key={opc}
+                            onClick={() => setNuevasSelecciones({ ...nuevasSelecciones, [p.id]: opc })}
+                            className={`flex-1 py-1.5 rounded text-[10px] md:text-xs font-black transition-all border ${
+                              seleccionActual === opc 
+                              ? 'bg-amber-600 border-amber-500 text-white shadow-[0_0_10px_rgba(217,119,6,0.3)] scale-105' 
+                              : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300 hover:bg-slate-700'
+                            }`}
+                          >
+                            {opc}
+                          </button>
+                        ))
+                      )}
                     </div>
                   </div>
                 )
               })}
             </div>
 
-            <div className="bg-slate-950 border border-slate-800 p-3 rounded-lg mb-4 shrink-0 flex justify-between items-center">
-              <div>
-                <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest">Total de Goles</h4>
-                <p className="text-[9px] text-slate-500 uppercase mt-0.5">Para desempate en la jornada</p>
+            {/* ⚡ UI INTELIGENTE: GOLES AUTOMÁTICOS VS MANUALES EN EDICIÓN */}
+            {ticketEditando.modalidad === 'marcador_exacto' ? (
+               <div className="bg-green-950/20 border border-green-900/40 p-3 rounded-lg mb-4 shrink-0 flex justify-between items-center shadow-inner">
+                 <div>
+                   <h4 className="text-xs font-black text-green-400 uppercase tracking-widest">Suma Automática</h4>
+                   <p className="text-[9px] text-slate-500 uppercase mt-0.5">Criterio de Desempate</p>
+                 </div>
+                 <div className="w-16 bg-slate-950 border border-slate-800 text-white font-black text-center py-2 rounded-lg text-sm shadow-inner">
+                   {golesAutomaticosEdicion}
+                 </div>
+               </div>
+            ) : (
+              <div className="bg-slate-950 border border-slate-800 p-3 rounded-lg mb-4 shrink-0 flex justify-between items-center">
+                <div>
+                  <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest">Total de Goles</h4>
+                  <p className="text-[9px] text-slate-500 uppercase mt-0.5">Para desempate en la jornada</p>
+                </div>
+                <input 
+                  type="number" 
+                  min="0"
+                  value={nuevosGoles}
+                  onChange={(e) => setNuevosGoles(e.target.value === '' ? '' : parseInt(e.target.value))}
+                  className="w-16 bg-slate-900 border border-amber-600/50 text-white font-black text-center py-2 rounded-lg text-sm focus:outline-none focus:border-amber-500 transition-colors"
+                />
               </div>
-              <input 
-                type="number" 
-                min="0"
-                value={nuevosGoles}
-                onChange={(e) => setNuevosGoles(e.target.value === '' ? '' : parseInt(e.target.value))}
-                className="w-16 bg-slate-900 border border-amber-600/50 text-white font-black text-center py-2 rounded-lg text-sm focus:outline-none focus:border-amber-500 transition-colors"
-              />
-            </div>
+            )}
 
             <button 
               onClick={guardarEdicion}
-              disabled={guardandoEdicion}
+              disabled={guardandoEdicion || !esEdicionValida()}
               className={`w-full font-black py-3 rounded-xl uppercase tracking-widest text-xs transition-all shrink-0 ${
-                guardandoEdicion 
-                ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
+                guardandoEdicion || !esEdicionValida()
+                ? 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-80' 
                 : 'bg-amber-600 hover:bg-amber-500 text-white shadow-[0_0_15px_rgba(217,119,6,0.2)]'
               }`}
             >
-              {guardandoEdicion ? 'Guardando...' : '💾 Guardar Cambios'}
+              {guardandoEdicion ? 'Guardando...' : (!esEdicionValida() ? 'Faltan Datos' : '💾 Guardar Cambios')}
             </button>
           </div>
         </div>

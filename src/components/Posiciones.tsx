@@ -32,11 +32,9 @@ export default function Posiciones() {
 
       const { data: pData } = await supabase.from('partidos').select('*').in('quiniela_id', quinielaIds).order('fecha_hora', { ascending: true })
       
-      // ⚡ MODIFICACIÓN: Traemos equipo_asignado_id y puntos_totales para el Sorteo
       const { data: tData } = await supabase.from('tickets').select('id, usuario_id, quiniela_id, prediccion_goles_total, puntos_totales, equipo_asignado_id, pronosticos(partido_id, eleccion_usuario)').in('quiniela_id', quinielaIds)
       
       const { data: uData } = await supabase.from('usuarios').select('id, nombre, avatar_url')
-      // ⚡ MODIFICACIÓN: Traemos los equipos para mostrar el logo en el sorteo
       const { data: eData } = await supabase.from('equipos').select('id, nombre, logo_url')
       
       const mapaUsuarios: Record<string, { nombre: string, avatar_url: string | null }> = {}
@@ -44,6 +42,22 @@ export default function Posiciones() {
 
       const mapaEquipos: Record<string, any> = {}
       if (eData) eData.forEach(e => mapaEquipos[e.id] = e)
+
+      // ⚡ Función modular interna para extraer tendencia L-E-V de un marcador
+      const getLEV = (marcador: string) => {
+        if (!marcador) return null;
+        const limpio = marcador.replace(/\s+/g, '').toUpperCase();
+        if (['L', 'E', 'V'].includes(limpio)) return limpio;
+        if (limpio.includes('-')) {
+          const [l, v] = limpio.split('-').map(Number);
+          if (!isNaN(l) && !isNaN(v)) {
+            if (l > v) return 'L';
+            if (l < v) return 'V';
+            return 'E';
+          }
+        }
+        return null;
+      }
 
       const quinielasProcesadas = qData.map(q => {
         const partidosQ = pData?.filter(p => p.quiniela_id === q.id) || []
@@ -54,20 +68,43 @@ export default function Posiciones() {
           const aciertos: Record<string, string> = {}
           const pronosticosTicket = ticket.pronosticos || [] 
 
-          // Lógica Clásica (Solo si no es sorteo)
+          // ⚡ LÓGICA DE PUNTUACIÓN HÍBRIDA BLINDADA
           if (q.modalidad !== 'sorteo') {
             pronosticosTicket.forEach((pron: any) => {
               const partido = partidosQ.find(p => p.id === pron.partido_id)
               if (partido) {
-                if (partido.resultado_real) {
-                  if (partido.resultado_real === pron.eleccion_usuario) {
-                    puntos++
-                    aciertos[pron.partido_id] = 'acierto'
+                const tieneResultado = partido.resultado_real !== null || (partido.goles_local !== null && partido.goles_visitante !== null);
+                
+                if (tieneResultado) {
+                  // 1. Limpiamos espacios en blanco del pick del usuario
+                  const pickStr = pron.eleccion_usuario?.replace(/\s+/g, '') || '';
+                  
+                  // 2. Construimos el resultado real forzando formato "X-Y" si hay goles, evitando fallos si resultado_real guardó "L"
+                  let realStr = '';
+                  if (partido.goles_local !== null && partido.goles_visitante !== null) {
+                    realStr = `${partido.goles_local}-${partido.goles_visitante}`;
                   } else {
-                    aciertos[pron.partido_id] = 'fallo'
+                    realStr = partido.resultado_real?.replace(/\s+/g, '') || '';
+                  }
+
+                  // 3. Comparación estricta
+                  if (pickStr === realStr) {
+                    puntos += (q.modalidad === 'marcador_exacto' ? 3 : 1);
+                    aciertos[pron.partido_id] = 'acierto_exacto';
+                  } else {
+                    // 4. Fallback a Tendencia (L, E, V)
+                    const pickLEV = getLEV(pickStr);
+                    const realLEV = getLEV(realStr) || getLEV(partido.resultado_real);
+                    
+                    if (pickLEV && realLEV && pickLEV === realLEV) {
+                      puntos += 1;
+                      aciertos[pron.partido_id] = 'acierto_lev';
+                    } else {
+                      aciertos[pron.partido_id] = 'fallo';
+                    }
                   }
                 } else {
-                  aciertos[pron.partido_id] = 'pendiente'
+                  aciertos[pron.partido_id] = 'pendiente';
                 }
               }
             })
@@ -84,20 +121,16 @@ export default function Posiciones() {
             nombre: userData.nombre,
             avatar_url: userData.avatar_url,
             prediccionGoles: ticket.prediccion_goles_total || 0,
-            // ⚡ LÓGICA DE SUPERVIVENCIA: Si es sorteo, leemos los puntos_totales de la base de datos (0 = Vivo, -1 = Eliminado)
             puntos: q.modalidad === 'sorteo' ? ticket.puntos_totales : puntos,
             aciertos,
             golesDiff,
             pronosticos: pronosticosTicket,
             equipoAsignado,
-            // Bandera de eliminación rápida
             estaEliminado: q.modalidad === 'sorteo' && ticket.puntos_totales < 0
           }
         })
 
-        // Ordenamiento Híbrido
         if (q.modalidad === 'sorteo') {
-           // Los vivos arriba (puntos >= 0), los eliminados abajo (puntos < 0)
            ranking.sort((a, b) => {
               if (a.estaEliminado === b.estaEliminado) return 0;
               return a.estaEliminado ? 1 : -1;
@@ -111,7 +144,7 @@ export default function Posiciones() {
 
         ranking.forEach((item: any, idx) => {
           if (q.modalidad === 'sorteo') {
-             item.posicion = idx + 1; // En sorteo solo es un listado
+             item.posicion = idx + 1; 
           } else {
              if (idx > 0) {
                const anterior = ranking[idx - 1];
@@ -141,10 +174,9 @@ export default function Posiciones() {
       })
 
       const activas = quinielasProcesadas
-        .filter(q => q.estado === 'abierta' || (q.estado === 'cerrada' && q.goles_totales_real === null && q.modalidad !== 'sorteo') || (q.estado === 'abierta' && q.modalidad === 'sorteo')) // Sorteos se manejan por estado cerrado desde Admin.
+        .filter(q => q.estado === 'abierta' || (q.estado === 'cerrada' && q.goles_totales_real === null && q.modalidad !== 'sorteo') || (q.estado === 'abierta' && q.modalidad === 'sorteo'))
         .sort((a, b) => new Date(a.fecha_cierre).getTime() - new Date(b.fecha_cierre).getTime())
 
-      // ⚡ Ajuste: Los sorteos se van a historial si el admin los cierra.
       const pasadas = quinielasProcesadas
         .filter(q => (q.estado === 'cerrada' && q.goles_totales_real !== null) || (q.estado === 'cerrada' && q.modalidad === 'sorteo'))
         .sort((a, b) => new Date(b.fecha_cierre).getTime() - new Date(a.fecha_cierre).getTime())
@@ -221,7 +253,7 @@ export default function Posiciones() {
   const yaPasoCierre = new Date() >= fechaCierre
   
   const mostrarPicks = quinielaActiva.estado === 'cerrada' || yaPasoCierre
-  const esSorteo = quinielaActiva.modalidad === 'sorteo' // ⚡ Bandera rápida
+  const esSorteo = quinielaActiva.modalidad === 'sorteo'
 
   const opcionesFecha: Intl.DateTimeFormatOptions = { day: '2-digit', month: 'short', hour: '2-digit', minute:'2-digit' };
   const fechaTextoVisible = fechaCierre.toLocaleDateString('es-MX', opcionesFecha).replace(',', ' a las');
@@ -304,7 +336,6 @@ export default function Posiciones() {
           </div>
         )}
 
-        {/* ⚡ CONTENEDOR HÍBRIDO (BOMBO DE SORTEO vs TABLA CLÁSICA) */}
         {esSorteo ? (
            <div className="bg-slate-900/80 rounded-xl border border-blue-900/30 shadow-2xl overflow-hidden p-3 md:p-5">
               <h3 className="text-center font-black text-slate-300 uppercase tracking-widest text-xs mb-4">Bombo de Asignaciones</h3>
@@ -316,7 +347,6 @@ export default function Posiciones() {
                     return (
                        <div key={jugador.id} className={`flex items-center justify-between p-3 md:p-4 rounded-xl border transition-all duration-500 ${eliminado ? 'bg-slate-950 border-red-900/40 opacity-50 grayscale' : 'bg-slate-800/80 border-blue-500/40 shadow-[0_0_15px_rgba(37,99,235,0.1)] hover:scale-[1.02]'}`}>
                           
-                          {/* Jugador */}
                           <div className="flex items-center gap-3">
                              <div className="relative">
                                <img src={getAvatarUrl(jugador.nombre, jugador.avatar_url)} className="w-10 h-10 md:w-12 md:h-12 rounded-full object-cover border-2 border-slate-700 bg-slate-900" />
@@ -334,7 +364,6 @@ export default function Posiciones() {
                              </div>
                           </div>
 
-                          {/* Equipo Asignado */}
                           <div className="flex flex-col items-end justify-center pl-3 border-l border-slate-700/50">
                              {eq ? (
                                 <>
@@ -351,7 +380,6 @@ export default function Posiciones() {
                                 </span>
                              )}
                           </div>
-
                        </div>
                     )
                  })}
@@ -445,7 +473,8 @@ export default function Posiciones() {
                                  }
 
                                  let bgClass = "bg-slate-950 border-slate-800 text-slate-600"
-                                 if (estado === 'acierto') bgClass = "bg-green-600 border-green-500 text-white"
+                                 if (estado === 'acierto_exacto') bgClass = "bg-green-600 border-green-500 text-white shadow-[0_0_5px_rgba(22,163,74,0.3)]"
+                                 if (estado === 'acierto_lev') bgClass = "bg-amber-500 border-amber-400 text-slate-900 shadow-[0_0_5px_rgba(245,158,11,0.3)]"
                                  if (estado === 'fallo') bgClass = "bg-red-950/40 border-red-900 text-red-500"
                                  if (estado === 'pendiente' && pronostico) bgClass = "bg-slate-800 border-slate-600 text-slate-300"
                                  
@@ -478,7 +507,8 @@ export default function Posiciones() {
                                    const enVivo = tieneGoles && !p.es_final
 
                                    let badgeColor = "bg-slate-800 text-slate-400 border-slate-700"
-                                   if (estado === 'acierto') badgeColor = "bg-green-950/40 text-green-400 border-green-900/50"
+                                   if (estado === 'acierto_exacto') badgeColor = "bg-green-950/40 text-green-400 border-green-900/50"
+                                   if (estado === 'acierto_lev') badgeColor = "bg-amber-950/20 text-amber-400 border-amber-900/50"
                                    if (estado === 'fallo') badgeColor = "bg-red-950/30 text-red-400 border-red-900/40"
 
                                    return (
@@ -508,7 +538,8 @@ export default function Posiciones() {
                                        <div className="flex justify-between items-center mt-auto pt-1.5 border-t border-slate-800/30">
                                          <span className="text-[8px] font-bold uppercase text-slate-500">Elección: <span className="text-white font-black">{pronostico ? pronostico.eleccion_usuario : 'N/A'}</span></span>
                                          
-                                         {estado === 'acierto' && <span className="text-[9px] font-black text-green-400 uppercase tracking-widest">+1 Pts</span>}
+                                         {estado === 'acierto_exacto' && <span className="text-[9px] font-black text-green-400 uppercase tracking-widest">{quinielaActiva.modalidad === 'marcador_exacto' ? '+3 Pts' : '+1 Pts'}</span>}
+                                         {estado === 'acierto_lev' && <span className="text-[9px] font-black text-amber-400 uppercase tracking-widest">+1 Pts</span>}
                                          {estado === 'fallo' && <span className="text-[9px] font-black text-red-500 uppercase tracking-widest">Fallo</span>}
                                        </div>
                                        
@@ -615,7 +646,8 @@ export default function Posiciones() {
                                 const estado = jugador.aciertos[p.id]
                                 
                                 let bgClass = "bg-slate-950 border-slate-800 text-slate-600"
-                                if (estado === 'acierto') bgClass = "bg-green-600 border-green-500 text-white"
+                                if (estado === 'acierto_exacto') bgClass = "bg-green-600 border-green-500 text-white"
+                                if (estado === 'acierto_lev') bgClass = "bg-amber-500 border-amber-400 text-slate-900"
                                 if (estado === 'fallo') bgClass = "bg-red-950/40 border-red-900 text-red-500"
                                 
                                 return (

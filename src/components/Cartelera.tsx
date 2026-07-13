@@ -6,7 +6,8 @@ import ModalReglas from '@/components/ModalReglas'
 export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioActivo: any, actualizarSaldo: (nuevoSaldo: number) => void }) {
   const {
     cargando, errorCarga, quinielasActivas, quinielaActual, partidos, selecciones, golesTotales,
-    guardando, mostrarReglas, aceptoReglas, esGratis, esSorteo, bloqueadoPorParticipacion, lugaresDisponibles, cantidadBoletos, setCantidadBoletos, setGolesTotales, setMostrarReglas,
+    guardando, mostrarReglas, aceptoReglas, esGratis, esSorteo, esMarcadorExacto, bloqueadoPorParticipacion, 
+    lugaresDisponibles, cantidadBoletos, golesAutomaticos, setCantidadBoletos, setGolesTotales, setMostrarReglas,
     setAceptoReglas, cambiarQuinielaVisible, seleccionarOpcion, guardarQuiniela, obtenerLogo
   } = useCartelera(usuarioActivo, actualizarSaldo)
 
@@ -74,6 +75,18 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
   const costoUnitario = quinielaActual.precio_ticket || 0;
   const costoTotal = esSorteo ? costoUnitario * cantidadBoletos : costoUnitario;
 
+  // ⚡ LÓGICA DE BARRA DE PROGRESO
+  const totalPartidos = partidos.length;
+  const partidosLlenos = partidos.filter(p => {
+      const sel = selecciones[p.id];
+      if (!sel) return false;
+      if (esMarcadorExacto) return /^\d+-\d+$/.test(sel.trim());
+      return ['L', 'E', 'V'].includes(sel.trim());
+  }).length;
+  
+  const porcentajeProgreso = totalPartidos > 0 ? (partidosLlenos / totalPartidos) * 100 : 0;
+  const faltanPartidos = partidosLlenos < totalPartidos;
+
   return (
     <div className="w-full max-w-4xl mx-auto mt-2 mb-20 animate-in fade-in duration-500 relative">
       
@@ -117,6 +130,11 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
                 🎰 {lugaresDisponibles > 0 ? `Cupo Disponible: ${lugaresDisponibles}/8` : 'SALA LLENA (0/8)'}
               </span>
             )}
+            {esMarcadorExacto && (
+              <span className="bg-green-950/40 border border-green-900/50 text-green-400 px-2.5 py-1 rounded-lg text-[9px] md:text-[10px] font-black uppercase tracking-widest">
+                🎯 Marcador Exacto
+              </span>
+            )}
           </div>
         </div>
 
@@ -129,7 +147,6 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
               Asegura tus lugares en el bombo. El sistema te asignará aleatoriamente un equipo por cada pase comprado una vez que la sala se llene.
             </p>
 
-            {/* ⚡ SELECTOR DE CANTIDAD (CARRITO DE COMPRA) */}
             <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 w-full max-w-xs flex flex-col items-center gap-3 shadow-inner">
                <label className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">¿Cuántos pases deseas?</label>
                <div className="flex items-center gap-4">
@@ -144,13 +161,17 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
           </div>
         ) : (
           <>
-            {/* 🎟️ VISTA JUGAR TICKET NORMAL (Se mantiene exactamente igual) */}
+            {/* 🎟️ VISTA JUGAR TICKET NORMAL (CLÁSICA O EXACTO) */}
             <div className="space-y-2 md:space-y-3">
               {partidos.map((partido) => {
-                const seleccion = selecciones[partido.id];
+                const seleccion = selecciones[partido.id] || '';
                 const logoL = obtenerLogo(partido.equipo_local);
                 const logoV = obtenerLogo(partido.equipo_visitante);
                 const fechaObj = formatearFechaObj(partido.fecha_hora);
+
+                const [golesL, golesV] = seleccion.split('-');
+                const valL = golesL !== undefined ? golesL : '';
+                const valV = golesV !== undefined ? golesV : '';
 
                 return (
                   <div key={partido.id} className={`bg-slate-800/60 px-3 py-2.5 md:p-3 rounded-lg border flex flex-col md:flex-row justify-between items-center gap-3 md:gap-4 transition-all shadow-sm relative group ${bloqueadoPorParticipacion ? 'border-slate-800 opacity-60' : 'border-slate-700 hover:border-slate-500 hover:bg-slate-800/90'}`}>
@@ -175,37 +196,97 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
                       </div>
                     </div>
 
-                    <div className="w-full md:w-[130px] shrink-0 mt-1 md:mt-0">
-                      <div className="flex gap-1 md:gap-1.5 w-full">
-                        {['L', 'E', 'V'].map((opc) => (
-                          <button 
-                            key={opc}
-                            onClick={() => { setMensajeUI({ tipo: '', texto: '' }); seleccionarOpcion(partido.id, opc); }}
+                    <div className="w-full md:w-[130px] shrink-0 mt-1 md:mt-0 flex justify-center">
+                      {esMarcadorExacto ? (
+                        <div className="flex items-center justify-center gap-1.5 w-full">
+                          <input
+                            type="number"
+                            min="0"
+                            placeholder="L"
+                            value={valL}
+                            onChange={(e) => { 
+                              setMensajeUI({ tipo: '', texto: '' }); 
+                              seleccionarOpcion(partido.id, `${e.target.value}-${valV}`); 
+                            }}
                             disabled={bloqueadoPorParticipacion}
-                            className={`flex-1 py-1.5 md:py-2 rounded text-xs font-black transition-all border shadow-sm ${
-                              seleccion === opc ? 'bg-blue-600 border-blue-400 text-white shadow-[0_0_10px_rgba(37,99,235,0.4)] md:scale-105' : 'bg-slate-950 border-slate-700 text-slate-500 hover:text-slate-300'
-                            } ${bloqueadoPorParticipacion ? 'cursor-not-allowed' : ''}`}
-                          >
-                            {opc}
-                          </button>
-                        ))}
-                      </div>
+                            className="w-12 bg-slate-900 border border-slate-700 rounded-md p-1.5 text-center text-sm font-black text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-inner transition-all"
+                          />
+                          <span className="text-slate-500 font-bold text-xs">-</span>
+                          <input
+                            type="number"
+                            min="0"
+                            placeholder="V"
+                            value={valV}
+                            onChange={(e) => { 
+                              setMensajeUI({ tipo: '', texto: '' }); 
+                              seleccionarOpcion(partido.id, `${valL}-${e.target.value}`); 
+                            }}
+                            disabled={bloqueadoPorParticipacion}
+                            className="w-12 bg-slate-900 border border-slate-700 rounded-md p-1.5 text-center text-sm font-black text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-inner transition-all"
+                          />
+                        </div>
+                      ) : (
+                        <div className="flex gap-1 md:gap-1.5 w-full">
+                          {['L', 'E', 'V'].map((opc) => (
+                            <button 
+                              key={opc}
+                              onClick={() => { setMensajeUI({ tipo: '', texto: '' }); seleccionarOpcion(partido.id, opc); }}
+                              disabled={bloqueadoPorParticipacion}
+                              className={`flex-1 py-1.5 md:py-2 rounded text-xs font-black transition-all border shadow-sm ${
+                                seleccion === opc ? 'bg-blue-600 border-blue-400 text-white shadow-[0_0_10px_rgba(37,99,235,0.4)] md:scale-105' : 'bg-slate-950 border-slate-700 text-slate-500 hover:text-slate-300'
+                              } ${bloqueadoPorParticipacion ? 'cursor-not-allowed' : ''}`}
+                            >
+                              {opc}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
+
                   </div>
                 )
               })}
             </div>
 
-            <div className={`mt-8 mb-5 p-4 bg-blue-950/40 border border-blue-900/50 rounded-2xl max-w-[280px] mx-auto text-center shadow-xl z-10 relative ${bloqueadoPorParticipacion ? 'opacity-60' : ''}`}>
-              <label className="block text-blue-400 font-black uppercase text-[9px] md:text-[10px] tracking-[0.2em] mb-1">Criterio Desempate</label>
-              <p className="text-slate-400 text-[8px] md:text-[9px] uppercase mb-3 font-bold tracking-tight">Total de goles en la jornada</p>
-              <input 
-                type="number" placeholder="00" value={golesTotales}
-                onChange={(e) => { setMensajeUI({ tipo: '', texto: '' }); setGolesTotales(e.target.value); }}
-                disabled={bloqueadoPorParticipacion}
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-3 text-center text-3xl font-black text-white focus:border-blue-500 outline-none transition-all disabled:cursor-not-allowed disabled:text-slate-500"
-              />
-            </div>
+            {/* ⚡ UI INTELIGENTE: CRITERIO DESEMPATE AUTOMÁTICO VS MANUAL */}
+            {esMarcadorExacto ? (
+              <div className={`mt-6 mb-5 p-4 bg-green-950/20 border border-green-900/40 rounded-2xl max-w-[280px] mx-auto text-center shadow-inner z-10 relative ${bloqueadoPorParticipacion ? 'opacity-60' : ''}`}>
+                <label className="block text-green-400 font-black uppercase text-[9px] md:text-[10px] tracking-[0.2em] mb-1">Criterio Desempate</label>
+                <p className="text-slate-400 text-[8px] md:text-[9px] uppercase mb-3 font-bold tracking-tight">Suma Automática de Goles</p>
+                <div className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-center text-3xl font-black text-white shadow-inner">
+                  {golesAutomaticos}
+                </div>
+              </div>
+            ) : (
+              <div className={`mt-8 mb-5 p-4 bg-blue-950/40 border border-blue-900/50 rounded-2xl max-w-[280px] mx-auto text-center shadow-xl z-10 relative ${bloqueadoPorParticipacion ? 'opacity-60' : ''}`}>
+                <label className="block text-blue-400 font-black uppercase text-[9px] md:text-[10px] tracking-[0.2em] mb-1">Criterio Desempate</label>
+                <p className="text-slate-400 text-[8px] md:text-[9px] uppercase mb-3 font-bold tracking-tight">Total de goles en la jornada</p>
+                <input 
+                  type="number" placeholder="00" value={golesTotales}
+                  onChange={(e) => { setMensajeUI({ tipo: '', texto: '' }); setGolesTotales(e.target.value); }}
+                  disabled={bloqueadoPorParticipacion}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-3 text-center text-3xl font-black text-white focus:border-blue-500 outline-none transition-all disabled:cursor-not-allowed disabled:text-slate-500"
+                />
+              </div>
+            )}
+            
+            {/* ⚡ BARRA DE PROGRESO DE PREDICCIONES */}
+            {totalPartidos > 0 && (
+                <div className="w-full max-w-[280px] mx-auto mb-6">
+                    <div className="flex justify-between items-center mb-1.5 px-1">
+                        <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Progreso del Ticket</span>
+                        <span className={`text-[10px] font-black ${faltanPartidos ? 'text-amber-500' : 'text-green-500 animate-pulse'}`}>
+                            {partidosLlenos} / {totalPartidos}
+                        </span>
+                    </div>
+                    <div className="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800 shadow-inner">
+                        <div 
+                            className={`h-full transition-all duration-500 ${faltanPartidos ? 'bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]' : 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]'}`}
+                            style={{ width: `${porcentajeProgreso}%` }}
+                        ></div>
+                    </div>
+                </div>
+            )}
           </>
         )}
 
@@ -236,11 +317,13 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
         <div className="flex flex-col items-center pt-2 border-t border-slate-800 z-10 relative">
           <button 
             onClick={handleGuardar}
-            disabled={guardando || !aceptoReglas || bloqueadoPorParticipacion || mensajeUI.tipo === 'exito'}
+            // ⚡ BOTÓN BLOQUEADO HASTA QUE SE LLENEN LOS PARTIDOS
+            disabled={guardando || !aceptoReglas || bloqueadoPorParticipacion || mensajeUI.tipo === 'exito' || (!esSorteo && faltanPartidos)}
             className={`w-full max-w-[280px] py-3 md:py-4 rounded-xl font-black uppercase text-xs tracking-widest transition-all ${
               mensajeUI.tipo === 'exito' ? 'bg-green-900 text-green-400 border border-green-700 cursor-default'
               : bloqueadoPorParticipacion && esSorteo ? 'bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-700 shadow-inner'
-              : bloqueadoPorParticipacion && !esSorteo ? 'bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-700 shadow-inner' 
+              : bloqueadoPorParticipacion && esGratis ? 'bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-700 shadow-inner' 
+              : (!esSorteo && faltanPartidos) ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700 opacity-80'
               : (guardando || !aceptoReglas) ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700' 
               : esSorteo ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_20px_rgba(37,99,235,0.4)] hover:scale-105 active:scale-95'
               : 'bg-green-600 hover:bg-green-500 text-white shadow-[0_0_20px_rgba(22,163,74,0.4)] hover:scale-105 active:scale-95'
@@ -248,7 +331,8 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
           >
             {mensajeUI.tipo === 'exito' ? '¡LISTO!' 
             : bloqueadoPorParticipacion && esSorteo ? 'SALA LLENA (AGOTADO)'
-            : bloqueadoPorParticipacion && !esSorteo ? 'YA PARTICIPASTE (MÁX 1)' 
+            : bloqueadoPorParticipacion && esGratis ? 'PROMO USADA (MÁX 1)' 
+            : (!esSorteo && faltanPartidos) ? 'LLENA TU TICKET'
             : guardando ? 'Procesando Pago...' 
             : esSorteo ? `Comprar Pases ($${costoTotal})`
             : 'Confirmar Jugada'}

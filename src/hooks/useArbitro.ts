@@ -129,7 +129,6 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     setEsFinalReal(finales);
     setGolesReales(hayGoles ? sumaGolesCalculada.toString() : (qData.goles_totales_real !== null ? qData.goles_totales_real.toString() : ''));
 
-    // ⚡ ACTUALIZADO: Añadido 'puntos_totales' para leer el estado de supervivencia
     const { data: tData } = await supabase.from('tickets').select('id, usuario_id, prediccion_goles_total, equipo_asignado_id, puntos_totales, pronosticos(partido_id, eleccion_usuario)').eq('quiniela_id', qData.id);
     const { data: uDataReal } = await supabase.from('usuarios').select('id, nombre, telefono, creditos_disponibles');
     const mapaU: Record<string, any> = {};
@@ -139,10 +138,28 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
       const rCalc = tData.map(ticket => {
         let pts = 0;
         const prons: Record<string, string> = {};
+        
+        // 🚀 NUEVA LÓGICA DE CALIFICACIÓN AL VUELO (3 pts exacto, 1 pt tendencia)
         ticket.pronosticos.forEach((pr: any) => {
           prons[pr.partido_id] = pr.eleccion_usuario;
           const p = qData.partidos.find((par: any) => par.id === pr.partido_id);
-          if (p && p.resultado_real === pr.eleccion_usuario) pts++;
+          
+          if (p && p.resultado_real) {
+            if (qData.modalidad === 'marcador_exacto') {
+              if (pr.eleccion_usuario.includes('-') && p.goles_local !== null && p.goles_visitante !== null) {
+                const [pl, pv] = pr.eleccion_usuario.split('-').map(Number);
+                if (pl === p.goles_local && pv === p.goles_visitante) {
+                  pts += 3; // Marcador perfecto
+                } else {
+                  const tendenciaPred = pl > pv ? 'L' : pl < pv ? 'V' : 'E';
+                  if (tendenciaPred === p.resultado_real) pts += 1; // Solo atinó al ganador/empate
+                }
+              }
+            } else {
+              // Modalidad Clásica (L-E-V)
+              if (p.resultado_real === pr.eleccion_usuario) pts++;
+            }
+          }
         });
         
         const golesRealesAct = hayGoles ? sumaGolesCalculada : (qData.goles_totales_real !== null ? qData.goles_totales_real : -1);
@@ -154,12 +171,12 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
           puntos: pts, prediccionGoles: ticket.prediccion_goles_total, golesDiff, pronosticosDiccionario: prons,
           equipo_asignado_id: ticket.equipo_asignado_id,
           puntos_totales: ticket.puntos_totales, 
-          estaEliminado: ticket.puntos_totales < 0 // ⚡ Bandera de Sorteo
+          estaEliminado: ticket.puntos_totales < 0
         };
       }).sort((a, b) => {
         if (qData.modalidad === 'sorteo') {
            if (a.estaEliminado === b.estaEliminado) return 0;
-           return a.estaEliminado ? 1 : -1; // Los eliminados abajo
+           return a.estaEliminado ? 1 : -1;
         }
         if (b.puntos !== a.puntos) return b.puntos - a.puntos;
         return a.golesDiff - b.golesDiff;
@@ -181,10 +198,9 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     }
   };
 
-  // 🔥 NUEVA FUNCIÓN: ELIMINAR / REVIVIR JUGADOR DEL SORTEO
   const toggleEstadoSupervivencia = async (ticketId: string, estaEliminado: boolean, nombreJugador: string) => {
     if (operacionEnCurso.current) return;
-    const nuevoEstado = estaEliminado ? 0 : -1; // Si estaba eliminado lo revive a 0, si estaba vivo lo elimina a -1
+    const nuevoEstado = estaEliminado ? 0 : -1; 
     const accion = estaEliminado ? 'Revivir' : 'Eliminar';
     
     const confirmar = window.confirm(`💀 ¿Seguro que deseas ${accion.toUpperCase()} a ${nombreJugador}?`);
@@ -197,7 +213,6 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
       await supabase.from('tickets').update({ puntos_totales: nuevoEstado }).eq('id', ticketId);
       toast.success(`Jugador ${accion.toLowerCase()}do con éxito.`, { id: idToast });
       
-      // Actualizamos solo local para que sea instantáneo sin recargar todo
       setRankingAdmin(prev => {
          const nuevos = prev.map(t => t.id === ticketId ? { ...t, puntos_totales: nuevoEstado, estaEliminado: nuevoEstado < 0 } : t);
          return nuevos.sort((a, b) => {
@@ -260,11 +275,34 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
       if (golesReales !== '') await supabase.from('quinielas').update({ goles_totales_real: parseInt(golesReales) }).eq('id', quiniela.id);
 
       const { data: tickets } = await supabase.from('tickets').select('id, pronosticos (partido_id, eleccion_usuario)').eq('quiniela_id', quiniela.id);
+      
       if (tickets) {
         for (const ticket of tickets) {
           let puntos = 0;
+          
+          // 🚀 NUEVA LÓGICA DE CALIFICACIÓN PARA GUARDADO EN DB
           for (const pronostico of ticket.pronosticos || []) {
-            if (resultadosReales[pronostico.partido_id] === pronostico.eleccion_usuario) puntos++;
+            const resDir = resultadosReales[pronostico.partido_id];
+            const marcReal = marcadoresReales[pronostico.partido_id];
+            
+            if (resDir) {
+              if (quiniela.modalidad === 'marcador_exacto') {
+                if (pronostico.eleccion_usuario.includes('-') && marcReal?.l !== '' && marcReal?.v !== '') {
+                  const [pl, pv] = pronostico.eleccion_usuario.split('-').map(Number);
+                  const rl = parseInt(marcReal.l);
+                  const rv = parseInt(marcReal.v);
+                  
+                  if (pl === rl && pv === rv) {
+                    puntos += 3; // 3 Puntos: Marcador Exacto
+                  } else {
+                    const tendenciaPred = pl > pv ? 'L' : pl < pv ? 'V' : 'E';
+                    if (tendenciaPred === resDir) puntos += 1; // 1 Punto: Tendencia (Consolación)
+                  }
+                }
+              } else {
+                if (resDir === pronostico.eleccion_usuario) puntos++;
+              }
+            }
           }
           await supabase.from('tickets').update({ puntos_totales: puntos }).eq('id', ticket.id);
         }
@@ -319,7 +357,10 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     } else {
       let seleccionesTexto = '';
       partidos.forEach(p => {
-        const pick = jugador.pronosticosDiccionario[p.id] === 'L' ? p.equipo_local : jugador.pronosticosDiccionario[p.id] === 'V' ? p.equipo_visitante : 'Empate';
+        let pick = jugador.pronosticosDiccionario[p.id];
+        if (quiniela.modalidad !== 'marcador_exacto') {
+           pick = pick === 'L' ? p.equipo_local : pick === 'V' ? p.equipo_visitante : 'Empate';
+        }
         seleccionesTexto += `⚽ ${p.equipo_local} vs ${p.equipo_visitante} 👉 *${pick}*\n`;
       });
       msg = `🎫 *QUINIELA CIBERTEQUE*\nHola ${jugador.nombre}, tu jugada para *${quiniela.nombre_jornada}* está registrada.\n\n*Tus pronósticos:*\n${seleccionesTexto}\nDesempate: *${jugador.prediccionGoles}*\n\nRanking en vivo:\n👉 ${ENLACE_PUBLICO_RANKING}\n\n🍀 ¡Suerte!`;
@@ -328,7 +369,6 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     window.open(`https://wa.me/52${jugador.telefono}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
-  // 🔥 ACTUALIZADO: Liquidación automática si es sorteo y solo queda 1 vivo.
   const cerrarJornadaDefinitivo = async () => {
     if (!quiniela) return;
     
@@ -343,7 +383,6 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     let ganadores: any[] = [];
     let desgloseTexto = '';
 
-    // Lógica Híbrida para Confirmación
     if (quiniela.modalidad === 'sorteo') {
       const vivos = rankingAdmin.filter(r => !r.estaEliminado);
       if (vivos.length > 1) return toast.error('🚨 Aún hay más de 1 jugador vivo. Debes eliminarlos desde el panel hasta que quede solo 1 para declarar campeón.');
@@ -384,7 +423,6 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
         }
         await supabase.from('quinielas').update({ estado: 'cerrada' }).eq('id', quiniela.id);
       } else {
-        // Lógica tradicional
         for (const pId of Object.keys(resultadosReales || {})) {
           const l_val = marcadoresReales[pId]?.l;
           const v_val = marcadoresReales[pId]?.v;

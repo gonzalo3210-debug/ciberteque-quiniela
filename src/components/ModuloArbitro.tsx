@@ -26,6 +26,15 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
   const sorteoRealizado = s.rankingAdmin?.some((r: any) => r.equipo_asignado_id);
   const equiposEnBombo = useMemo(() => s.equipos?.filter(e => s.quiniela?.equipos_sorteo?.includes(e.id)) || [], [s.equipos, s.quiniela?.equipos_sorteo]);
 
+  // 🛡️ UX DE PREVENCIÓN: Candado de base de datos para Marcador Exacto
+  const guardadoBloqueado = useMemo(() => {
+    if (!s.marcadoresReales) return false;
+    // Evita guardar si hay un gol capturado pero falta el del rival
+    return Object.values(s.marcadoresReales).some((m: any) => 
+      (m.l !== '' && m.v === '') || (m.l === '' && m.v !== '')
+    );
+  }, [s.marcadoresReales]);
+
   // Motor de Animación de Alta Velocidad (Efecto Ruleta)
   useEffect(() => {
     let intervalo: NodeJS.Timeout;
@@ -469,7 +478,14 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                     </div>
                     
                     <div className="w-full md:w-2/3 flex gap-2">
-                      <button onClick={a.guardarYCalificar} disabled={s.calificando} className="flex-1 py-3 rounded-xl font-bold text-[10px] uppercase bg-slate-800 hover:bg-slate-700 text-white transition-colors">💾 Guardar Avance</button>
+                      <button 
+                        onClick={a.guardarYCalificar} 
+                        disabled={s.calificando || guardadoBloqueado} 
+                        className={`flex-1 py-3 rounded-xl font-bold text-[10px] uppercase transition-colors ${guardadoBloqueado ? 'bg-slate-800 text-slate-500 border border-red-900/50 cursor-not-allowed' : 'bg-slate-800 hover:bg-slate-700 text-white'}`}
+                      >
+                        {guardadoBloqueado ? '⚠️ Completa el Marcador' : '💾 Guardar Avance'}
+                      </button>
+
                       <button onClick={a.cerrarJornadaDefinitivo} disabled={s.calificando || totalBoletosAdmin === 0} className={`flex-1 py-3 rounded-xl font-black text-[10px] uppercase text-white transition-transform active:scale-95 ${esCualquierPromo ? 'bg-purple-600 hover:bg-purple-500 shadow-[0_0_15px_rgba(147,51,234,0.3)]' : 'bg-red-600 hover:bg-red-500 shadow-[0_0_15px_rgba(220,38,38,0.3)]'} disabled:opacity-50 disabled:active:scale-100`}>
                         {esCualquierPromo ? '🎁 Cerrar y Pagar' : '🏆 Cerrar y Liquidar'}
                       </button>
@@ -563,7 +579,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
         </div>
       )}
 
-      {/* MODAL: EDICIÓN DE TICKET */}
+      {/* MODAL: EDICIÓN DE TICKET (AQUÍ SE APLICÓ LA MUTACIÓN PARA MARCADOR EXACTO) */}
       {et.editandoTicketId && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 w-full max-w-sm max-h-[90vh] overflow-y-auto animate-in zoom-in-95">
@@ -580,13 +596,24 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                       <div className="flex justify-between text-[9px] text-slate-400 font-bold uppercase">
                         <span>{p.equipo_local}</span><span>VS</span><span>{p.equipo_visitante}</span>
                       </div>
-                      <div className="flex gap-1 h-7">
-                        {['L', 'E', 'V'].map(opc => (
-                          <button key={opc} onClick={() => et.seleccionarOpcionEditTicket(p.id, opc)} className={`flex-1 rounded font-black text-xs transition-all ${sel === opc ? 'bg-blue-600 text-white shadow-inner scale-[1.02]' : 'bg-slate-900 text-slate-500 border border-slate-700 hover:bg-slate-800'}`}>
-                            {opc}
-                          </button>
-                        ))}
-                      </div>
+                      
+                      {s.quiniela?.modalidad === 'marcador_exacto' ? (
+                        <input 
+                          type="text" 
+                          placeholder="Ej: 2-1" 
+                          value={sel || ''} 
+                          onChange={e => et.seleccionarOpcionEditTicket(p.id, e.target.value)} 
+                          className="w-full h-7 bg-slate-900 border border-slate-700 rounded text-center text-xs font-black text-white focus:outline-none focus:border-blue-500" 
+                        />
+                      ) : (
+                        <div className="flex gap-1 h-7">
+                          {['L', 'E', 'V'].map(opc => (
+                            <button key={opc} onClick={() => et.seleccionarOpcionEditTicket(p.id, opc)} className={`flex-1 rounded font-black text-xs transition-all ${sel === opc ? 'bg-blue-600 text-white shadow-inner scale-[1.02]' : 'bg-slate-900 text-slate-500 border border-slate-700 hover:bg-slate-800'}`}>
+                              {opc}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                    </div>
                  )
                })}
