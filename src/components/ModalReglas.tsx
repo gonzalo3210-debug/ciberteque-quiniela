@@ -1,85 +1,139 @@
-import React from 'react';
+'use client'
+import { useEffect } from 'react'
 
 interface ModalReglasProps {
   onClose: () => void;
-  onAccept?: () => void; // Lo hacemos opcional por si en otro lado solo quieren "leer" sin tener que aceptar nada
+  onAccept: () => void;
 }
 
 export default function ModalReglas({ onClose, onAccept }: ModalReglasProps) {
+  // Prevenir scroll en el body cuando el modal está abierto
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = 'auto';
+    };
+  }, []);
+
   return (
-    <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-700 max-w-md w-full p-5 rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200">
-        <div className="flex justify-between items-center border-b border-slate-800 pb-2.5 mb-3">
-          <h3 className="text-base font-black text-white flex items-center gap-2 uppercase tracking-tight"><span>📜</span> Reglamento CiberTeque</h3>
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 font-bold font-mono text-lg">✕</button>
-        </div>
+    <div className="fixed inset-0 z-[200] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-slate-900 border border-slate-700 w-full max-w-2xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col animate-in zoom-in-95 duration-200">
         
-        <div className="space-y-3.5 text-[10px] md:text-xs text-slate-300 font-medium leading-relaxed uppercase tracking-wide max-h-[300px] md:max-h-[380px] overflow-y-auto pr-1">
-          <div>
-            <strong className="text-blue-400 block mb-0.5">1️⃣ Cierre y Correcciones:</strong>
-            <span className="text-slate-400 block pl-2 font-bold mb-1">• Boletos Digitales (App):</span>
-            <span className="normal-case text-slate-300 pl-4 block leading-normal">
-              Tu jugada es tu responsabilidad. <span className="text-amber-400 font-bold">Puedes modificar tus pronósticos desde la aplicación en cualquier momento antes de la fecha y hora de cierre oficial.</span> Una vez llegada la hora de cierre de la jornada, el boleto queda bloqueado y participarás con tu última selección guardada.
-            </span>
-            <span className="text-slate-400 block pl-2 font-bold mt-1.5 mb-1">• Boletos Físicos:</span>
-            <span className="normal-case text-slate-300 pl-4 block leading-normal">Se reciben a más tardar un día antes de la fecha de cierre a las 8:00 P.M. Si detectas un error en la captura realizada por el personal de CiberTeque, debe reportarse inmediatamente antes del cierre para su corrección.</span>
+        {/* HEADER */}
+        <div className="flex justify-between items-center p-4 md:p-5 border-b border-slate-800 shrink-0 bg-slate-900/50 rounded-t-2xl">
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">📜</span>
+            <h2 className="text-lg md:text-xl font-black text-white uppercase tracking-widest">
+              Reglamento Oficial
+            </h2>
           </div>
-
-          <p>
-            <strong className="text-blue-400 block mb-0.5">2️⃣ Tiempo Reglamentario (90 Min):</strong>
-            <span className="normal-case leading-normal block text-slate-300">Para los pronósticos, solo cuentan los 90 minutos reglamentarios (incluyendo el tiempo agregado por el árbitro). NO cuentan los tiempos extras ni las tandas de penales.</span>
-          </p>
-
-          <p>
-            <strong className="text-blue-400 block mb-0.5">3️⃣ Partidos Aplazados o Suspendidos:</strong>
-            <span className="normal-case leading-normal block text-slate-300">Si un partido se suspende después de haber iniciado, se toma como válido el marcador que tenía en ese momento. Si un partido se cancela o aplaza antes de iniciar, para fines de la quiniela se declarará como Empate (E).</span>
-          </p>
-
-          <p>
-            <strong className="text-blue-400 block mb-0.5">4️⃣ Criterios de Desempate:</strong>
-            <span className="normal-case leading-normal block text-slate-300">El ganador se define por quién tenga más aciertos. Si dos o más jugadores empatan en puntos, el desempate se decide por la predicción de goles totales de la jornada (quien se acerque más al número real).</span>
-          </p>
-
-          <div>
-            <strong className="text-blue-400 block mb-0.5">5️⃣ Empates Perfectos (Bolsa Compartida):</strong>
-            <span className="normal-case text-slate-300 block leading-normal"><span className="text-amber-500 font-bold uppercase text-[9px] tracking-wider block mt-0.5">💸 En quinielas de paga:</span> Se sumarán las bolsas de los lugares ocupados y se dividirá el dinero en partes iguales.</span>
-            <span className="normal-case text-slate-300 block leading-normal"><span className="text-amber-500 font-bold uppercase text-[9px] tracking-wider block mt-1">🎁 En quinielas Promocionales (Gratis):</span> Se respetará el premio completo (ej. 1 crédito) para todos los que empaten en el primer lugar.</span>
-          </div>
-
-          <p>
-            <strong className="text-blue-400 block mb-0.5">6️⃣ Boletos Físicos VS Digitales:</strong>
-            <span className="normal-case leading-normal block text-slate-300">Ambos tienen exactamente la misma validez. Si dejas tu boleto físico en CiberTeque, nosotros lo capturamos y aparecerás en el ranking web al igual que todos.</span>
-          </p>
-
-          <p>
-            <strong className="text-amber-500 block mb-0.5">7️⃣ Actualización de Marcadores:</strong>
-            <span className="normal-case leading-normal block text-slate-300">Procuramos reflejar los resultados al instante, pero la administración cuenta con un margen de tolerancia de hasta 24 horas posteriores al partido para su actualización oficial en el sistema.</span>
-          </p>
-
-          <p>
-            <strong className="text-amber-500 block mb-0.5">8️⃣ Cierre y Premiación:</strong>
-            <span className="normal-case leading-normal block text-slate-300">La validación final de la jornada y el pago de premios a los ganadores se realizará a más tardar el siguiente día hábil tras concluir el último encuentro de la quiniela.</span>
-          </p>
-
-          <p>
-            <strong className="text-amber-500 block mb-0.5">9️⃣ Cancelación y Reembolsos:</strong>
-            <span className="normal-case leading-normal block text-slate-300">En caso de fallas mayores en la plataforma o la cancelación oficial de más de la mitad de los partidos de la jornada, la quiniela será anulada y se reembolsarán íntegramente los créditos a todos los participantes.</span>
-          </p>
-
-          <p className="italic text-slate-500 mt-4 border-t border-slate-800 pt-2.5 text-[9px] md:text-[10px]">
-            Al participar en CiberTeque se entiende que conoces y aceptas todos los puntos mencionados anteriormente.
-          </p>
-        </div>
-        
-        {onAccept && (
           <button 
-            onClick={onAccept} 
-            className="w-full mt-4 bg-blue-600 hover:bg-blue-500 text-white font-black py-2.5 rounded-xl uppercase tracking-wider text-xs transition-all shadow-lg transform active:scale-95"
+            onClick={onClose}
+            className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
           >
-            Entendido y Aceptado
+            ✕
           </button>
-        )}
+        </div>
+
+        {/* BODY (Scrollable) */}
+        <div className="p-4 md:p-6 overflow-y-auto flex-1 space-y-6 text-sm text-slate-300 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-slate-900 [&::-webkit-scrollbar-thumb]:bg-slate-700 [&::-webkit-scrollbar-thumb]:rounded-full">
+          
+          <section>
+            <h3 className="font-black text-blue-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <span>1️⃣</span> Cierre y Correcciones
+            </h3>
+            <ul className="list-disc pl-5 space-y-1 text-slate-400">
+              <li><strong className="text-slate-300">Boletos Digitales (App):</strong> Tu jugada es tu responsabilidad. Puedes modificar tus pronósticos en cualquier momento antes de la fecha y hora de cierre. Al llegar la hora, el boleto se bloquea y participarás con tu última selección.</li>
+              <li><strong className="text-slate-300">Boletos Físicos:</strong> Se reciben a más tardar un día antes de la fecha de cierre a las 8:00 P.M. Errores de captura por el personal deben reportarse antes del cierre oficial.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h3 className="font-black text-blue-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <span>2️⃣</span> Tiempo Reglamentario
+            </h3>
+            <p className="text-slate-400">Para los pronósticos, solo cuentan los 90 minutos reglamentarios (incluyendo el tiempo agregado). <strong className="text-red-400">NO</strong> cuentan los tiempos extras ni penales, a menos que se especifique lo contrario.</p>
+          </section>
+
+          <section>
+            <h3 className="font-black text-blue-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <span>3️⃣</span> Partidos Aplazados o Suspendidos
+            </h3>
+            <p className="text-slate-400">Si un partido se suspende ya iniciado, se toma como válido el marcador en ese momento. Si se cancela antes de iniciar, se declarará como Empate (E) para modalidad clásica, y 0-0 para marcador exacto.</p>
+          </section>
+
+          <section className="bg-slate-950/50 p-4 rounded-xl border border-slate-800">
+            <h3 className="font-black text-amber-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+              <span>4️⃣</span> Dinámica por Modalidad
+            </h3>
+            <div className="space-y-4">
+              <div>
+                <span className="font-bold text-white uppercase text-xs">⚽ Clásica (L-E-V):</span>
+                <p className="text-slate-400 text-xs mt-1">Gana quien acumule más aciertos pronosticando Local, Empate o Visitante.</p>
+              </div>
+              <div className="space-y-1.5">
+                <span className="font-bold text-white uppercase text-xs">🎯 Marcador Exacto:</span>
+                <div className="flex items-start gap-2 text-xs text-slate-400"><span className="text-green-500 text-base leading-none">🟢</span> <span><strong>Acierto Exacto (3 pts):</strong> Atinar a los goles exactos de ambos equipos.</span></div>
+                <div className="flex items-start gap-2 text-xs text-slate-400"><span className="text-amber-500 text-base leading-none">🟡</span> <span><strong>Tendencia (1 pt):</strong> Fallar en los goles, pero atinarle a qué equipo ganó o si fue empate.</span></div>
+                <div className="flex items-start gap-2 text-xs text-slate-400"><span className="text-red-500 text-base leading-none">🔴</span> <span><strong>Fallo (0 pts):</strong> No atinar ni al ganador ni a los goles.</span></div>
+              </div>
+              <div>
+                <span className="font-bold text-white uppercase text-xs">🎲 Sorteo (Acceso Virtual):</span>
+                <p className="text-slate-400 text-xs mt-1">Adquieres pases a ciegas. Al llenarse la sala o llegar el cierre, el sistema asignará aleatoriamente un equipo por pase. Ganas si tu equipo resulta victorioso.</p>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <h3 className="font-black text-blue-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <span>5️⃣</span> Criterios de Desempate
+            </h3>
+            <p className="text-slate-400">Si hay empate en puntos, se decide por la predicción de <strong className="text-slate-200">Goles Totales</strong> (quien se acerque más al número real, sin importar si se pasa o le falta). En la modalidad Clásica lo ingresas manualmente, en Marcador Exacto es la suma automática de tus pronósticos.</p>
+          </section>
+
+          <section>
+            <h3 className="font-black text-blue-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <span>6️⃣</span> Empates Perfectos (Bolsa)
+            </h3>
+            <ul className="list-disc pl-5 space-y-1 text-slate-400">
+              <li><strong className="text-amber-400">De paga:</strong> Se sumarán las bolsas de los lugares ocupados y se dividirá el dinero en partes iguales.</li>
+              <li><strong className="text-green-400">Gratis (Promocional):</strong> Se respetará el premio completo para todos los que empaten en primer lugar.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h3 className="font-black text-blue-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <span>7️⃣</span> Actualización y Premiación
+            </h3>
+            <p className="text-slate-400">Contamos con un margen de tolerancia de hasta 24 horas posteriores al partido para actualizar resultados. El pago de premios se realizará a más tardar el siguiente día hábil tras concluir la jornada.</p>
+          </section>
+
+          <section>
+            <h3 className="font-black text-blue-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <span>8️⃣</span> Cancelación y Reembolsos
+            </h3>
+            <p className="text-slate-400">En caso de fallas mayores o cancelación oficial de más de la mitad de los partidos, la quiniela será anulada. Para Sorteos, si no se llena el cupo mínimo, la administración decide si se realiza o se anula. Toda quiniela anulada resultará en un reembolso íntegro a tu saldo.</p>
+          </section>
+
+        </div>
+
+        {/* FOOTER */}
+        <div className="p-4 md:p-5 border-t border-slate-800 shrink-0 bg-slate-900/80 rounded-b-2xl flex flex-col sm:flex-row gap-3">
+          <button 
+            onClick={onClose}
+            className="flex-1 py-3 rounded-xl font-black uppercase text-xs tracking-widest text-slate-400 bg-slate-800 hover:bg-slate-700 transition-colors"
+          >
+            Volver
+          </button>
+          <button 
+            onClick={onAccept}
+            className="flex-1 py-3 rounded-xl font-black uppercase text-xs tracking-widest text-white bg-green-600 hover:bg-green-500 shadow-[0_0_15px_rgba(22,163,74,0.3)] transition-all"
+          >
+            Aceptar y Continuar
+          </button>
+        </div>
+
       </div>
     </div>
-  );
+  )
 }

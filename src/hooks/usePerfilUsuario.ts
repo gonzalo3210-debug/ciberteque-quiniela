@@ -8,7 +8,7 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
   const [cargando, setCargando] = useState(true)
   
   const [subiendoAvatar, setSubiendoAvatar] = useState(false)
-  const [subiendoPortada, setSubiendoPortada] = useState(false) // 🆕 ESTADO DE LA PORTADA
+  const [subiendoPortada, setSubiendoPortada] = useState(false) 
   const [guardandoPreferencias, setGuardandoPreferencias] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -27,11 +27,30 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
       try {
         const { data: userData, error: userErr } = await supabase
           .from('usuarios')
-          .select('*') // Trae todo, incluyendo campos nulos y portada_url
+          .select('*') 
           .eq('id', usuarioActivo.id)
           .single();
           
         if (userErr) throw userErr;
+
+        // ⚡ INGENIERÍA: CÁLCULO DE GANANCIAS (LIBRO MAYOR)
+        // Consultamos todas las transacciones positivas del usuario
+        const { data: txData } = await supabase
+          .from('transacciones_creditos')
+          .select('cantidad, descripcion')
+          .eq('usuario_id', usuarioActivo.id)
+          .gt('cantidad', 0); 
+
+        if (txData) {
+          // Filtramos y sumamos solo aquellas cuya descripción indique que es un premio
+          const totalCalculado = txData
+            .filter((tx: any) => tx.descripcion && tx.descripcion.toUpperCase().includes('PREMIO'))
+            .reduce((suma: number, tx: any) => suma + tx.cantidad, 0);
+          
+          // Sobrescribimos el dato estático de la BD con el cálculo matemático real
+          userData.total_ganado = totalCalculado;
+        }
+
         if (isMounted) setPerfil(userData);
 
         const { data: eqData } = await supabase.from('equipos').select('id, nombre, logo_url, liga');
@@ -112,7 +131,6 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
     return () => { isMounted = false; }
   }, [usuarioActivo?.id]);
 
-  // 📷 SUBIR FOTO DE PERFIL BLINDADA ANTI-CACHÉ
   const subirAvatar = async (e: any) => {
     try {
       setSubiendoAvatar(true);
@@ -120,7 +138,6 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
       if (!file) return;
 
       const fileExt = file.name.split('.').pop() || 'jpg';
-      // 🔥 BLINDAJE: Usamos Date.now() para que Supabase no cachee la imagen anterior
       const filePath = `avatar_${usuarioActivo.id}_${Date.now()}.${fileExt}`;
 
       const { error: uploadError } = await supabase.storage
@@ -143,11 +160,10 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
       console.error(error);
     } finally {
       setSubiendoAvatar(false);
-      if(e.target) e.target.value = ''; // Reseteamos input
+      if(e.target) e.target.value = ''; 
     }
   };
 
-  // 🖼️ SUBIR FOTO DE PORTADA BLINDADA ANTI-CACHÉ
   const subirPortada = async (e: any) => {
     try {
       setSubiendoPortada(true);
@@ -165,14 +181,11 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
 
       const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
       
-      // 🔥 FIX CLAVE: Forzamos el timestamp directo en la URL que se guarda
       const linkPublico = `${data.publicUrl}?t=${Date.now()}`;
 
-      // Guardamos en el cajón de la BD
       const { error: dbError } = await supabase.from('usuarios').update({ portada_url: linkPublico }).eq('id', usuarioActivo.id);
       if (dbError) throw dbError;
       
-      // 🔥 FIX CLAVE: Sincronizamos localmente y con la app padre
       setPerfil((prev: any) => ({ ...prev, portada_url: linkPublico }));
       if (onUpdate) onUpdate({ portada_url: linkPublico });
       
@@ -183,7 +196,7 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
       console.error("Detalle del error al subir portada:", error);
     } finally {
       setSubiendoPortada(false);
-      if(e.target) e.target.value = ''; // Reseteamos input
+      if(e.target) e.target.value = ''; 
     }
   };
 

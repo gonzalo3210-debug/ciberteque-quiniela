@@ -146,7 +146,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
     return equipo?.logo_url || 'https://a.espncdn.com/i/teamlogos/default-soccer-35.png'
   }
 
-  // ⚡ INGENIERÍA: Ahora pasamos la modalidad al estado de edición
   const abrirModalEdicion = (grupo: any, ticket: any) => {
     setTicketEditando({
       ticketId: ticket.id,
@@ -159,7 +158,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
     setNuevosGoles(ticket.goles || 0) 
   }
 
-  // ⚡ INGENIERÍA: Cálculo en tiempo real de goles exactos para edición
   const golesAutomaticosEdicion = ticketEditando?.modalidad === 'marcador_exacto' 
     ? Object.values(nuevasSelecciones).reduce((acc: number, val: string) => {
         if (!val) return acc;
@@ -172,13 +170,12 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
       }, 0)
     : 0;
 
-  // ⚡ INGENIERÍA: Validación estricta para evitar guardar marcadores incompletos
   const esEdicionValida = () => {
     if (!ticketEditando) return false;
     if (ticketEditando.modalidad === 'marcador_exacto') {
       return ticketEditando.partidos.every((p: any) => /^\d+-\d+$/.test(nuevasSelecciones[p.id]?.trim()));
     }
-    return true; // Clásica siempre es válida si tiene L, E, V
+    return true; 
   }
 
   const guardarEdicion = async () => {
@@ -198,7 +195,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
       const { error: errorPronosticos } = await supabase.from('pronosticos').upsert(pronosticosActualizados)
       if (errorPronosticos) throw errorPronosticos
 
-      // ⚡ INGENIERÍA: Inyectamos los goles automáticos si es exacto
       const golesParseados = ticketEditando.modalidad === 'marcador_exacto' 
         ? golesAutomaticosEdicion 
         : (nuevosGoles === '' ? 0 : Number(nuevosGoles));
@@ -244,7 +240,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
     return (
       <div className={`bg-slate-900 border rounded-xl overflow-hidden shadow-xl transition-all mb-6 ${esActivo ? (esSorteo ? 'border-blue-600/40 shadow-[0_0_15px_rgba(37,99,235,0.1)]' : 'border-amber-600/40 shadow-[0_0_15px_rgba(217,119,6,0.1)]') : 'border-slate-700 opacity-95'}`}>
         
-        {/* CABECERA */}
         <div className={`px-4 py-3 border-b flex flex-col sm:flex-row justify-between items-center gap-2 ${esActivo ? (esSorteo ? 'bg-gradient-to-r from-blue-900/20 to-slate-900 border-blue-800/40' : 'bg-gradient-to-r from-amber-900/20 to-slate-900 border-amber-800/40') : 'bg-slate-950 border-slate-700'}`}>
           <div className="flex items-center gap-3 w-full sm:w-auto">
             <span className="text-2xl drop-shadow-md">{esActivo ? (esSorteo ? '🎲' : (estaEnJuego ? '⚔️' : '🔥')) : '✅'}</span>
@@ -267,7 +262,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
           )}
         </div>
         
-        {/* CONTENIDO: CONDICIONAL (SORTEO VS TRADICIONAL) */}
         {esSorteo ? (
           <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 bg-blue-950/10">
             {grupo.tickets.map((t: any, idx: number) => {
@@ -364,19 +358,44 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
                       </td>
 
                       {grupo.tickets.map((t: any) => {
-                        const pick = t.selecciones[p.id];
+                        const pick = t.selecciones[p.id] || '';
                         let color = 'bg-slate-800 text-slate-300';
                         
                         if (p.real) {
-                          if (pick === p.real) color = 'bg-green-600 text-white shadow-[0_0_8px_rgba(34,197,94,0.3)] border border-green-500'; 
-                          else color = 'bg-red-950/60 text-red-500/50 border border-red-900/30'; 
-                        } else {
-                          // Ajuste visual: Si es exacto pero no hay real, se muestra grisáceo
-                          if (pick === 'L' || pick === 'E' || pick === 'V') {
-                              if (pick === 'E') color = 'bg-slate-700 text-slate-300 border border-slate-600';
-                              else color = 'bg-blue-900/60 text-blue-300 border border-blue-800';
+                          if (grupo.modalidad === 'marcador_exacto') {
+                            const [pickL, pickV] = pick.split('-').map(Number);
+                            const realL = p.goles_local;
+                            const realV = p.goles_visitante;
+
+                            if (!isNaN(pickL) && !isNaN(pickV) && realL !== null && realV !== null) {
+                              // Evaluamos la tendencia que pronosticó el usuario
+                              const tendenciaPick = pickL > pickV ? 'L' : pickL < pickV ? 'V' : 'E';
+                              
+                              if (pickL === realL && pickV === realV) {
+                                // 🟢 Acierto Exacto
+                                color = 'bg-green-600 text-white shadow-[0_0_8px_rgba(34,197,94,0.3)] border border-green-500';
+                              } else if (tendenciaPick === p.real) {
+                                // 🟡 Acierto de Tendencia (Atinó quién ganó o el empate)
+                                color = 'bg-amber-600 text-white shadow-[0_0_8px_rgba(217,119,6,0.3)] border border-amber-500';
+                              } else {
+                                // 🔴 Fallo Total
+                                color = 'bg-red-950/60 text-red-500/50 border border-red-900/30';
+                              }
+                            } else {
+                              color = 'bg-red-950/60 text-red-500/50 border border-red-900/30';
+                            }
                           } else {
-                              color = 'bg-slate-800 text-slate-300 border border-slate-700'; // Estilo base para X-Y
+                            // Modalidad Clásica L-E-V
+                            if (pick === p.real) color = 'bg-green-600 text-white shadow-[0_0_8px_rgba(34,197,94,0.3)] border border-green-500'; 
+                            else color = 'bg-red-950/60 text-red-500/50 border border-red-900/30'; 
+                          }
+                        } else {
+                          // Ajuste visual pre-partido
+                          if (grupo.modalidad === 'marcador_exacto') {
+                             color = 'bg-slate-800 text-slate-300 border border-slate-700'; 
+                          } else {
+                             if (pick === 'E') color = 'bg-slate-700 text-slate-300 border border-slate-600';
+                             else color = 'bg-blue-900/60 text-blue-300 border border-blue-800';
                           }
                         }
 
@@ -474,7 +493,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
         )}
       </div>
 
-      {/* 🚀 MODAL DE EDICIÓN FLOTANTE */}
       {ticketEditando && (
         <div className="fixed inset-0 z-[100] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-amber-600/50 max-w-md w-full p-4 md:p-6 rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
@@ -497,7 +515,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
                 const seleccionActual = nuevasSelecciones[p.id] || ''
                 const esExacto = ticketEditando.modalidad === 'marcador_exacto'
                 
-                // Extraemos goles si es modalidad exacta
                 const [golesL, golesV] = esExacto ? seleccionActual.split('-') : ['', '']
                 const valL = golesL !== undefined ? golesL : ''
                 const valV = golesV !== undefined ? golesV : ''
@@ -518,7 +535,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
 
                     <div className="flex gap-1.5 w-full mt-1 justify-center">
                       {esExacto ? (
-                        // ⚡ RENDERIZADO CONDICIONAL: INPUTS NUMÉRICOS
                         <div className="flex items-center justify-center gap-1.5 w-full max-w-[150px]">
                           <input
                             type="number"
@@ -539,7 +555,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
                           />
                         </div>
                       ) : (
-                        // RENDERIZADO TRADICIONAL: BOTONES L-E-V
                         ['L', 'E', 'V'].map(opc => (
                           <button
                             key={opc}
@@ -560,7 +575,6 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
               })}
             </div>
 
-            {/* ⚡ UI INTELIGENTE: GOLES AUTOMÁTICOS VS MANUALES EN EDICIÓN */}
             {ticketEditando.modalidad === 'marcador_exacto' ? (
                <div className="bg-green-950/20 border border-green-900/40 p-3 rounded-lg mb-4 shrink-0 flex justify-between items-center shadow-inner">
                  <div>

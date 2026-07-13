@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
 import { useCartelera } from '@/hooks/useCartelera'
+import { useCuentaRegresiva } from '@/hooks/useCuentaRegresiva' // 🆕 NUEVA IMPORTACIÓN MODULAR
 import ModalReglas from '@/components/ModalReglas' 
 
 export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioActivo: any, actualizarSaldo: (nuevoSaldo: number) => void }) {
@@ -10,6 +11,9 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
     lugaresDisponibles, cantidadBoletos, golesAutomaticos, setCantidadBoletos, setGolesTotales, setMostrarReglas,
     setAceptoReglas, cambiarQuinielaVisible, seleccionarOpcion, guardarQuiniela, obtenerLogo
   } = useCartelera(usuarioActivo, actualizarSaldo)
+
+  // ⚡ INGENIERÍA: Inyectamos nuestro reloj maestro
+  const { textoCuenta, esUrgente, yaCerro } = useCuentaRegresiva(quinielaActual?.fecha_cierre)
 
   const [mensajeUI, setMensajeUI] = useState({ tipo: '', texto: '' })
   const procesandoRef = useRef(false)
@@ -125,6 +129,18 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
             <span className="bg-purple-950/40 border border-purple-900/50 text-purple-400 px-2.5 py-1 rounded-lg text-[9px] md:text-[10px] font-black uppercase tracking-widest">
               🏆 Premiación: {prem === 'unico' ? 'Ganador Único' : prem === 'top2' ? 'Top 2' : prem === 'top3' ? 'Top 3' : 'Promocional'}
             </span>
+            
+            {/* ⚡ RELOJ FOMO DINÁMICO */}
+            {textoCuenta && (
+              <span className={`px-2.5 py-1 rounded-lg text-[9px] md:text-[10px] font-black uppercase tracking-widest shadow-inner flex items-center gap-1 border ${
+                yaCerro ? 'bg-slate-950/40 border-slate-900/50 text-slate-500' :
+                esUrgente ? 'bg-red-950/40 border-red-900/50 text-red-400' : 
+                'bg-slate-800/40 border-slate-700/50 text-slate-300'
+              }`}>
+                <span className={esUrgente && !yaCerro ? "animate-pulse" : ""}>⏱️</span> {textoCuenta}
+              </span>
+            )}
+
             {esSorteo && (
               <span className={`px-2.5 py-1 rounded-lg text-[9px] md:text-[10px] font-black uppercase tracking-widest border ${lugaresDisponibles > 0 ? 'bg-amber-950/40 border-amber-900/50 text-amber-400' : 'bg-red-950/40 border-red-900/50 text-red-500'}`}>
                 🎰 {lugaresDisponibles > 0 ? `Cupo Disponible: ${lugaresDisponibles}/8` : 'SALA LLENA (0/8)'}
@@ -150,9 +166,9 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
             <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 w-full max-w-xs flex flex-col items-center gap-3 shadow-inner">
                <label className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">¿Cuántos pases deseas?</label>
                <div className="flex items-center gap-4">
-                 <button onClick={restarBoleto} disabled={cantidadBoletos <= 1 || bloqueadoPorParticipacion} className="w-10 h-10 rounded-full bg-slate-800 hover:bg-slate-700 text-white font-black text-xl flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-slate-600 shadow-sm">-</button>
+                 <button onClick={restarBoleto} disabled={cantidadBoletos <= 1 || bloqueadoPorParticipacion || yaCerro} className="w-10 h-10 rounded-full bg-slate-800 hover:bg-slate-700 text-white font-black text-xl flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-slate-600 shadow-sm">-</button>
                  <span className="text-4xl font-black text-white w-12 text-center">{cantidadBoletos}</span>
-                 <button onClick={sumarBoleto} disabled={cantidadBoletos >= lugaresDisponibles || bloqueadoPorParticipacion} className="w-10 h-10 rounded-full bg-slate-800 hover:bg-slate-700 text-white font-black text-xl flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-slate-600 shadow-sm">+</button>
+                 <button onClick={sumarBoleto} disabled={cantidadBoletos >= lugaresDisponibles || bloqueadoPorParticipacion || yaCerro} className="w-10 h-10 rounded-full bg-slate-800 hover:bg-slate-700 text-white font-black text-xl flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-slate-600 shadow-sm">+</button>
                </div>
                <div className="mt-2 text-blue-400 font-black uppercase text-sm bg-blue-950/30 px-4 py-1.5 rounded-lg border border-blue-900/50">
                  Total a Pagar: ${costoTotal}.00
@@ -174,7 +190,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
                 const valV = golesV !== undefined ? golesV : '';
 
                 return (
-                  <div key={partido.id} className={`bg-slate-800/60 px-3 py-2.5 md:p-3 rounded-lg border flex flex-col md:flex-row justify-between items-center gap-3 md:gap-4 transition-all shadow-sm relative group ${bloqueadoPorParticipacion ? 'border-slate-800 opacity-60' : 'border-slate-700 hover:border-slate-500 hover:bg-slate-800/90'}`}>
+                  <div key={partido.id} className={`bg-slate-800/60 px-3 py-2.5 md:p-3 rounded-lg border flex flex-col md:flex-row justify-between items-center gap-3 md:gap-4 transition-all shadow-sm relative group ${(bloqueadoPorParticipacion || yaCerro) ? 'border-slate-800 opacity-60' : 'border-slate-700 hover:border-slate-500 hover:bg-slate-800/90'}`}>
                     
                     <div className="w-full md:w-[80px] text-center md:text-left border-b md:border-b-0 md:border-r border-slate-700/50 pb-2 md:pb-0 md:pr-3 flex md:block justify-center items-center gap-2 shrink-0">
                       {fechaObj ? (
@@ -208,7 +224,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
                               setMensajeUI({ tipo: '', texto: '' }); 
                               seleccionarOpcion(partido.id, `${e.target.value}-${valV}`); 
                             }}
-                            disabled={bloqueadoPorParticipacion}
+                            disabled={bloqueadoPorParticipacion || yaCerro}
                             className="w-12 bg-slate-900 border border-slate-700 rounded-md p-1.5 text-center text-sm font-black text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-inner transition-all"
                           />
                           <span className="text-slate-500 font-bold text-xs">-</span>
@@ -221,7 +237,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
                               setMensajeUI({ tipo: '', texto: '' }); 
                               seleccionarOpcion(partido.id, `${valL}-${e.target.value}`); 
                             }}
-                            disabled={bloqueadoPorParticipacion}
+                            disabled={bloqueadoPorParticipacion || yaCerro}
                             className="w-12 bg-slate-900 border border-slate-700 rounded-md p-1.5 text-center text-sm font-black text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-inner transition-all"
                           />
                         </div>
@@ -231,10 +247,10 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
                             <button 
                               key={opc}
                               onClick={() => { setMensajeUI({ tipo: '', texto: '' }); seleccionarOpcion(partido.id, opc); }}
-                              disabled={bloqueadoPorParticipacion}
+                              disabled={bloqueadoPorParticipacion || yaCerro}
                               className={`flex-1 py-1.5 md:py-2 rounded text-xs font-black transition-all border shadow-sm ${
                                 seleccion === opc ? 'bg-blue-600 border-blue-400 text-white shadow-[0_0_10px_rgba(37,99,235,0.4)] md:scale-105' : 'bg-slate-950 border-slate-700 text-slate-500 hover:text-slate-300'
-                              } ${bloqueadoPorParticipacion ? 'cursor-not-allowed' : ''}`}
+                              } ${(bloqueadoPorParticipacion || yaCerro) ? 'cursor-not-allowed' : ''}`}
                             >
                               {opc}
                             </button>
@@ -250,7 +266,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
 
             {/* ⚡ UI INTELIGENTE: CRITERIO DESEMPATE AUTOMÁTICO VS MANUAL */}
             {esMarcadorExacto ? (
-              <div className={`mt-6 mb-5 p-4 bg-green-950/20 border border-green-900/40 rounded-2xl max-w-[280px] mx-auto text-center shadow-inner z-10 relative ${bloqueadoPorParticipacion ? 'opacity-60' : ''}`}>
+              <div className={`mt-6 mb-5 p-4 bg-green-950/20 border border-green-900/40 rounded-2xl max-w-[280px] mx-auto text-center shadow-inner z-10 relative ${(bloqueadoPorParticipacion || yaCerro) ? 'opacity-60' : ''}`}>
                 <label className="block text-green-400 font-black uppercase text-[9px] md:text-[10px] tracking-[0.2em] mb-1">Criterio Desempate</label>
                 <p className="text-slate-400 text-[8px] md:text-[9px] uppercase mb-3 font-bold tracking-tight">Suma Automática de Goles</p>
                 <div className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-center text-3xl font-black text-white shadow-inner">
@@ -258,13 +274,13 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
                 </div>
               </div>
             ) : (
-              <div className={`mt-8 mb-5 p-4 bg-blue-950/40 border border-blue-900/50 rounded-2xl max-w-[280px] mx-auto text-center shadow-xl z-10 relative ${bloqueadoPorParticipacion ? 'opacity-60' : ''}`}>
+              <div className={`mt-8 mb-5 p-4 bg-blue-950/40 border border-blue-900/50 rounded-2xl max-w-[280px] mx-auto text-center shadow-xl z-10 relative ${(bloqueadoPorParticipacion || yaCerro) ? 'opacity-60' : ''}`}>
                 <label className="block text-blue-400 font-black uppercase text-[9px] md:text-[10px] tracking-[0.2em] mb-1">Criterio Desempate</label>
                 <p className="text-slate-400 text-[8px] md:text-[9px] uppercase mb-3 font-bold tracking-tight">Total de goles en la jornada</p>
                 <input 
                   type="number" placeholder="00" value={golesTotales}
                   onChange={(e) => { setMensajeUI({ tipo: '', texto: '' }); setGolesTotales(e.target.value); }}
-                  disabled={bloqueadoPorParticipacion}
+                  disabled={bloqueadoPorParticipacion || yaCerro}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-3 text-center text-3xl font-black text-white focus:border-blue-500 outline-none transition-all disabled:cursor-not-allowed disabled:text-slate-500"
                 />
               </div>
@@ -295,7 +311,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
           <input 
             type="checkbox" id="check-reglas" checked={aceptoReglas} 
             onChange={(e) => { setMensajeUI({ tipo: '', texto: '' }); setAceptoReglas(e.target.checked); }} 
-            disabled={bloqueadoPorParticipacion} 
+            disabled={bloqueadoPorParticipacion || yaCerro} 
             className="mt-0.5 w-3.5 h-3.5 accent-green-600 rounded border-slate-700 bg-slate-900 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50" 
           />
           <label htmlFor="check-reglas" className="text-[9px] font-bold uppercase tracking-wide text-slate-400 select-none">
@@ -317,10 +333,11 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
         <div className="flex flex-col items-center pt-2 border-t border-slate-800 z-10 relative">
           <button 
             onClick={handleGuardar}
-            // ⚡ BOTÓN BLOQUEADO HASTA QUE SE LLENEN LOS PARTIDOS
-            disabled={guardando || !aceptoReglas || bloqueadoPorParticipacion || mensajeUI.tipo === 'exito' || (!esSorteo && faltanPartidos)}
+            // ⚡ BOTÓN BLOQUEADO SI CUALQUIERA DE ESTAS CONDICIONES SE CUMPLE
+            disabled={guardando || !aceptoReglas || bloqueadoPorParticipacion || mensajeUI.tipo === 'exito' || (!esSorteo && faltanPartidos) || yaCerro}
             className={`w-full max-w-[280px] py-3 md:py-4 rounded-xl font-black uppercase text-xs tracking-widest transition-all ${
               mensajeUI.tipo === 'exito' ? 'bg-green-900 text-green-400 border border-green-700 cursor-default'
+              : yaCerro ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700 opacity-80'
               : bloqueadoPorParticipacion && esSorteo ? 'bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-700 shadow-inner'
               : bloqueadoPorParticipacion && esGratis ? 'bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-700 shadow-inner' 
               : (!esSorteo && faltanPartidos) ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700 opacity-80'
@@ -330,6 +347,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
             }`}
           >
             {mensajeUI.tipo === 'exito' ? '¡LISTO!' 
+            : yaCerro ? 'JORNADA CERRADA'
             : bloqueadoPorParticipacion && esSorteo ? 'SALA LLENA (AGOTADO)'
             : bloqueadoPorParticipacion && esGratis ? 'PROMO USADA (MÁX 1)' 
             : (!esSorteo && faltanPartidos) ? 'LLENA TU TICKET'
