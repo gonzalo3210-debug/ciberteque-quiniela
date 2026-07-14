@@ -7,6 +7,7 @@ export default function Posiciones() {
   const [quinielaActiva, setQuinielaActiva] = useState<any>(null)
   const [historial, setHistorial] = useState<any[]>([])
   const [cargando, setCargando] = useState(true)
+  const [errorCarga, setErrorCarga] = useState<string | null>(null) // ⚡ MEJORA UX: Estado de error
   
   const [quinielaExpandidaId, setQuinielaExpandidaId] = useState<string | null>(null)
   const [jugadorExpandidoId, setJugadorExpandidoId] = useState<string | null>(null)
@@ -15,13 +16,16 @@ export default function Posiciones() {
 
   const cargarDatos = useCallback(async (esCargaSilenciosa = false) => {
     if (!esCargaSilenciosa) setCargando(true)
+    setErrorCarga(null)
 
     try {
-      const { data: qData } = await supabase
+      const { data: qData, error: qError } = await supabase
         .from('quinielas')
         .select('*')
         .order('fecha_cierre', { ascending: false }) 
         .limit(10)
+
+      if (qError) throw qError;
 
       if (!qData || qData.length === 0) {
         setCargando(false)
@@ -30,9 +34,11 @@ export default function Posiciones() {
 
       const quinielaIds = qData.map(q => q.id)
 
-      const { data: pData } = await supabase.from('partidos').select('*').in('quiniela_id', quinielaIds).order('fecha_hora', { ascending: true })
+      const { data: pData, error: pError } = await supabase.from('partidos').select('*').in('quiniela_id', quinielaIds).order('fecha_hora', { ascending: true })
+      if (pError) throw pError;
       
-      const { data: tData } = await supabase.from('tickets').select('id, usuario_id, quiniela_id, prediccion_goles_total, puntos_totales, equipo_asignado_id, pronosticos(partido_id, eleccion_usuario)').in('quiniela_id', quinielaIds)
+      const { data: tData, error: tError } = await supabase.from('tickets').select('id, usuario_id, quiniela_id, prediccion_goles_total, puntos_totales, equipo_asignado_id, pronosticos(partido_id, eleccion_usuario)').in('quiniela_id', quinielaIds)
+      if (tError) throw tError;
       
       const { data: uData } = await supabase.from('usuarios').select('id, nombre, avatar_url')
       const { data: eData } = await supabase.from('equipos').select('id, nombre, logo_url')
@@ -43,7 +49,7 @@ export default function Posiciones() {
       const mapaEquipos: Record<string, any> = {}
       if (eData) eData.forEach(e => mapaEquipos[e.id] = e)
 
-      // ⚡ Función modular interna para extraer tendencia L-E-V de un marcador
+      // Función para extraer tendencia L-E-V de un marcador
       const getLEV = (marcador: string) => {
         if (!marcador) return null;
         const limpio = marcador.replace(/\s+/g, '').toUpperCase();
@@ -68,7 +74,7 @@ export default function Posiciones() {
           const aciertos: Record<string, string> = {}
           const pronosticosTicket = ticket.pronosticos || [] 
 
-          // ⚡ LÓGICA DE PUNTUACIÓN HÍBRIDA BLINDADA
+          // LÓGICA DE PUNTUACIÓN HÍBRIDA BLINDADA
           if (q.modalidad !== 'sorteo') {
             pronosticosTicket.forEach((pron: any) => {
               const partido = partidosQ.find(p => p.id === pron.partido_id)
@@ -76,23 +82,19 @@ export default function Posiciones() {
                 const tieneResultado = partido.resultado_real !== null || (partido.goles_local !== null && partido.goles_visitante !== null);
                 
                 if (tieneResultado) {
-                  // 1. Limpiamos espacios en blanco del pick del usuario
                   const pickStr = pron.eleccion_usuario?.replace(/\s+/g, '') || '';
-                  
-                  // 2. Construimos el resultado real forzando formato "X-Y" si hay goles, evitando fallos si resultado_real guardó "L"
                   let realStr = '';
+                  
                   if (partido.goles_local !== null && partido.goles_visitante !== null) {
                     realStr = `${partido.goles_local}-${partido.goles_visitante}`;
                   } else {
                     realStr = partido.resultado_real?.replace(/\s+/g, '') || '';
                   }
 
-                  // 3. Comparación estricta
                   if (pickStr === realStr) {
                     puntos += (q.modalidad === 'marcador_exacto' ? 3 : 1);
                     aciertos[pron.partido_id] = 'acierto_exacto';
                   } else {
-                    // 4. Fallback a Tendencia (L, E, V)
                     const pickLEV = getLEV(pickStr);
                     const realLEV = getLEV(realStr) || getLEV(partido.resultado_real);
                     
@@ -192,8 +194,9 @@ export default function Posiciones() {
         return activas.length > 0 ? activas[0] : quinielasProcesadas[0]
       })
 
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error al cargar posiciones:", error)
+      setErrorCarga("Hubo un problema de red al cargar el ranking. Por favor, reintenta en unos segundos.")
     } finally {
       setCargando(false)
     }
@@ -243,16 +246,31 @@ export default function Posiciones() {
     )
   }
 
+  // ⚡ MEJORA UX: Renderizado de estado de error
+  if (errorCarga) {
+    return (
+      <div className="w-full max-w-md mx-auto mt-10 p-6 bg-red-950/30 border border-red-900/50 rounded-2xl text-center shadow-xl animate-in fade-in">
+        <span className="text-4xl mb-3 block">📡</span>
+        <h3 className="text-red-400 font-black uppercase tracking-widest text-lg mb-2">Error de Conexión</h3>
+        <p className="text-slate-400 text-sm mb-4">{errorCarga}</p>
+        <button onClick={() => cargarDatos()} className="bg-red-900/50 hover:bg-red-800 text-red-200 px-6 py-2 rounded-xl font-bold transition-colors">
+          Reintentar
+        </button>
+      </div>
+    )
+  }
+
   if (!quinielaActiva) return <div className="text-slate-500 italic text-center mt-10 text-sm">No hay datos de quinielas disponibles.</div>
 
   const totalJugadores = quinielaActiva.ranking.length
   const partidosTerminados = quinielaActiva.partidos?.filter((p: any) => p.es_final).length || 0
   
-  const fechaCierreCorta = quinielaActiva.fecha_cierre ? quinielaActiva.fecha_cierre.substring(0, 16) : null
-  const fechaCierre = new Date(fechaCierreCorta || quinielaActiva.fecha_cierre)
-  const yaPasoCierre = new Date() >= fechaCierre
+  // ⚡ CORRECCIÓN DE BUG: Respetar la zona horaria UTC proveniente de Supabase
+  const fechaCierre = new Date(quinielaActiva.fecha_cierre)
+  const yaPasoCierre = new Date().getTime() >= fechaCierre.getTime()
   
-  const mostrarPicks = quinielaActiva.estado === 'cerrada' || yaPasoCierre
+  // ⚡ CORRECCIÓN DE BUG: Blindaje del string contra espacios y minúsculas/mayúsculas en DB
+  const mostrarPicks = quinielaActiva.estado?.trim().toLowerCase() === 'cerrada' || yaPasoCierre
   const esSorteo = quinielaActiva.modalidad === 'sorteo'
 
   const opcionesFecha: Intl.DateTimeFormatOptions = { day: '2-digit', month: 'short', hour: '2-digit', minute:'2-digit' };
@@ -284,7 +302,7 @@ export default function Posiciones() {
                     : 'bg-slate-950 border border-slate-700 text-slate-500 hover:text-slate-300'
                 }`}
               >
-                {qa.modalidad === 'sorteo' ? '🎲' : '⚽'} {qa.nombre_jornada} {qa.estado === 'cerrada' ? '(En Juego)' : ''}
+                {qa.modalidad === 'sorteo' ? '🎲' : '⚽'} {qa.nombre_jornada} {qa.estado?.trim().toLowerCase() === 'cerrada' ? '(En Juego)' : ''}
               </button>
             ))}
           </div>
@@ -294,7 +312,7 @@ export default function Posiciones() {
           <div className="absolute -right-4 -top-4 p-2 opacity-5 text-7xl select-none">{esSorteo ? '🎟️' : '💰'}</div>
           
           <h2 className={`text-center text-lg md:text-xl font-black uppercase italic tracking-tight mb-0.5 relative z-10 ${esSorteo ? 'text-blue-400' : 'text-white'}`}>
-            {esSorteo ? 'ZONA DE SUPERVIVENCIA' : (quinielaActiva.estado === 'abierta' ? 'RANKING EN VIVO' : 'RESULTADOS EN JUEGO')}
+            {esSorteo ? 'ZONA DE SUPERVIVENCIA' : (quinielaActiva.estado?.trim().toLowerCase() === 'abierta' ? 'RANKING EN VIVO' : 'RESULTADOS EN JUEGO')}
           </h2>
           <p className="text-center text-slate-400 text-[10px] font-black uppercase tracking-widest mb-3">{quinielaActiva.nombre_jornada}</p>
           
