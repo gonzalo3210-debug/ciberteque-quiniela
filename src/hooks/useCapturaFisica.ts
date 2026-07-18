@@ -20,7 +20,7 @@ export function useCapturaFisica(actualizarSaldoGlobal?: (id: string, nuevo: num
   const [linkWaReciente, setLinkWaReciente] = useState<string | null>(null);
   const [ticketAImprimir, setTicketAImprimir] = useState<any>(null);
 
-  // ⚡ NUEVO: Estado para saber cuántos lugares hay ocupados en el Sorteo
+  // ⚡ Estado para saber cuántos lugares hay ocupados en el Sorteo
   const [ocupacionSorteo, setOcupacionSorteo] = useState(0);
 
   // --- EFECTOS INICIALES ---
@@ -29,7 +29,21 @@ export function useCapturaFisica(actualizarSaldoGlobal?: (id: string, nuevo: num
     cargarPartidosJornada();
   }, []);
 
-  // --- FUNCIONES ---
+  // 🧠 NUEVO: Cálculo automático de goles movido al Hook (Modularidad Estricta)
+  useEffect(() => {
+    if (quiniela?.modalidad === 'marcador_exacto') {
+      let sumaTotal = 0;
+      Object.values(capSelecciones).forEach(seleccion => {
+        if (typeof seleccion === 'string' && seleccion.includes('-')) {
+          const [l, v] = seleccion.split('-');
+          sumaTotal += (parseInt(l) || 0) + (parseInt(v) || 0);
+        }
+      });
+      setCapGoles(sumaTotal.toString());
+    }
+  }, [capSelecciones, quiniela?.modalidad]);
+
+  // --- FUNCIONES DE CARGA ---
   const cargarEquiposDB = async () => {
     try {
       const { data: eq, error } = await supabase.from('equipos').select('nombre, logo_url');
@@ -52,20 +66,19 @@ export function useCapturaFisica(actualizarSaldoGlobal?: (id: string, nuevo: num
 
       if (abiertas && abiertas.length > 0) {
         setQuinielasAbiertas(abiertas);
-        seleccionarQuiniela(abiertas[0]); // Usamos la función para que calcule la ocupación
+        seleccionarQuiniela(abiertas[0]); 
       }
     } catch (error: any) {
       toast.error('Error al cargar las jornadas activas.');
     }
   };
 
-  // 👈 ACTUALIZADO: Consultar ocupación si es Sorteo
   const seleccionarQuiniela = async (qa: any) => {
     setQuiniela(qa);
     setPartidos(qa.partidos || []);
     setCapSelecciones({}); 
     
-    // ⚡ NUEVO: Calcular cuántos lugares van si es sorteo
+    // Calcular cuántos lugares van si es modalidad sorteo[cite: 1]
     if (qa.modalidad === 'sorteo') {
       const { count } = await supabase.from('tickets').select('id', { count: 'exact' }).eq('quiniela_id', qa.id);
       setOcupacionSorteo(count || 0);
@@ -88,10 +101,36 @@ export function useCapturaFisica(actualizarSaldoGlobal?: (id: string, nuevo: num
     }
   };
 
+  // 🧠 NUEVO: Manejo del estado del Marcador Exacto encapsulado en el Hook
+  const obtenerMarcador = (partidoId: string, equipo: 'L' | 'V') => {
+    const seleccion = capSelecciones[partidoId];
+    if (!seleccion || !seleccion.includes('-')) return '';
+    const [l, v] = seleccion.split('-');
+    return equipo === 'L' ? l : v;
+  };
+
+  const cambiarMarcador = (partidoId: string, equipo: 'L' | 'V', valor: string) => {
+    // 1. Limpiamos: permitimos string vacío o solo números
+    const val = valor === '' ? '' : valor.replace(/[^0-9]/g, '');
+    
+    // 2. Inicializamos con un guion simple en lugar de '0-0'
+    let seleccionActual = capSelecciones[partidoId] || '-';
+    if (!seleccionActual.includes('-')) seleccionActual = '-';
+    
+    let [l, v] = seleccionActual.split('-');
+    if (equipo === 'L') l = val;
+    else v = val;
+    
+    setCapSelecciones(prev => ({
+      ...prev,
+      [partidoId]: `${l}-${v}`
+    }));
+  };
+
+  // --- LÓGICA DE GUARDADO ---
   const guardarCapturaFisica = async () => {
     const esSorteo = quiniela?.modalidad === 'sorteo';
 
-    // 👈 ACTUALIZADO: La validación cambia dependiendo de la modalidad
     if (!capTelefono || !capNombre || (!esSorteo && !capGoles) || !quiniela) {
       return toast.error('Faltan datos por llenar.');
     }
@@ -130,7 +169,7 @@ export function useCapturaFisica(actualizarSaldoGlobal?: (id: string, nuevo: num
         }
       }
 
-      // 2. VALIDACIÓN DE PROMOCIONES GRATUITAS
+      // 2. VALIDACIÓN DE PROMOCIONES GRATUITAS[cite: 1]
       const esGratis = quiniela.precio_ticket === 0;
       if (esGratis) {
         const { data: tp } = await supabase.from('tickets').select('id').eq('usuario_id', uid).eq('quiniela_id', quiniela.id);
@@ -151,14 +190,20 @@ export function useCapturaFisica(actualizarSaldoGlobal?: (id: string, nuevo: num
         return;
       }
 
-      // Autocompletado inteligente (Omitido si es Sorteo)
+      // Autocompletado inteligente con corrección de blancos
       const esMarcadorExacto = quiniela.modalidad === 'marcador_exacto';
       const seleccionesFinales = { ...capSelecciones };
       
       if (!esSorteo) {
         partidos.forEach(p => { 
-          if (!seleccionesFinales[p.id]) {
-            seleccionesFinales[p.id] = esMarcadorExacto ? '0-0' : 'E'; 
+          let sel = seleccionesFinales[p.id];
+          if (esMarcadorExacto) {
+            // Reemplazamos campos vacíos o incompletos con '0-0' para la base de datos
+            if (!sel || sel === '-' || sel.startsWith('-') || sel.endsWith('-')) {
+              seleccionesFinales[p.id] = '0-0';
+            }
+          } else {
+            if (!sel) seleccionesFinales[p.id] = 'E'; 
           }
         });
       }
@@ -205,7 +250,7 @@ export function useCapturaFisica(actualizarSaldoGlobal?: (id: string, nuevo: num
         
       if (errTk) throw errTk;
       
-      // ⚡ NUEVO: Guardar Pronósticos SOLO si NO es sorteo
+      // Guardar Pronósticos SOLO si NO es sorteo
       if (!esSorteo) {
         const prons = Object.keys(seleccionesFinales).map(pId => ({ 
           ticket_id: tk.id, 
@@ -215,13 +260,12 @@ export function useCapturaFisica(actualizarSaldoGlobal?: (id: string, nuevo: num
         const { error: errProns } = await supabase.from('pronosticos').insert(prons);
         if (errProns) throw errProns;
       } else {
-        // Incrementamos la ocupación visualmente rápido
         setOcupacionSorteo(prev => prev + 1);
       }
       
       if (actualizarSaldoGlobal) actualizarSaldoGlobal(uid, nuevoCreditos + nuevoSaldoPesos);
 
-      // 6. GENERAR WHATSAPP Y TICKET DE IMPRESIÓN (⚡ ACTUALIZADO)
+      // 6. GENERAR WHATSAPP Y TICKET DE IMPRESIÓN
       let msgWa = '';
       if (esSorteo) {
         msgWa = `🎫 *SORTEO MUNDIAL CIBERTEQUE*\nHola ${capNombre}, tu lugar para la sala *${quiniela.nombre_jornada}* ha sido asegurado con éxito.\n\nEspera a que la sala se llene (8 participantes) para conocer qué equipo te será asignado aleatoriamente.\n\n🍀 ¡Mucha suerte!`;
@@ -260,28 +304,12 @@ export function useCapturaFisica(actualizarSaldoGlobal?: (id: string, nuevo: num
   };
 
   return {
-    quinielasAbiertas,
-    quiniela,
-    partidos,
-    equipos,
-    capTelefono,
-    setCapTelefono,
-    capNombre,
-    setCapNombre,
-    capUsuarioId,
-    setCapUsuarioId,
-    capSelecciones,
-    setCapSelecciones,
-    capGoles,
-    setCapGoles,
-    guardandoCaptura,
-    linkWaReciente,
-    setLinkWaReciente,
-    ticketAImprimir,
-    setTicketAImprimir,
-    ocupacionSorteo, // ⚡ Exportado
-    seleccionarQuiniela,
-    buscarClienteParaCaptura,
-    guardarCapturaFisica
+    quinielasAbiertas, quiniela, partidos, equipos,
+    capTelefono, setCapTelefono, capNombre, setCapNombre, capUsuarioId, setCapUsuarioId,
+    capSelecciones, setCapSelecciones, capGoles, setCapGoles, guardandoCaptura,
+    linkWaReciente, setLinkWaReciente, ticketAImprimir, setTicketAImprimir,
+    ocupacionSorteo,
+    seleccionarQuiniela, buscarClienteParaCaptura, guardarCapturaFisica,
+    obtenerMarcador, cambiarMarcador // ⚡ NUEVAS FUNCIONES EXPORTADAS
   };
 }

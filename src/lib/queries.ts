@@ -1,8 +1,14 @@
 import { supabase } from '@/lib/supabase';
 
 /**
+ * ==========================================
+ * MÓDULO: CARTELERA Y QUINIELAS ACTIVAS
+ * ==========================================
+ */
+
+/**
  * Obtiene todas las quinielas abiertas.
- * Si el usuario NO es admin, filtra automáticamente las que tienen solo_admins = true.
+ * Filtra automáticamente las jornadas privadas (solo_admins = true) si el usuario NO es admin.
  */
 export const obtenerQuinielasActivas = async (rolUsuario?: string) => {
   let consulta = supabase
@@ -22,14 +28,18 @@ export const obtenerQuinielasActivas = async (rolUsuario?: string) => {
   return await consulta;
 };
 
-// Aquí iremos agregando más consultas en el futuro (ej. obtenerPosiciones, obtenerHistorial, etc.)
-// Agrega esto a tu src/lib/queries.ts
 
 /**
- * Obtiene las quinielas para el módulo de posiciones.
- * Filtra jornadas privadas si el usuario no es admin.
+ * ==========================================
+ * MÓDULO: POSICIONES Y RANKING
+ * ==========================================
  */
-export const obtenerQuinielasParaPosiciones = async (rolUsuario?: string) => {
+
+/**
+ * Obtiene las quinielas recientes junto con TODOS sus partidos y tickets asociados.
+ * Gracias a las llaves foráneas, extraemos la jerarquía completa en 1 sola petición.
+ */
+export const obtenerDatosAnidadosPosiciones = async (rolUsuario?: string, limite: number = 10) => {
   let consulta = supabase
     .from('quinielas')
     .select(`
@@ -38,7 +48,7 @@ export const obtenerQuinielasParaPosiciones = async (rolUsuario?: string) => {
       tickets (*, pronosticos (*))
     `)
     .order('fecha_cierre', { ascending: false })
-    .limit(10);
+    .limit(limite);
 
   // 🔥 Filtro de Privacidad Centralizado
   if (rolUsuario !== 'admin') {
@@ -46,4 +56,24 @@ export const obtenerQuinielasParaPosiciones = async (rolUsuario?: string) => {
   }
 
   return await consulta;
+};
+
+/**
+ * Obtiene el catálogo básico de usuarios para cruzar nombres y avatares 
+ * con los tickets sin necesidad de hacer JOINs pesados en cada consulta.
+ */
+export const obtenerCatalogoUsuarios = async () => {
+  return await supabase
+    .from('usuarios')
+    .select('id, nombre, avatar_url');
+};
+
+/**
+ * Obtiene el catálogo de equipos para renderizar logos 
+ * en sorteos y partidos.
+ */
+export const obtenerCatalogoEquipos = async () => {
+  return await supabase
+    .from('equipos')
+    .select('id, nombre, logo_url');
 };

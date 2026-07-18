@@ -39,7 +39,7 @@ export function useCajero(actualizarSaldoGlobal?: (id: string, nuevo: number) =>
     try {
       const { data, error } = await supabase
         .from('usuarios')
-        .select('*') // Ya trae deuda_pesos
+        .select('*')
         .or(`nombre.ilike.%${termino}%,telefono.ilike.%${termino}%`)
         .order('nombre', { ascending: true })
         .range(offset, offset + LIMIT_USUARIOS - 1);
@@ -111,102 +111,100 @@ export function useCajero(actualizarSaldoGlobal?: (id: string, nuevo: number) =>
     }
   };
 
-  // 💰 LÓGICA MEJORADA: Ingreso con soporte para TRANSFERENCIA Y FIADO
-  const procesarRecargaLibre = async (usuario: any, monto: string, metodo: 'efectivo' | 'transferencia' | 'fiado') => {
+  // 🧠 FUNCIÓN MAESTRA (SMART INGRESO): Decide automáticamente si es Abono, Recarga o Fiado.
+  const procesarIngreso = async (usuario: any, monto: string, metodo: 'efectivo' | 'transferencia' | 'fiado') => {
     const pesosIngresados = parseFloat(monto);
     if (isNaN(pesosIngresados) || pesosIngresados <= 0) {
       toast.error("Ingresa una cantidad válida.");
       return false;
     }
 
-    const loadingId = toast.loading('Procesando ingreso...');
+    const loadingId = toast.loading('Procesando ingreso inteligente...');
     try {
-      let tipoMovimiento = 'recarga_manual';
-      let descripcionTxt = 'Ingreso Mostrador (Efectivo)';
-      let nuevaDeuda = Number(usuario.deuda_pesos || 0);
+      const deudaActual = Number(usuario.deuda_pesos || 0);
+      const totalActual = Number(usuario.creditos_disponibles || 0) + Number(usuario.saldo_pesos || 0);
+      
+      let nuevaDeuda = deudaActual;
+      let nuevoTotal = totalActual;
+      const transacciones = [];
 
-      if (metodo === 'transferencia') {
-        tipoMovimiento = 'recarga_transferencia';
-        descripcionTxt = 'Ingreso por Transferencia';
-      } else if (metodo === 'fiado') {
-        tipoMovimiento = 'recarga_fiada';
-        descripcionTxt = 'Préstamo/Fiado';
-        nuevaDeuda += pesosIngresados; // Sumamos la deuda
+      if (metodo === 'fiado') {
+        // LÓGICA FIADO: El usuario pide crédito. Se le suma al saldo, pero se añade a su deuda.
+        nuevaDeuda = deudaActual + pesosIngresados;
+        nuevoTotal = totalActual + pesosIngresados;
+        
+        transacciones.push({
+          usuario_id: usuario.id,
+          cantidad: pesosIngresados,
+          tipo_movimiento: 'recarga_fiada',
+          descripcion: 'Préstamo/Fiado (Mostrador)'
+        });
+      } else {
+        // LÓGICA EFECTIVO/TRANSFERENCIA: El usuario nos da dinero real.
+        if (deudaActual > 0) {
+          if (pesosIngresados <= deudaActual) {
+            // Caso 1: El dinero no alcanza para cubrir toda la deuda. Se va todo a la deuda.
+            nuevaDeuda = deudaActual - pesosIngresados;
+            transacciones.push({
+              usuario_id: usuario.id,
+              cantidad: 0, // Se manda 0 para que no sume al "Saldo" visual del historial
+              tipo_movimiento: metodo === 'transferencia' ? 'pago_deuda_transferencia' : 'pago_deuda_efectivo',
+              descripcion: `Abono a deuda: $${pesosIngresados} (${metodo})`
+            });
+          } else {
+            // Caso 2: El dinero paga TODA la deuda y sobra. Se divide la transacción.
+            const sobrante = pesosIngresados - deudaActual;
+            nuevaDeuda = 0;
+            nuevoTotal = totalActual + sobrante;
+            
+            transacciones.push({
+              usuario_id: usuario.id,
+              cantidad: 0,
+              tipo_movimiento: metodo === 'transferencia' ? 'pago_deuda_transferencia' : 'pago_deuda_efectivo',
+              descripcion: `Liquidación de deuda: $${deudaActual} (${metodo})`
+            });
+            
+            transacciones.push({
+              usuario_id: usuario.id,
+              cantidad: sobrante,
+              tipo_movimiento: metodo === 'transferencia' ? 'recarga_transferencia' : 'recarga_manual',
+              descripcion: `Ingreso Sobrante a favor (${metodo})`
+            });
+          }
+        } else {
+          // Caso 3: Usuario sin deudas, el dinero entra directo a su saldo.
+          nuevoTotal = totalActual + pesosIngresados;
+          transacciones.push({
+            usuario_id: usuario.id,
+            cantidad: pesosIngresados,
+            tipo_movimiento: metodo === 'transferencia' ? 'recarga_transferencia' : 'recarga_manual',
+            descripcion: metodo === 'transferencia' ? 'Ingreso por Transferencia' : 'Ingreso Mostrador (Efectivo)'
+          });
+        }
       }
 
-      const totalActual = Number(usuario.creditos_disponibles || 0) + Number(usuario.saldo_pesos || 0);
-      const nuevoTotal = totalActual + pesosIngresados;
-
-      // Actualizamos usuario
+      // Ejecutar transacciones en BD
       await supabase.from('usuarios').update({ 
         creditos_disponibles: 0, 
         saldo_pesos: nuevoTotal,
         deuda_pesos: nuevaDeuda
       }).eq('id', usuario.id);
 
-      // Historial
-      await supabase.from('transacciones_creditos').insert([{ 
-        usuario_id: usuario.id, 
-        cantidad: pesosIngresados, 
-        tipo_movimiento: tipoMovimiento, 
-        descripcion: descripcionTxt 
-      }]);
+      await supabase.from('transacciones_creditos').insert(transacciones);
 
       if (actualizarSaldoGlobal) actualizarSaldoGlobal(usuario.id, nuevoTotal);
       
       await buscarUsuariosDB(busqueda, 0, true); 
       if (historialActivo === usuario.id) await verHistorial(usuario.id, true);
 
-      toast.success(`Ingreso exitoso (${metodo})`, { id: loadingId });
+      toast.success(`Operación registrada exitosamente`, { id: loadingId });
       return true;
     } catch (e: any) {
-      toast.error("Error procesando el ingreso", { id: loadingId });
+      toast.error("Error procesando la operación", { id: loadingId });
       return false;
     }
   };
 
-  // 📝 NUEVA LÓGICA: Cobrar Deuda (Abono)
-  const procesarPagoDeuda = async (usuario: any, monto: string, metodo: 'efectivo' | 'transferencia') => {
-    const pago = parseFloat(monto);
-    const deudaActual = Number(usuario.deuda_pesos || 0);
-
-    if (isNaN(pago) || pago <= 0) {
-      toast.error("Monto de abono inválido.");
-      return false;
-    }
-    if (pago > deudaActual) {
-      toast.error("El abono no puede superar la deuda total.");
-      return false;
-    }
-
-    const loadingId = toast.loading('Registrando abono...');
-    try {
-      const nuevaDeuda = deudaActual - pago;
-      
-      // Descontamos la deuda
-      await supabase.from('usuarios').update({ deuda_pesos: nuevaDeuda }).eq('id', usuario.id);
-
-      // Registramos la entrada de dinero (cantidad 0 para no alterar saldo a favor, pero lo dejamos en el historial)
-      const tipo = metodo === 'transferencia' ? 'pago_deuda_transferencia' : 'pago_deuda_efectivo';
-      await supabase.from('transacciones_creditos').insert([{
-        usuario_id: usuario.id,
-        cantidad: 0,
-        tipo_movimiento: tipo,
-        descripcion: `Abono a deuda: $${pago} (${metodo})`
-      }]);
-
-      await buscarUsuariosDB(busqueda, 0, true);
-      if (historialActivo === usuario.id) await verHistorial(usuario.id, true);
-
-      toast.success(`Abono registrado. Restan: $${nuevaDeuda}`, { id: loadingId });
-      return true;
-    } catch (e: any) {
-      toast.error("Error al registrar abono", { id: loadingId });
-      return false;
-    }
-  };
-
-  // 💸 Retiro de Efectivo (Se mantiene intacto)
   const procesarRetiro = async (usuario: any, monto: string) => {
     const cantidadRetiro = parseFloat(monto);
     const totalActual = Number(usuario.creditos_disponibles || 0) + Number(usuario.saldo_pesos || 0);
@@ -242,6 +240,6 @@ export function useCajero(actualizarSaldoGlobal?: (id: string, nuevo: number) =>
   return { 
     usuarios, busqueda, setBusqueda, cargando, hayMasUsuarios, cargarMasUsuarios,
     historialActivo, datosHistorial, cargandoHistorial, hayMasHistorial, cargarMasHistorial, verHistorial, 
-    procesarRecargaLibre, procesarRetiro, procesarPagoDeuda
+    procesarIngreso, procesarRetiro
   };
 }

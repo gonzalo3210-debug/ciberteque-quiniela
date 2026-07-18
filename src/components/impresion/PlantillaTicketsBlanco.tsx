@@ -10,12 +10,19 @@ export default function PlantillaTicketsBlanco({ quiniela, partidos, obtenerLogo
     return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: true}).toUpperCase()}`;
   }
 
+  // 💡 Lógica centralizada: Determinamos la modalidad
+  const esMarcadorExacto = quiniela.modalidad === 'marcador_exacto';
+
+  // 💡 Ordenamiento cronológico defensivo
+  const partidosOrdenados = [...(partidos || [])].sort((a, b) => {
+    const fechaA = new Date(a.fecha_hora_partido || a.fecha_hora || 0).getTime();
+    const fechaB = new Date(b.fecha_hora_partido || b.fecha_hora || 0).getTime();
+    return fechaA - fechaB;
+  });
+
   return (
     <>
-      {/* 🔥 INGENIERÍA: CSS Grid Estricto
-        Forzamos al navegador a crear 2 columnas idénticas (1fr 1fr) sin importar
-        la orientación. Además, limitamos el alto a 96vh para evitar hojas en blanco.
-      */}
+      {/* 🔥 INGENIERÍA: CSS Grid Estricto */}
       <style>{`
         @media print {
           @page { margin: 5mm !important; }
@@ -23,10 +30,10 @@ export default function PlantillaTicketsBlanco({ quiniela, partidos, obtenerLogo
           /* CONTENEDOR MAESTRO: Cuadrícula de 2 columnas forzada */
           .impresion-contenedor { 
             display: grid !important; 
-            grid-template-columns: 1fr 1fr !important; /* Mágia: 2 columnas siempre */
-            gap: 5mm !important; /* Espacio entre los dos tickets */
+            grid-template-columns: 1fr 1fr !important;
+            gap: 5mm !important;
             width: 100% !important; 
-            height: 96vh !important; /* Tope de alto para no saltar de hoja */
+            height: 96vh !important;
             page-break-after: avoid !important;
             overflow: hidden !important;
             box-sizing: border-box !important;
@@ -51,7 +58,6 @@ export default function PlantillaTicketsBlanco({ quiniela, partidos, obtenerLogo
         }
       `}</style>
 
-      {/* Observa que cambiamos print:flex por print:grid */}
       <div className="hidden print:grid print:w-full print:bg-white print:text-black zona-impresion z-[99999] impresion-contenedor">
         {[1, 2].map((num) => (
           <div className="border-2 border-black rounded-3xl bg-white impresion-ticket" key={num}>
@@ -65,7 +71,7 @@ export default function PlantillaTicketsBlanco({ quiniela, partidos, obtenerLogo
               </div>
               
               <h2 className="text-center font-black text-sm md:text-lg uppercase mb-2 md:mb-4 bg-amber-400 py-1 border-y-2 border-black text-black">
-                {quiniela.nombre_jornada}
+                {quiniela.nombre_jornada} {esMarcadorExacto && "- MARCADORES"}
               </h2>
               
               <div className="mb-2 md:mb-4 space-y-1.5 md:space-y-3">
@@ -81,14 +87,23 @@ export default function PlantillaTicketsBlanco({ quiniela, partidos, obtenerLogo
                 <thead>
                   <tr className="bg-blue-900 text-white uppercase">
                     <th className="border-2 border-black text-right w-[40%]">Local</th>
-                    <th className="border-2 border-black text-center w-[6%]">L</th>
-                    <th className="border-2 border-black text-center w-[6%]">E</th>
-                    <th className="border-2 border-black text-center w-[6%]">V</th>
+                    
+                    {/* RENDERIZADO CONDICIONAL DE CABECERAS */}
+                    {esMarcadorExacto ? (
+                      <th className="border-2 border-black text-center w-[20%]">Marcador</th>
+                    ) : (
+                      <>
+                        <th className="border-2 border-black text-center w-[6%]">L</th>
+                        <th className="border-2 border-black text-center w-[6%]">E</th>
+                        <th className="border-2 border-black text-center w-[6%]">V</th>
+                      </>
+                    )}
+
                     <th className="border-2 border-black text-left w-[40%]">Visita</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(partidos || []).map((p: any) => {
+                  {partidosOrdenados.map((p: any) => {
                     const logoL = obtenerLogo(p.equipo_local)
                     const logoV = obtenerLogo(p.equipo_visitante)
                     return (
@@ -99,9 +114,24 @@ export default function PlantillaTicketsBlanco({ quiniela, partidos, obtenerLogo
                             {logoL ? <img src={logoL} alt="" className="w-4 h-4 md:w-5 md:h-5 object-contain" /> : <div className="w-3 h-3 md:w-4 md:h-4 rounded-full border border-black flex items-center justify-center text-[5px]">?</div>}
                           </div>
                         </td>
-                        <td className="border-2 border-black text-center font-bold"></td>
-                        <td className="border-2 border-black text-center font-bold"></td>
-                        <td className="border-2 border-black text-center font-bold"></td>
+                        
+                        {/* ⚡ MEJORA UX: Dos casillas con un guion en medio para llenado manual */}
+                        {esMarcadorExacto ? (
+                           <td className="border-2 border-black text-center p-0.5">
+                             <div className="flex items-center justify-center gap-1">
+                               <div className="w-4 h-4 md:w-5 md:h-5 border border-slate-400 rounded-sm bg-white"></div>
+                               <span className="font-black text-slate-500 text-[10px]">-</span>
+                               <div className="w-4 h-4 md:w-5 md:h-5 border border-slate-400 rounded-sm bg-white"></div>
+                             </div>
+                           </td>
+                        ) : (
+                          <>
+                            <td className="border-2 border-black text-center font-bold"></td>
+                            <td className="border-2 border-black text-center font-bold"></td>
+                            <td className="border-2 border-black text-center font-bold"></td>
+                          </>
+                        )}
+
                         <td className="border-2 border-black text-left overflow-hidden bg-gray-50">
                           <div className="flex items-center justify-start gap-1">
                             {logoV ? <img src={logoV} alt="" className="w-4 h-4 md:w-5 md:h-5 object-contain" /> : <div className="w-3 h-3 md:w-4 md:h-4 rounded-full border border-black flex items-center justify-center text-[5px]">?</div>}

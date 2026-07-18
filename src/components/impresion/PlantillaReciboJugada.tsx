@@ -10,6 +10,18 @@ interface PlantillaReciboJugadaProps {
 export default function PlantillaReciboJugada({ quiniela, partidos, ticketAImprimir, obtenerLogo }: PlantillaReciboJugadaProps) {
   if (!quiniela || !ticketAImprimir) return null;
 
+  // Lógica centralizada: Determinamos la modalidad directamente de la BD
+  const esMarcadorExacto = quiniela.modalidad === 'marcador_exacto';
+
+  // 💡 NUEVO: Ordenamiento cronológico defensivo.
+  // Clonamos el arreglo para no mutar el prop original y lo ordenamos por fecha.
+  const partidosOrdenados = [...partidos].sort((a, b) => {
+    // Usamos fecha_hora_partido o fecha_hora según lo que devuelva tu consulta a Supabase
+    const fechaA = new Date(a.fecha_hora_partido || a.fecha_hora || 0).getTime();
+    const fechaB = new Date(b.fecha_hora_partido || b.fecha_hora || 0).getTime();
+    return fechaA - fechaB;
+  });
+
   return (
     <>
       {/* Estilos CSS inline específicos para forzar el ajuste en una sola página física */}
@@ -62,6 +74,12 @@ export default function PlantillaReciboJugada({ quiniela, partidos, ticketAImpri
             height: 24px !important;
             font-size: 11px !important;
           }
+          
+          /* Caja de marcador exacto */
+          .recibo-casilla-marcador {
+             font-size: 14px !important;
+             padding: 2px 8px !important;
+          }
 
           /* Caja de desempate optimizada */
           .recibo-desempate {
@@ -85,7 +103,7 @@ export default function PlantillaReciboJugada({ quiniela, partidos, ticketAImpri
             <h1 className="text-4xl font-black uppercase tracking-widest text-blue-900 drop-shadow-sm">CiberTeque</h1>
             <h2 className="text-sm font-bold uppercase tracking-widest mt-0.5 text-slate-500">Comprobante Oficial de Jugada</h2>
             <div className="mt-2 inline-block bg-amber-400 text-black border-2 border-black px-6 py-1 font-black uppercase text-lg rounded-xl shadow-sm">
-              {quiniela.nombre_jornada}
+              {quiniela.nombre_jornada} {esMarcadorExacto && "- MARCADORES"}
             </div>
           </div>
 
@@ -101,21 +119,31 @@ export default function PlantillaReciboJugada({ quiniela, partidos, ticketAImpri
             </div>
           </div>
 
-          {/* Tabla de Partidos con L-E-V al CENTRO */}
+          {/* Tabla Dinámica de Partidos */}
           <div className="border-2 border-blue-900 rounded-xl overflow-hidden mb-4 shadow-sm">
             <table className="w-full text-sm recibo-tabla">
               <thead className="bg-blue-900 text-white text-xs font-black uppercase tracking-widest">
                 <tr>
                   <th className="p-2 text-center w-10 border-r border-blue-800">#</th>
                   <th className="p-2 text-right border-r border-blue-800 w-[35%] pr-4">Local</th>
-                  <th className="p-2 text-center w-11 border-r border-blue-800">L</th>
-                  <th className="p-2 text-center w-11 border-r border-blue-800">E</th>
-                  <th className="p-2 text-center w-11 border-r border-blue-800">V</th>
+                  
+                  {/* RENDERIZADO CONDICIONAL DE CABECERAS */}
+                  {esMarcadorExacto ? (
+                    <th className="p-2 text-center w-[20%] border-r border-blue-800">Marcador</th>
+                  ) : (
+                    <>
+                      <th className="p-2 text-center w-11 border-r border-blue-800">L</th>
+                      <th className="p-2 text-center w-11 border-r border-blue-800">E</th>
+                      <th className="p-2 text-center w-11 border-r border-blue-800">V</th>
+                    </>
+                  )}
+
                   <th className="p-2 text-left w-[35%] pl-4">Visitante</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 font-bold text-xs uppercase bg-white">
-                {partidos.map((partido: any, index: number) => {
+                {/* 💡 Iteramos sobre el nuevo arreglo cronológico */}
+                {partidosOrdenados.map((partido: any, index: number) => {
                   const eleccion = ticketAImprimir.selecciones[partido.id];
                   const logoL = obtenerLogo(partido.equipo_local);
                   const logoV = obtenerLogo(partido.equipo_visitante);
@@ -141,22 +169,32 @@ export default function PlantillaReciboJugada({ quiniela, partidos, ticketAImpri
                         </div>
                       </td>
                       
-                      {/* CASILLAS CENTRADAS (L - E - V) */}
-                      <td className="p-1 text-center border-r border-slate-200 bg-blue-50/20">
-                        <div className={`w-6 h-6 mx-auto flex items-center justify-center rounded font-black text-xs border-2 transition-all recibo-casilla-opc ${eleccion === 'L' ? 'bg-blue-600 text-white border-blue-700 shadow-inner' : 'bg-white text-slate-300 border-slate-200'}`}>
-                          L
-                        </div>
-                      </td>
-                      <td className="p-1 text-center border-r border-slate-200 bg-slate-100/40">
-                        <div className={`w-6 h-6 mx-auto flex items-center justify-center rounded font-black text-xs border-2 transition-all recibo-casilla-opc ${eleccion === 'E' ? 'bg-blue-600 text-white border-blue-700 shadow-inner' : 'bg-white text-slate-300 border-slate-200'}`}>
-                          E
-                        </div>
-                      </td>
-                      <td className="p-1 text-center border-r border-slate-200 bg-blue-50/20">
-                        <div className={`w-6 h-6 mx-auto flex items-center justify-center rounded font-black text-xs border-2 transition-all recibo-casilla-opc ${eleccion === 'V' ? 'bg-blue-600 text-white border-blue-700 shadow-inner' : 'bg-white text-slate-300 border-slate-200'}`}>
-                          V
-                        </div>
-                      </td>
+                      {/* RENDERIZADO CONDICIONAL DE CASILLAS */}
+                      {esMarcadorExacto ? (
+                        <td className="p-1 text-center border-r border-slate-200 bg-blue-50/20">
+                           <div className="mx-auto flex items-center justify-center rounded font-black text-base tracking-[0.2em] text-blue-900 bg-white border-2 border-blue-300 py-0.5 px-3 shadow-inner w-fit recibo-casilla-marcador">
+                             {eleccion || '0-0'}
+                           </div>
+                        </td>
+                      ) : (
+                        <>
+                          <td className="p-1 text-center border-r border-slate-200 bg-blue-50/20">
+                            <div className={`w-6 h-6 mx-auto flex items-center justify-center rounded font-black text-xs border-2 transition-all recibo-casilla-opc ${eleccion === 'L' ? 'bg-blue-600 text-white border-blue-700 shadow-inner' : 'bg-white text-slate-300 border-slate-200'}`}>
+                              L
+                            </div>
+                          </td>
+                          <td className="p-1 text-center border-r border-slate-200 bg-slate-100/40">
+                            <div className={`w-6 h-6 mx-auto flex items-center justify-center rounded font-black text-xs border-2 transition-all recibo-casilla-opc ${eleccion === 'E' ? 'bg-blue-600 text-white border-blue-700 shadow-inner' : 'bg-white text-slate-300 border-slate-200'}`}>
+                              E
+                            </div>
+                          </td>
+                          <td className="p-1 text-center border-r border-slate-200 bg-blue-50/20">
+                            <div className={`w-6 h-6 mx-auto flex items-center justify-center rounded font-black text-xs border-2 transition-all recibo-casilla-opc ${eleccion === 'V' ? 'bg-blue-600 text-white border-blue-700 shadow-inner' : 'bg-white text-slate-300 border-slate-200'}`}>
+                              V
+                            </div>
+                          </td>
+                        </>
+                      )}
                       
                       {/* EQUIPO VISITANTE */}
                       <td className="p-1.5">

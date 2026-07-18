@@ -1,8 +1,9 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useCajero } from '@/hooks/useCajero'
 import { useCapturaFisica } from '@/hooks/useCapturaFisica'
+import { useDebouncedCallback } from '@/hooks/useDebounce'
 import { Toaster, toast } from 'react-hot-toast' 
 
 interface ModuloRecargasCapturaProps {
@@ -15,14 +16,13 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
   const captura = useCapturaFisica(actualizarSaldoGlobal);
 
   const [metodoPago, setMetodoPago] = useState<'efectivo' | 'transferencia' | 'fiado'>('efectivo');
-  const [modalOperacion, setModalOperacion] = useState<{id: string, tipo: 'recarga' | 'retiro' | 'deuda'} | null>(null);
+  const [modalOperacion, setModalOperacion] = useState<{id: string, tipo: 'recarga' | 'retiro'} | null>(null);
   const [montoOperacion, setMontoOperacion] = useState('');
   const [formatoImpresion, setFormatoImpresion] = useState<'A4' | 'termica' | null>(null);
 
   const [sugerenciasClientes, setSugerenciasClientes] = useState<any[]>([]);
   const [mostrarSugerencias, setMostrarSugerencias] = useState(false);
   const [buscandoCliente, setBuscandoCliente] = useState(false);
-  const autocompleteTimer = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const handleAfterPrint = () => setFormatoImpresion(null);
@@ -44,19 +44,11 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
 
   const handleProcesarOperacion = async (u: any) => {
     let exito = false;
-    
     if (modalOperacion?.tipo === 'recarga') {
-      exito = await cajero.procesarRecargaLibre(u, montoOperacion, metodoPago);
+      exito = await cajero.procesarIngreso(u, montoOperacion, metodoPago);
     } else if (modalOperacion?.tipo === 'retiro') {
       exito = await cajero.procesarRetiro(u, montoOperacion);
-    } else if (modalOperacion?.tipo === 'deuda') {
-      if (metodoPago === 'fiado') {
-        toast.error('Para cobrar una deuda, selecciona Efectivo o Transferencia en la parte superior.');
-        return;
-      }
-      exito = await cajero.procesarPagoDeuda(u, montoOperacion, metodoPago);
-    }
-    
+    } 
     if (exito) {
       setModalOperacion(null);
       setMontoOperacion('');
@@ -76,6 +68,21 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
     }
   }, [vista, captura.quiniela?.id, quinielasCapturables.length]);
 
+  // ⚡ NUEVO: Función de búsqueda aislada y conectada al Debounce
+  const ejecutarBusqueda = async (valor: string) => {
+    const { data } = await supabase
+      .from('usuarios')
+      .select('id, nombre, telefono')
+      .or(`nombre.ilike.%${valor}%,telefono.ilike.%${valor}%`)
+      .limit(6);
+
+    if (data && data.length > 0) setSugerenciasClientes(data);
+    else { setSugerenciasClientes([]); setMostrarSugerencias(false); }
+    setBuscandoCliente(false);
+  };
+
+  const debouncedBusqueda = useDebouncedCallback(ejecutarBusqueda, 400);
+
   const manejarAutocompletado = (valor: string, campo: 'telefono' | 'nombre') => {
     if (campo === 'telefono') {
       captura.setCapTelefono(valor);
@@ -89,25 +96,12 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
       setSugerenciasClientes([]);
       setMostrarSugerencias(false);
       setBuscandoCliente(false);
-      if (autocompleteTimer.current) clearTimeout(autocompleteTimer.current);
       return;
     }
 
     setBuscandoCliente(true);
     setMostrarSugerencias(true);
-    if (autocompleteTimer.current) clearTimeout(autocompleteTimer.current);
-
-    autocompleteTimer.current = setTimeout(async () => {
-      const { data } = await supabase
-        .from('usuarios')
-        .select('id, nombre, telefono')
-        .or(`nombre.ilike.%${valor}%,telefono.ilike.%${valor}%`)
-        .limit(6);
-
-      if (data && data.length > 0) setSugerenciasClientes(data);
-      else { setSugerenciasClientes([]); setMostrarSugerencias(false); }
-      setBuscandoCliente(false);
-    }, 400); 
+    debouncedBusqueda(valor); 
   };
 
   const aplicarSugerencia = (cliente: any) => {
@@ -126,52 +120,14 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
     setSugerenciasClientes([]);
   };
 
-  // 🔥 CONSTANTES DE MODALIDAD
   const esMarcadorExacto = captura.quiniela?.modalidad === 'marcador_exacto';
-  const esSorteo = captura.quiniela?.modalidad === 'sorteo'; // ⚡ NUEVO
-
-  const obtenerMarcador = (partidoId: string, equipo: 'L' | 'V') => {
-    const seleccion = captura.capSelecciones[partidoId];
-    if (!seleccion || !seleccion.includes('-')) return '';
-    const [l, v] = seleccion.split('-');
-    return equipo === 'L' ? l : v;
-  };
-
-  const cambiarMarcador = (partidoId: string, equipo: 'L' | 'V', valor: string) => {
-    let val = valor === '' ? '' : parseInt(valor, 10).toString();
-    if (val === 'NaN') val = '0';
-    
-    let seleccionActual = captura.capSelecciones[partidoId] || '0-0';
-    if (!seleccionActual.includes('-')) seleccionActual = '0-0';
-    
-    let [l, v] = seleccionActual.split('-');
-    if (equipo === 'L') l = val === '' ? '0' : val;
-    else v = val === '' ? '0' : val;
-    
-    captura.setCapSelecciones({
-      ...captura.capSelecciones,
-      [partidoId]: `${l}-${v}`
-    });
-  };
-
-  useEffect(() => {
-    if (esMarcadorExacto) {
-      let sumaTotal = 0;
-      Object.values(captura.capSelecciones).forEach(seleccion => {
-        if (typeof seleccion === 'string' && seleccion.includes('-')) {
-          const [l, v] = seleccion.split('-');
-          sumaTotal += (parseInt(l) || 0) + (parseInt(v) || 0);
-        }
-      });
-      captura.setCapGoles(sumaTotal.toString());
-    }
-  }, [captura.capSelecciones, esMarcadorExacto, captura.setCapGoles]);
+  const esSorteo = captura.quiniela?.modalidad === 'sorteo'; 
 
   return (
     <>
       <Toaster position="top-right" reverseOrder={false} />
 
-      {/* VISTA: VENTAS Y RETIROS (CAJERO) - SE MANTIENE INTACTO */}
+      {/* VISTA: VENTAS Y RETIROS (CAJERO) */}
       {vista === 'recargas' && (
         <div className="animate-in fade-in duration-300 w-full max-w-2xl mx-auto space-y-4">
           <div className="bg-slate-900/80 p-1.5 rounded-xl border border-slate-700 shadow-inner flex flex-col sm:flex-row gap-1">
@@ -192,6 +148,7 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
 
             {(cajero.usuarios || []).map(u => {
               const saldoTotal = Number(u.creditos_disponibles || 0) + Number(u.saldo_pesos || 0);
+              const deudaTotal = Number(u.deuda_pesos || 0);
 
               return (
                 <div key={u.id} className="bg-slate-900/80 p-3 md:p-4 rounded-xl border border-slate-700 hover:border-slate-500 transition-all shadow-lg">
@@ -208,44 +165,63 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                           </span>
                         </div>
 
-                        {Number(u.deuda_pesos) > 0 && (
+                        {deudaTotal > 0 && (
                           <div className="flex items-center gap-1.5 border-l border-red-900/50 pl-3 bg-red-950/20 px-2 py-0.5 rounded">
                             <span className="text-[9px] uppercase text-red-500 font-bold">Debe:</span>
                             <span className="text-red-400 font-black text-sm drop-shadow-[0_0_5px_rgba(248,113,113,0.3)]">
-                              -${Number(u.deuda_pesos).toLocaleString('es-MX', {minimumFractionDigits: 2})}
+                              -${deudaTotal.toLocaleString('es-MX', {minimumFractionDigits: 2})}
                             </span>
                           </div>
                         )}
                       </div>
                     </div>
                     
+                    {/* ⚡ MODIFICACIÓN UX: Botones Condicionales e Interactivos */}
                     <div className="flex flex-wrap gap-2 w-full md:w-auto">
                       <button onClick={() => cajero.verHistorial(u.id)} className="bg-slate-800 hover:bg-slate-700 px-3 py-2 rounded-lg text-[10px] font-black uppercase transition-all text-slate-300 border border-slate-700 flex-1 md:flex-none shadow-md">📜 Historial</button>
                       
-                      {Number(u.deuda_pesos) > 0 && (
-                        <button onClick={() => {setModalOperacion({id: u.id, tipo: 'deuda'}); setMontoOperacion('');}} className="bg-red-950/60 hover:bg-red-900/80 border border-red-800/50 text-red-400 px-3 py-2 rounded-lg text-[10px] font-black uppercase transition-all shadow-md flex-1 md:flex-none">💸 Cobrar</button>
-                      )}
+                      <button 
+                        onClick={() => {
+                          if (modalOperacion?.id === u.id && modalOperacion?.tipo === 'recarga') setModalOperacion(null);
+                          else { setModalOperacion({id: u.id, tipo: 'recarga'}); setMontoOperacion(''); }
+                        }} 
+                        className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase transition-all flex-1 md:flex-none shadow-md border ${
+                          modalOperacion?.id === u.id && modalOperacion?.tipo === 'recarga' 
+                            ? 'bg-green-600 text-white border-green-500 shadow-[0_0_15px_rgba(22,163,74,0.4)] ring-2 ring-green-500/50' 
+                            : 'bg-green-950/40 hover:bg-green-900 border-green-800/50 text-green-500 hover:text-white'
+                        }`}>
+                        💰 Ingresar $
+                      </button>
 
-                      <button onClick={() => {setModalOperacion({id: u.id, tipo: 'recarga'}); setMontoOperacion('');}} className="bg-green-900 hover:bg-green-800 border border-green-600/50 text-white px-3 py-2 rounded-lg text-[10px] font-black uppercase transition-all shadow-[0_0_10px_rgba(22,163,74,0.2)] flex-1 md:flex-none">💰 Ingresar $</button>
-                      <button onClick={() => {setModalOperacion({id: u.id, tipo: 'retiro'}); setMontoOperacion('');}} className="bg-slate-900 hover:bg-red-950 border border-slate-700 hover:border-red-800/50 text-slate-400 hover:text-red-300 px-3 py-2 rounded-lg text-[10px] font-black uppercase transition-all shadow-md flex-1 md:flex-none">Retirar $</button>
+                      <button 
+                        onClick={() => {
+                          if (modalOperacion?.id === u.id && modalOperacion?.tipo === 'retiro') setModalOperacion(null);
+                          else { setModalOperacion({id: u.id, tipo: 'retiro'}); setMontoOperacion(''); }
+                        }} 
+                        className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase transition-all flex-1 md:flex-none shadow-md border ${
+                          modalOperacion?.id === u.id && modalOperacion?.tipo === 'retiro'
+                            ? 'bg-red-600 text-white border-red-500 shadow-[0_0_15px_rgba(220,38,38,0.4)] ring-2 ring-red-500/50'
+                            : 'bg-red-950/20 hover:bg-red-950 border-red-900/30 text-red-500 hover:text-red-400'
+                        }`}>
+                        Retirar $
+                      </button>
                     </div>
                   </div>
 
                   {modalOperacion?.id === u.id && (
                     <div className={`mt-4 p-4 border rounded-xl animate-in fade-in zoom-in-95 ${
-                      modalOperacion.tipo === 'recarga' ? 'bg-green-950/20 border-green-900/50' : 
-                      modalOperacion.tipo === 'deuda' ? 'bg-red-950/30 border-red-900/50' :
-                      'bg-slate-950 border-slate-800'
+                      modalOperacion.tipo === 'recarga' ? 'bg-green-950/20 border-green-900/50' : 'bg-red-950/20 border-red-900/50'
                     }`}>
                       <div className="flex justify-between items-center mb-3">
-                        <label className={`text-[10px] font-black uppercase tracking-widest block ${
-                          modalOperacion.tipo === 'recarga' ? 'text-green-500' : 
-                          modalOperacion.tipo === 'deuda' ? 'text-red-400' :
-                          'text-slate-400'
+                        <label className={`text-[10px] font-black uppercase tracking-widest block flex flex-col sm:flex-row sm:items-center gap-1 ${
+                          modalOperacion.tipo === 'recarga' ? 'text-green-500' : 'text-red-400'
                         }`}>
-                          {modalOperacion.tipo === 'recarga' ? `Ingreso de saldo (Método: ${metodoPago})` : 
-                           modalOperacion.tipo === 'deuda' ? `Registrar pago de deuda` :
-                           '¿Cuánto dinero vas a retirar?'}
+                          <span>{modalOperacion.tipo === 'recarga' ? `Recepción de dinero (${metodoPago})` : '¿Cuánto dinero vas a retirar?'}</span>
+                          {modalOperacion.tipo === 'recarga' && deudaTotal > 0 && metodoPago !== 'fiado' && (
+                            <span className="text-[9px] text-red-400 bg-red-950/40 px-2 py-0.5 rounded border border-red-900/50 animate-pulse">
+                              Se abonará automáticamente a la deuda de ${deudaTotal}
+                            </span>
+                          )}
                         </label>
                         <button onClick={() => setModalOperacion(null)} className="text-slate-500 hover:text-white font-mono text-sm">✕</button>
                       </div>
@@ -257,26 +233,20 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                             type="number" 
                             value={montoOperacion} 
                             onChange={(e) => setMontoOperacion(e.target.value)} 
-                            placeholder={modalOperacion.tipo === 'deuda' ? `Max. ${u.deuda_pesos}` : "Ej. 100"} 
+                            placeholder="Ej. 100" 
                             className={`w-full bg-slate-900 border rounded-lg pl-8 pr-3 py-2.5 text-white outline-none transition-all font-black text-xl shadow-inner ${
-                              modalOperacion.tipo === 'recarga' ? 'border-green-900/50 focus:border-green-500' : 
-                              modalOperacion.tipo === 'deuda' ? 'border-red-900/50 focus:border-red-500' :
-                              'border-slate-700 focus:border-slate-500'
+                              modalOperacion.tipo === 'recarga' ? 'border-green-900/50 focus:border-green-500' : 'border-red-900/50 focus:border-red-500'
                             }`} 
                           />
                         </div>
+                        {/* ⚡ MODIFICACIÓN UX: Botón de confirmación visualmente acorde a la acción */}
                         <button 
                           onClick={() => handleProcesarOperacion(u)} 
-                          disabled={modalOperacion.tipo === 'deuda' && metodoPago === 'fiado'}
                           className={`text-white font-black px-6 py-2.5 rounded-lg text-[10px] uppercase tracking-widest transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed ${
-                            modalOperacion.tipo === 'recarga' ? 'bg-green-600 hover:bg-green-500' : 
-                            modalOperacion.tipo === 'deuda' ? 'bg-red-600 hover:bg-red-500' :
-                            'bg-slate-700 hover:bg-slate-600'
+                            modalOperacion.tipo === 'recarga' ? 'bg-green-600 hover:bg-green-500 shadow-green-900/50' : 'bg-red-600 hover:bg-red-500 shadow-red-900/50'
                           }`}
                         >
-                          {modalOperacion.tipo === 'recarga' ? 'Confirmar' : 
-                           modalOperacion.tipo === 'deuda' ? 'Abonar' :
-                           'Confirmar'}
+                          Confirmar
                         </button>
                       </div>
                     </div>
@@ -374,7 +344,6 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                   </h3>
                   <p className="text-[9px] md:text-[10px] text-slate-400 uppercase font-bold mt-0.5">{captura.quiniela.nombre_jornada}</p>
                 </div>
-                {/* ⚡ NUEVO: Indicador de cupo para el Sorteo */}
                 {esSorteo && (
                   <div className="bg-blue-950/50 border border-blue-900 px-3 py-1.5 rounded-lg text-right">
                     <p className="text-[9px] text-blue-400 font-bold uppercase tracking-widest">Lugares Ocupados</p>
@@ -426,7 +395,6 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                 )}
               </div>
               
-              {/* ⚡ CONDICIÓN: Ocultar partidos y mostrar panel de sorteo si es modalidad sorteo */}
               {esSorteo ? (
                 <div className="bg-blue-950/20 border border-blue-900/50 rounded-xl p-6 text-center shadow-inner mb-5">
                   <span className="text-4xl mb-3 block">🎫</span>
@@ -437,7 +405,6 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                 </div>
               ) : (
                 <>
-                  {/* LISTA DE PARTIDOS ADAPTATIVA */}
                   <div className="space-y-1.5 mb-5">
                     {(captura.partidos || []).map((p) => {
                       const logoL = obtenerLogo(p.equipo_local)
@@ -459,9 +426,9 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                           
                           {esMarcadorExacto ? (
                             <div className="w-full sm:w-[130px] flex items-center justify-center gap-2 shrink-0 bg-slate-900 border border-slate-700 rounded-lg p-1 shadow-inner">
-                              <input type="number" min="0" placeholder="0" value={obtenerMarcador(p.id, 'L')} onChange={(e) => cambiarMarcador(p.id, 'L', e.target.value)} className="w-10 h-8 md:w-12 text-center bg-slate-950 border border-slate-700 text-white font-black text-sm rounded outline-none focus:border-amber-500 transition-all placeholder:text-slate-600" />
+                              <input type="number" min="0" placeholder="0" value={captura.obtenerMarcador(p.id, 'L')} onChange={(e) => captura.cambiarMarcador(p.id, 'L', e.target.value)} className="w-10 h-8 md:w-12 text-center bg-slate-950 border border-slate-700 text-white font-black text-sm rounded outline-none focus:border-amber-500 transition-all placeholder:text-slate-600" />
                               <span className="text-slate-500 font-black text-xs">-</span>
-                              <input type="number" min="0" placeholder="0" value={obtenerMarcador(p.id, 'V')} onChange={(e) => cambiarMarcador(p.id, 'V', e.target.value)} className="w-10 h-8 md:w-12 text-center bg-slate-950 border border-slate-700 text-white font-black text-sm rounded outline-none focus:border-amber-500 transition-all placeholder:text-slate-600" />
+                              <input type="number" min="0" placeholder="0" value={captura.obtenerMarcador(p.id, 'V')} onChange={(e) => captura.cambiarMarcador(p.id, 'V', e.target.value)} className="w-10 h-8 md:w-12 text-center bg-slate-950 border border-slate-700 text-white font-black text-sm rounded outline-none focus:border-amber-500 transition-all placeholder:text-slate-600" />
                             </div>
                           ) : (
                             <div className="w-full sm:w-[110px] flex gap-1 shrink-0">
@@ -479,7 +446,6 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
 
               {/* BARRA DE COBRO Y GUARDAR */}
               <div className="flex flex-col md:flex-row gap-3 items-center justify-between border-t border-slate-800 pt-4">
-                {/* ⚡ CONDICIÓN: Si NO es sorteo, mostramos campo de goles */}
                 {!esSorteo ? (
                   <div className="w-full md:w-[150px] bg-slate-950/40 p-2 rounded-xl border border-slate-800 flex items-center gap-2 transition-all">
                     <label className="text-[8px] md:text-[9px] text-amber-500 font-bold uppercase tracking-widest leading-tight">
@@ -561,7 +527,6 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                 </div>
               </div>
               
-              {/* ⚡ TICKET CONDICIONAL PARA SORTEO */}
               {captura.ticketAImprimir.modalidad === 'sorteo' ? (
                 <div className="border-4 border-black border-dashed p-10 text-center rounded-2xl bg-gray-50 mt-6">
                    <h3 className="text-3xl font-black uppercase mb-4 text-blue-900">🎟️ LUGAR ASEGURADO</h3>

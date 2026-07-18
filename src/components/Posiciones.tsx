@@ -1,237 +1,23 @@
 'use client'
-import React, { useEffect, useState, Fragment, useCallback } from 'react'
-import { supabase } from '@/lib/supabase'
+import React, { useState, Fragment } from 'react'
+import { usePosiciones } from '@/hooks/usePosiciones'
 
 export default function Posiciones() {
-  const [quinielasAbiertas, setQuinielasAbiertas] = useState<any[]>([]) 
-  const [quinielaActiva, setQuinielaActiva] = useState<any>(null)
-  const [historial, setHistorial] = useState<any[]>([])
-  const [cargando, setCargando] = useState(true)
-  const [errorCarga, setErrorCarga] = useState<string | null>(null) // ⚡ MEJORA UX: Estado de error
+  const {
+    quinielasAbiertas,
+    quinielaActiva,
+    historial,
+    cargando,
+    errorCarga,
+    setQuinielaActiva,
+    recargarDatos
+  } = usePosiciones()
   
   const [quinielaExpandidaId, setQuinielaExpandidaId] = useState<string | null>(null)
   const [jugadorExpandidoId, setJugadorExpandidoId] = useState<string | null>(null)
 
-  const PORCENTAJE_PREMIO = 0.80 
-
-  const cargarDatos = useCallback(async (esCargaSilenciosa = false) => {
-    if (!esCargaSilenciosa) setCargando(true)
-    setErrorCarga(null)
-
-    try {
-      const { data: qData, error: qError } = await supabase
-        .from('quinielas')
-        .select('*')
-        .order('fecha_cierre', { ascending: false }) 
-        .limit(10)
-
-      if (qError) throw qError;
-
-      if (!qData || qData.length === 0) {
-        setCargando(false)
-        return
-      }
-
-      const quinielaIds = qData.map(q => q.id)
-
-      const { data: pData, error: pError } = await supabase.from('partidos').select('*').in('quiniela_id', quinielaIds).order('fecha_hora', { ascending: true })
-      if (pError) throw pError;
-      
-      const { data: tData, error: tError } = await supabase.from('tickets').select('id, usuario_id, quiniela_id, prediccion_goles_total, puntos_totales, equipo_asignado_id, pronosticos(partido_id, eleccion_usuario)').in('quiniela_id', quinielaIds)
-      if (tError) throw tError;
-      
-      const { data: uData } = await supabase.from('usuarios').select('id, nombre, avatar_url')
-      const { data: eData } = await supabase.from('equipos').select('id, nombre, logo_url')
-      
-      const mapaUsuarios: Record<string, { nombre: string, avatar_url: string | null }> = {}
-      if (uData) uData.forEach(u => mapaUsuarios[u.id] = { nombre: u.nombre, avatar_url: u.avatar_url })
-
-      const mapaEquipos: Record<string, any> = {}
-      if (eData) eData.forEach(e => mapaEquipos[e.id] = e)
-
-      // Función para extraer tendencia L-E-V de un marcador
-      const getLEV = (marcador: string) => {
-        if (!marcador) return null;
-        const limpio = marcador.replace(/\s+/g, '').toUpperCase();
-        if (['L', 'E', 'V'].includes(limpio)) return limpio;
-        if (limpio.includes('-')) {
-          const [l, v] = limpio.split('-').map(Number);
-          if (!isNaN(l) && !isNaN(v)) {
-            if (l > v) return 'L';
-            if (l < v) return 'V';
-            return 'E';
-          }
-        }
-        return null;
-      }
-
-      const quinielasProcesadas = qData.map(q => {
-        const partidosQ = pData?.filter(p => p.quiniela_id === q.id) || []
-        const ticketsQ = tData?.filter(t => t.quiniela_id === q.id) || []
-
-        const ranking = ticketsQ.map(ticket => {
-          let puntos = 0
-          const aciertos: Record<string, string> = {}
-          const pronosticosTicket = ticket.pronosticos || [] 
-
-          // LÓGICA DE PUNTUACIÓN HÍBRIDA BLINDADA
-          if (q.modalidad !== 'sorteo') {
-            pronosticosTicket.forEach((pron: any) => {
-              const partido = partidosQ.find(p => p.id === pron.partido_id)
-              if (partido) {
-                const tieneResultado = partido.resultado_real !== null || (partido.goles_local !== null && partido.goles_visitante !== null);
-                
-                if (tieneResultado) {
-                  const pickStr = pron.eleccion_usuario?.replace(/\s+/g, '') || '';
-                  let realStr = '';
-                  
-                  if (partido.goles_local !== null && partido.goles_visitante !== null) {
-                    realStr = `${partido.goles_local}-${partido.goles_visitante}`;
-                  } else {
-                    realStr = partido.resultado_real?.replace(/\s+/g, '') || '';
-                  }
-
-                  if (pickStr === realStr) {
-                    puntos += (q.modalidad === 'marcador_exacto' ? 3 : 1);
-                    aciertos[pron.partido_id] = 'acierto_exacto';
-                  } else {
-                    const pickLEV = getLEV(pickStr);
-                    const realLEV = getLEV(realStr) || getLEV(partido.resultado_real);
-                    
-                    if (pickLEV && realLEV && pickLEV === realLEV) {
-                      puntos += 1;
-                      aciertos[pron.partido_id] = 'acierto_lev';
-                    } else {
-                      aciertos[pron.partido_id] = 'fallo';
-                    }
-                  }
-                } else {
-                  aciertos[pron.partido_id] = 'pendiente';
-                }
-              }
-            })
-          }
-
-          const golesReales = q.goles_totales_real !== null ? q.goles_totales_real : -1
-          const golesDiff = golesReales !== -1 ? Math.abs((ticket.prediccion_goles_total || 0) - golesReales) : 999
-
-          const userData = mapaUsuarios[ticket.usuario_id] || { nombre: 'Jugador de Mostrador', avatar_url: null }
-          const equipoAsignado = ticket.equipo_asignado_id ? mapaEquipos[ticket.equipo_asignado_id] : null
-
-          return {
-            id: ticket.id,
-            nombre: userData.nombre,
-            avatar_url: userData.avatar_url,
-            prediccionGoles: ticket.prediccion_goles_total || 0,
-            puntos: q.modalidad === 'sorteo' ? ticket.puntos_totales : puntos,
-            aciertos,
-            golesDiff,
-            pronosticos: pronosticosTicket,
-            equipoAsignado,
-            estaEliminado: q.modalidad === 'sorteo' && ticket.puntos_totales < 0
-          }
-        })
-
-        if (q.modalidad === 'sorteo') {
-           ranking.sort((a, b) => {
-              if (a.estaEliminado === b.estaEliminado) return 0;
-              return a.estaEliminado ? 1 : -1;
-           });
-        } else {
-           ranking.sort((a, b) => {
-             if (b.puntos !== a.puntos) return b.puntos - a.puntos
-             return a.golesDiff - b.golesDiff
-           })
-        }
-
-        ranking.forEach((item: any, idx) => {
-          if (q.modalidad === 'sorteo') {
-             item.posicion = idx + 1; 
-          } else {
-             if (idx > 0) {
-               const anterior = ranking[idx - 1];
-               if (item.puntos === anterior.puntos && item.golesDiff === anterior.golesDiff) {
-                 item.posicion = anterior.posicion; 
-               } else {
-                 item.posicion = idx + 1; 
-               }
-             } else {
-               item.posicion = 1;
-             }
-          }
-        });
-
-        const precioTicketMXN = q.precio_ticket ?? 30 
-        const totalBoletos = ranking.length
-        const recaudadoPesos = totalBoletos * precioTicketMXN
-        const premioPesos = recaudadoPesos * PORCENTAJE_PREMIO
-
-        return { 
-          ...q, 
-          ranking, 
-          partidos: partidosQ, 
-          recaudadoPesos, 
-          premioPesos 
-        }
-      })
-
-      const activas = quinielasProcesadas
-        .filter(q => q.estado === 'abierta' || (q.estado === 'cerrada' && q.goles_totales_real === null && q.modalidad !== 'sorteo') || (q.estado === 'abierta' && q.modalidad === 'sorteo'))
-        .sort((a, b) => new Date(a.fecha_cierre).getTime() - new Date(b.fecha_cierre).getTime())
-
-      const pasadas = quinielasProcesadas
-        .filter(q => (q.estado === 'cerrada' && q.goles_totales_real !== null) || (q.estado === 'cerrada' && q.modalidad === 'sorteo'))
-        .sort((a, b) => new Date(b.fecha_cierre).getTime() - new Date(a.fecha_cierre).getTime())
-
-      setQuinielasAbiertas(activas)
-      setHistorial(pasadas)
-
-      setQuinielaActiva((prevActiva) => {
-        if (prevActiva) {
-          const actualizada = quinielasProcesadas.find(q => q.id === prevActiva.id)
-          return actualizada || (activas.length > 0 ? activas[0] : quinielasProcesadas[0])
-        }
-        return activas.length > 0 ? activas[0] : quinielasProcesadas[0]
-      })
-
-    } catch (error: any) {
-      console.error("Error al cargar posiciones:", error)
-      setErrorCarga("Hubo un problema de red al cargar el ranking. Por favor, reintenta en unos segundos.")
-    } finally {
-      setCargando(false)
-    }
-  }, []) 
-
-  useEffect(() => {
-    cargarDatos()
-
-    const canalPosiciones = supabase.channel('posiciones_publicas_blindado')
-      .on('postgres', { event: '*', schema: 'public', table: 'partidos' }, () => {
-        cargarDatos(true);
-      })
-      .on('postgres', { event: '*', schema: 'public', table: 'quinielas' }, () => {
-        cargarDatos(true);
-      })
-      .on('postgres', { event: '*', schema: 'public', table: 'tickets' }, () => {
-        cargarDatos(true);
-      })
-      .on('postgres', { event: '*', schema: 'public', table: 'pronosticos' }, () => {
-        cargarDatos(true);
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(canalPosiciones);
-    }
-  }, [cargarDatos])
-
-  const toggleExpandirHistorial = (id: string) => {
-    setQuinielaExpandidaId(prevId => prevId === id ? null : id)
-  }
-
-  const toggleExpandirJugador = (id: string) => {
-    setJugadorExpandidoId(prevId => prevId === id ? null : id)
-  }
+  const toggleExpandirHistorial = (id: string) => setQuinielaExpandidaId(prevId => prevId === id ? null : id)
+  const toggleExpandirJugador = (id: string) => setJugadorExpandidoId(prevId => prevId === id ? null : id)
 
   if (cargando) {
     return (
@@ -246,14 +32,13 @@ export default function Posiciones() {
     )
   }
 
-  // ⚡ MEJORA UX: Renderizado de estado de error
   if (errorCarga) {
     return (
       <div className="w-full max-w-md mx-auto mt-10 p-6 bg-red-950/30 border border-red-900/50 rounded-2xl text-center shadow-xl animate-in fade-in">
         <span className="text-4xl mb-3 block">📡</span>
         <h3 className="text-red-400 font-black uppercase tracking-widest text-lg mb-2">Error de Conexión</h3>
         <p className="text-slate-400 text-sm mb-4">{errorCarga}</p>
-        <button onClick={() => cargarDatos()} className="bg-red-900/50 hover:bg-red-800 text-red-200 px-6 py-2 rounded-xl font-bold transition-colors">
+        <button onClick={recargarDatos} className="bg-red-900/50 hover:bg-red-800 text-red-200 px-6 py-2 rounded-xl font-bold transition-colors">
           Reintentar
         </button>
       </div>
@@ -265,13 +50,11 @@ export default function Posiciones() {
   const totalJugadores = quinielaActiva.ranking.length
   const partidosTerminados = quinielaActiva.partidos?.filter((p: any) => p.es_final).length || 0
   
-  // ⚡ CORRECCIÓN DE BUG: Respetar la zona horaria UTC proveniente de Supabase
   const fechaCierre = new Date(quinielaActiva.fecha_cierre)
   const yaPasoCierre = new Date().getTime() >= fechaCierre.getTime()
-  
-  // ⚡ CORRECCIÓN DE BUG: Blindaje del string contra espacios y minúsculas/mayúsculas en DB
   const mostrarPicks = quinielaActiva.estado?.trim().toLowerCase() === 'cerrada' || yaPasoCierre
   const esSorteo = quinielaActiva.modalidad === 'sorteo'
+  const esPromo = quinielaActiva.tipo_premiacion?.toLowerCase().includes('promo')
 
   const opcionesFecha: Intl.DateTimeFormatOptions = { day: '2-digit', month: 'short', hour: '2-digit', minute:'2-digit' };
   const fechaTextoVisible = fechaCierre.toLocaleDateString('es-MX', opcionesFecha).replace(',', ' a las');
@@ -280,8 +63,6 @@ export default function Posiciones() {
     if (url) return url;
     return `https://ui-avatars.com/api/?name=${encodeURIComponent(nombre)}&background=1e293b&color=3b82f6&size=100&bold=true`;
   }
-
-  const esPromo = quinielaActiva.tipo_premiacion?.toLowerCase().includes('promo');
 
   return (
     <div className="w-full max-w-4xl mt-2 animate-in fade-in duration-500 mb-20 space-y-6">
@@ -292,10 +73,7 @@ export default function Posiciones() {
             {quinielasAbiertas.map(qa => (
               <button 
                 key={qa.id} 
-                onClick={() => {
-                  setQuinielaActiva(qa);
-                  setJugadorExpandidoId(null);
-                }} 
+                onClick={() => { setQuinielaActiva(qa); setJugadorExpandidoId(null); }} 
                 className={`px-3 py-1.5 rounded-lg text-[10px] md:text-xs font-black uppercase transition-all ${
                   quinielaActiva?.id === qa.id 
                     ? 'bg-amber-500 text-slate-900 shadow-md scale-105' 
