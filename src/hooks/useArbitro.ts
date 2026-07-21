@@ -139,7 +139,6 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
         let pts = 0;
         const prons: Record<string, string> = {};
         
-        // 🚀 NUEVA LÓGICA DE CALIFICACIÓN AL VUELO (3 pts exacto, 1 pt tendencia)
         ticket.pronosticos.forEach((pr: any) => {
           prons[pr.partido_id] = pr.eleccion_usuario;
           const p = qData.partidos.find((par: any) => par.id === pr.partido_id);
@@ -149,14 +148,13 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
               if (pr.eleccion_usuario.includes('-') && p.goles_local !== null && p.goles_visitante !== null) {
                 const [pl, pv] = pr.eleccion_usuario.split('-').map(Number);
                 if (pl === p.goles_local && pv === p.goles_visitante) {
-                  pts += 3; // Marcador perfecto
+                  pts += 3;
                 } else {
                   const tendenciaPred = pl > pv ? 'L' : pl < pv ? 'V' : 'E';
-                  if (tendenciaPred === p.resultado_real) pts += 1; // Solo atinó al ganador/empate
+                  if (tendenciaPred === p.resultado_real) pts += 1;
                 }
               }
             } else {
-              // Modalidad Clásica (L-E-V)
               if (p.resultado_real === pr.eleccion_usuario) pts++;
             }
           }
@@ -280,7 +278,6 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
         for (const ticket of tickets) {
           let puntos = 0;
           
-          // 🚀 NUEVA LÓGICA DE CALIFICACIÓN PARA GUARDADO EN DB
           for (const pronostico of ticket.pronosticos || []) {
             const resDir = resultadosReales[pronostico.partido_id];
             const marcReal = marcadoresReales[pronostico.partido_id];
@@ -293,10 +290,10 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
                   const rv = parseInt(marcReal.v);
                   
                   if (pl === rl && pv === rv) {
-                    puntos += 3; // 3 Puntos: Marcador Exacto
+                    puntos += 3;
                   } else {
                     const tendenciaPred = pl > pv ? 'L' : pl < pv ? 'V' : 'E';
-                    if (tendenciaPred === resDir) puntos += 1; // 1 Punto: Tendencia (Consolación)
+                    if (tendenciaPred === resDir) puntos += 1;
                   }
                 }
               } else {
@@ -372,6 +369,15 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
   const cerrarJornadaDefinitivo = async () => {
     if (!quiniela) return;
     
+    // 🛡️ INGENIERÍA: BLOQUEO DEFENSIVO ESTRICTO
+    // Evita cerrar caja si faltan partidos por capturar.
+    if (quiniela.modalidad !== 'sorteo') {
+      const faltan = partidos.filter(p => !resultadosReales[p.id]).length;
+      if (faltan > 0) {
+        return toast.error(`🚨 Faltan ${faltan} partido(s) por capturar. La liquidación está bloqueada para prevenir pagos erróneos.`);
+      }
+    }
+
     if (golesReales === '' && quiniela.modalidad !== 'sorteo') return toast.error('🚨 Ingresa primero el "Resultado Oficial" de goles totales.');
     if (!rankingAdmin || rankingAdmin.length === 0) return toast.error('No hay tickets registrados.');
     if (operacionEnCurso.current) return;
@@ -609,8 +615,12 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     finally { setGuardandoEdicionTicket(false); operacionEnCurso.current = false; }
   };
 
+  // 💡 INGENIERÍA: Variables derivadas para UX de liquidación segura
+  const partidosPendientes = partidos.filter(p => !resultadosReales[p.id]).length;
+  const sePuedeLiquidar = partidos.length > 0 && partidosPendientes === 0;
+
   return {
-    state: { cargando, vistaActual, equipos, quinielasAbiertas, quinielasCerradas, quiniela, partidos, resultadosReales, marcadoresReales, esFinalReal, golesReales, calificando, rankingAdmin, busquedaJugador, tipoImpresion, ticketAImprimir },
+    state: { cargando, vistaActual, equipos, quinielasAbiertas, quinielasCerradas, quiniela, partidos, resultadosReales, marcadoresReales, esFinalReal, golesReales, calificando, rankingAdmin, busquedaJugador, tipoImpresion, ticketAImprimir, partidosPendientes, sePuedeLiquidar },
     setters: { setVistaActual, setGolesReales, setBusquedaJugador, setTicketAImprimir, setTipoImpresion },
     actions: { 
       cargarDetallesQuiniela, handleMarcadorExacto, handleToggleEsFinal, guardarYCalificar, 

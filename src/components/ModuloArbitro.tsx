@@ -258,7 +258,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                     <span>🎲</span> Bombo Virtual (Sorteo)
                   </h3>
                   
-                  {/* ESTADÍSTICAS DE SUPERVIVENCIA (Sugerencia de Ingeniería UX) */}
                   {sorteoRealizado && (
                     <div className="flex gap-2 text-[10px] font-black uppercase tracking-widest">
                       <div className="bg-green-950/40 border border-green-900/50 text-green-400 px-3 py-1.5 rounded-lg shadow-inner">
@@ -362,7 +361,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
               </div>
             ) : (
               <>
-                {/* 👈 CÓDIGO ORIGINAL PARA PARTIDOS TRADICIONALES Y MARCADOR EXACTO */}
                 <div className="bg-slate-900/60 rounded-xl border border-slate-800 overflow-hidden shadow-sm mt-4">
                   <div className="bg-slate-950 p-2.5 border-b border-slate-800 flex justify-between items-center gap-2">
                     <div className="flex items-center gap-2">
@@ -472,6 +470,14 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                 {/* SECCIÓN FINAL (CERRAR JORNADA TRADICIONAL) */}
                 {!esHistoricoLiquidado && (
                   <div className="flex flex-col md:flex-row items-center gap-3 border-t border-slate-800 pt-4 mt-2">
+                    
+                    {/* 🛡️ BLOQUEO DEFENSIVO VISUAL: Advertencia de partidos faltantes */}
+                    {s.partidosPendientes > 0 && !esSorteo && (
+                        <div className="w-full col-span-full mb-2 p-2 bg-amber-950/40 border border-amber-900/50 rounded-lg text-center text-[10px] md:text-xs font-bold text-amber-500 animate-pulse">
+                            ⚠️ Faltan {s.partidosPendientes} partido(s) por capturar resultado. La liquidación está bloqueada.
+                        </div>
+                    )}
+
                     <div className="w-full md:w-1/3 p-3 bg-red-950/20 border border-red-900/40 rounded-xl text-center flex flex-col justify-center items-center gap-1.5">
                       <label className="text-red-500 font-black uppercase text-[9px] tracking-widest">Total Goles Oficial</label>
                       <input type="number" min="0" value={s.golesReales} onChange={(e) => set.setGolesReales(e.target.value)} className="w-20 bg-slate-950 border border-red-900/50 rounded-lg px-2 py-1 text-center text-xl font-black text-white focus:outline-none focus:ring-1 focus:ring-red-500" />
@@ -486,8 +492,15 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                         {guardadoBloqueado ? '⚠️ Completa el Marcador' : '💾 Guardar Avance'}
                       </button>
 
-                      <button onClick={a.cerrarJornadaDefinitivo} disabled={s.calificando || totalBoletosAdmin === 0} className={`flex-1 py-3 rounded-xl font-black text-[10px] uppercase text-white transition-transform active:scale-95 ${esCualquierPromo ? 'bg-purple-600 hover:bg-purple-500 shadow-[0_0_15px_rgba(147,51,234,0.3)]' : 'bg-red-600 hover:bg-red-500 shadow-[0_0_15px_rgba(220,38,38,0.3)]'} disabled:opacity-50 disabled:active:scale-100`}>
-                        {esCualquierPromo ? '🎁 Cerrar y Pagar' : '🏆 Cerrar y Liquidar'}
+                      <button 
+                        onClick={a.cerrarJornadaDefinitivo} 
+                        disabled={s.calificando || totalBoletosAdmin === 0 || (!s.sePuedeLiquidar && !esSorteo)} 
+                        className={`flex-1 py-3 rounded-xl font-black text-[10px] uppercase text-white transition-transform active:scale-95 ${
+                          (!s.sePuedeLiquidar && !esSorteo) ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed opacity-70' :
+                          esCualquierPromo ? 'bg-purple-600 hover:bg-purple-500 shadow-[0_0_15px_rgba(147,51,234,0.3)]' : 'bg-red-600 hover:bg-red-500 shadow-[0_0_15px_rgba(220,38,38,0.3)]'
+                        } disabled:opacity-50 disabled:active:scale-100`}
+                      >
+                        {(!s.sePuedeLiquidar && !esSorteo) ? '🔒 Liquidación Bloqueada' : esCualquierPromo ? '🎁 Cerrar y Pagar' : '🏆 Cerrar y Liquidar'}
                       </button>
                     </div>
                   </div>

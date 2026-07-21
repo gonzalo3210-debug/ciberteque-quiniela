@@ -1,7 +1,7 @@
 // src/hooks/useCreadorJornadas.ts
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import toast from 'react-hot-toast'; // ⚡ NUEVO: Necesario para las notificaciones al clonar
+import toast from 'react-hot-toast';
 
 export interface PartidoInput {
   local: string;
@@ -10,7 +10,7 @@ export interface PartidoInput {
 }
 
 export type TipoPremiacion = 'unico' | 'top2' | 'top3' | 'promo_unico' | 'promo_top2';
-export type Modalidad = 'clasica' | 'marcador_exacto' | 'sorteo'; // 👈 ACTUALIZADO
+export type Modalidad = 'clasica' | 'marcador_exacto' | 'sorteo';
 
 export function useCreadorJornadas() {
   // Estados del formulario
@@ -24,7 +24,7 @@ export function useCreadorJornadas() {
   const [modalidad, setModalidad] = useState<Modalidad>('clasica');
   const [soloAdmins, setSoloAdmins] = useState(false);
 
-  // ⚡ NUEVO: Estado para guardar los IDs de los 8 equipos del Sorteo Mundial
+  // Estado para guardar los IDs de los 8 equipos del Sorteo Mundial
   const [equiposSorteo, setEquiposSorteo] = useState<string[]>([]);
 
   // Estados de control
@@ -45,7 +45,7 @@ export function useCreadorJornadas() {
         
         if (datos.modalidad) setModalidad(datos.modalidad);
         if (datos.soloAdmins !== undefined) setSoloAdmins(datos.soloAdmins);
-        if (datos.equiposSorteo) setEquiposSorteo(datos.equiposSorteo); // 👈 Cargar equipos de sorteo
+        if (datos.equiposSorteo) setEquiposSorteo(datos.equiposSorteo);
       } catch (error) {
         console.error("Error leyendo borrador:", error);
       }
@@ -84,7 +84,7 @@ export function useCreadorJornadas() {
     setPartidosNuevos(partidosNuevos.filter((_, i) => i !== index));
   };
 
-  // ⚡ NUEVO: Función para seleccionar/quitar equipos del Sorteo
+  // Función para seleccionar/quitar equipos del Sorteo
   const toggleEquipoSorteo = (equipoId: string) => {
     setEquiposSorteo(prev => {
       if (prev.includes(equipoId)) return prev.filter(id => id !== equipoId);
@@ -96,7 +96,7 @@ export function useCreadorJornadas() {
     });
   };
 
-  // ⚡ NUEVO: Función para Clonar Sorteo Anterior (Fricción Cero en ventas)
+  // Función para Clonar Sorteo Anterior
   const clonarUltimoSorteo = async () => {
     const idToast = toast.loading('Buscando última sala de sorteo...');
     try {
@@ -129,7 +129,7 @@ export function useCreadorJornadas() {
     setPartidosNuevos([{ local: '', visitante: '', fecha_hora: '' }]);
     setModalidad('clasica'); 
     setSoloAdmins(false); 
-    setEquiposSorteo([]); // 👈 Limpiar selección de sorteo
+    setEquiposSorteo([]); 
     localStorage.removeItem('ciberteque_borrador_jornada');
   };
 
@@ -139,28 +139,30 @@ export function useCreadorJornadas() {
       return { success: false, message: "Ponle nombre a la jornada y fecha de cierre." };
     }
 
-    // ⚡ NUEVO: Validación estricta para asegurar que la modalidad Sorteo tenga 8 equipos
     if (modalidad === 'sorteo' && equiposSorteo.length !== 8) {
       return { success: false, message: `Selecciona exactamente 8 equipos. Actualmente tienes ${equiposSorteo.length}.` };
     }
     
     setCreando(true);
     try {
+      // ⚡ INGENIERÍA: Conversión estricta de la hora local a UTC antes de tocar la BD
+      const fechaCierreUTC = new Date(fechaCierre).toISOString();
+
       // 1. Insertar Quiniela
       const { data: q, error: qErr } = await supabase.from('quinielas').insert([{ 
         nombre_jornada: nombreJornada, 
         precio_ticket: parseInt(precioTicket), 
-        fecha_cierre: fechaCierre, 
+        fecha_cierre: fechaCierreUTC, 
         tipo_premiacion: tipoPremiacion, 
         estado: 'abierta',
         modalidad: modalidad, 
         solo_admins: soloAdmins,
-        equipos_sorteo: modalidad === 'sorteo' ? equiposSorteo : [] // 👈 Solo se insertan si es Sorteo
+        equipos_sorteo: modalidad === 'sorteo' ? equiposSorteo : [] 
       }]).select().single();
       
       if (qErr) throw qErr;
       
-      // 2. Ordenar y preparar partidos (👈 ACTUALIZADO: Solo se ejecuta si NO es sorteo)
+      // 2. Ordenar y preparar partidos
       if (modalidad !== 'sorteo') {
         const partidosOrdenados = [...partidosNuevos].sort((a, b) => {
           if (a.fecha_hora && b.fecha_hora) return new Date(a.fecha_hora).getTime() - new Date(b.fecha_hora).getTime();
@@ -173,7 +175,8 @@ export function useCreadorJornadas() {
           quiniela_id: q.id, 
           equipo_local: p.local, 
           equipo_visitante: p.visitante, 
-          fecha_hora: p.fecha_hora || null 
+          // ⚡ INGENIERÍA: Aplicamos la misma conversión estricta a la hora de cada partido
+          fecha_hora_partido: p.fecha_hora ? new Date(p.fecha_hora).toISOString() : null 
         }));
         
         // 3. Insertar Partidos
