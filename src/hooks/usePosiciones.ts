@@ -1,3 +1,4 @@
+// src/hooks/usePosiciones.ts
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 // 🔥 Importamos nuestras consultas centralizadas
@@ -61,7 +62,13 @@ export function usePosiciones(rolUsuario?: string) {
 
       // ⚡ 3. PROCESAMIENTO EN MEMORIA (El array anidado ya trae la data lista)
       const quinielasProcesadas = qData.map(q => {
-        const partidosQ = q.partidos || []
+        // 🛠️ CORRECCIÓN DE INGENIERÍA: Ordenamos los partidos cronológicamente antes de procesar
+        const partidosQ = [...(q.partidos || [])].sort((a: any, b: any) => {
+          const tiempoA = new Date(a.fecha_hora_partido || a.fecha_hora || 0).getTime();
+          const tiempoB = new Date(b.fecha_hora_partido || b.fecha_hora || 0).getTime();
+          return tiempoA - tiempoB;
+        });
+
         const ticketsQ = q.tickets || []
 
         const ranking = ticketsQ.map((ticket: any) => {
