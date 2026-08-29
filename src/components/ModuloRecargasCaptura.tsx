@@ -12,7 +12,20 @@ interface ModuloRecargasCapturaProps {
 }
 
 export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: ModuloRecargasCapturaProps) {
-  const cajero = useCajero(actualizarSaldoGlobal);
+  // 👇 1. NUEVO: Obtenemos el ID del Admin logueado para que nunca sea nulo
+  const [adminId, setAdminId] = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session?.user) {
+        setAdminId(data.session.user.id);
+      }
+    });
+  }, []);
+
+  // 👇 2. AHORA SÍ: Le pasamos el adminId a nuestro hook del cajero
+  const cajero = useCajero(actualizarSaldoGlobal, adminId);
+  
   const captura = useCapturaFisica(actualizarSaldoGlobal);
 
   const [metodoPago, setMetodoPago] = useState<'efectivo' | 'transferencia' | 'fiado'>('efectivo');
@@ -68,7 +81,6 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
     }
   }, [vista, captura.quiniela?.id, quinielasCapturables.length]);
 
-  // ⚡ NUEVO: Función de búsqueda aislada y conectada al Debounce
   const ejecutarBusqueda = async (valor: string) => {
     const { data } = await supabase
       .from('usuarios')
@@ -176,7 +188,6 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                       </div>
                     </div>
                     
-                    {/* ⚡ MODIFICACIÓN UX: Botones Condicionales e Interactivos */}
                     <div className="flex flex-wrap gap-2 w-full md:w-auto">
                       <button onClick={() => cajero.verHistorial(u.id)} className="bg-slate-800 hover:bg-slate-700 px-3 py-2 rounded-lg text-[10px] font-black uppercase transition-all text-slate-300 border border-slate-700 flex-1 md:flex-none shadow-md">📜 Historial</button>
                       
@@ -239,7 +250,6 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                             }`} 
                           />
                         </div>
-                        {/* ⚡ MODIFICACIÓN UX: Botón de confirmación visualmente acorde a la acción */}
                         <button 
                           onClick={() => handleProcesarOperacion(u)} 
                           className={`text-white font-black px-6 py-2.5 rounded-lg text-[10px] uppercase tracking-widest transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed ${

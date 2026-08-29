@@ -1,6 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+// 🔥 Importamos nuestro nuevo proveedor de autenticación global (Modularidad Estricta)
+import { AuthProvider } from "@/contexts/AuthContext";
+// 🔔 Importamos el Centro de Notificaciones global
+import CentroNotificaciones from "@/components/CentroNotificaciones";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -39,7 +43,22 @@ export default function RootLayout({
       lang="es"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col relative bg-[#020617] text-slate-200">
+        {/* 🔥 Envolvemos la app para que cualquier componente pueda usar la sesión sin tocar el disco */}
+        <AuthProvider>
+          
+          {/* Contenido principal de la aplicación */}
+          {children}
+          
+          {/* 
+            🔔 INGENIERÍA: Widget flotante global. 
+            Lo colocamos aquí al final del body para que flote naturalmente.
+            El componente en sí ya contiene las coordenadas "fixed".
+          */}
+          <CentroNotificaciones />
+          
+        </AuthProvider>
+      </body>
     </html>
   );
 }

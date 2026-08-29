@@ -1,10 +1,11 @@
 // src/hooks/usePosiciones.ts
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
-// 🔥 Importamos nuestras consultas centralizadas
 import { obtenerDatosAnidadosPosiciones, obtenerCatalogoUsuarios, obtenerCatalogoEquipos } from '@/lib/queries'
+import { useAuth } from '@/contexts/AuthContext' 
 
 export function usePosiciones(rolUsuario?: string) {
+  const { usuario } = useAuth(); 
   const [quinielasAbiertas, setQuinielasAbiertas] = useState<any[]>([]) 
   const [quinielaActiva, setQuinielaActiva] = useState<any>(null)
   const [historial, setHistorial] = useState<any[]>([])
@@ -18,7 +19,6 @@ export function usePosiciones(rolUsuario?: string) {
     setErrorCarga(null)
 
     try {
-      // ⚡ 1. LLAMADA OPTIMIZADA: Trae quinielas + partidos + tickets + pronósticos de un solo golpe
       const { data: qData, error: qError } = await obtenerDatosAnidadosPosiciones(rolUsuario, 10);
       if (qError) throw qError;
 
@@ -27,13 +27,19 @@ export function usePosiciones(rolUsuario?: string) {
         return
       }
 
-      // ⚡ 2. CATÁLOGOS LIGEROS EN PARALELO
+      const todosLosTickets = qData.flatMap((q: any) => q.tickets || []);
+      const ticketIds = todosLosTickets.map((t: any) => t.id);
+
       const [ 
         { data: uData, error: uError }, 
-        { data: eData, error: eError } 
+        { data: eData, error: eError },
+        { data: rData } 
       ] = await Promise.all([
         obtenerCatalogoUsuarios(),
-        obtenerCatalogoEquipos()
+        obtenerCatalogoEquipos(),
+        ticketIds.length > 0 
+          ? supabase.from('reacciones').select('*').in('entidad_id', ticketIds).eq('entidad_tipo', 'jugada')
+          : Promise.resolve({ data: [] })
       ]);
 
       if (uError) throw uError;
@@ -44,6 +50,34 @@ export function usePosiciones(rolUsuario?: string) {
 
       const mapaEquipos: Record<string, any> = {}
       if (eData) eData.forEach(e => mapaEquipos[e.id] = e)
+
+      const mapaReacciones: Record<string, Record<string, {count: number, me: boolean, usuarios: any[]}>> = {};
+      
+      if (rData && Array.isArray(rData)) {
+        rData.forEach((r: any) => {
+          const tId = r.entidad_id;
+          const emj = r.emoji;
+
+          if (!mapaReacciones[tId]) mapaReacciones[tId] = {};
+          if (!mapaReacciones[tId][emj]) {
+            mapaReacciones[tId][emj] = { count: 0, me: false, usuarios: [] };
+          }
+          
+          mapaReacciones[tId][emj].count += 1;
+          
+          const esMio = r.emisor_id === usuario?.id;
+          if (esMio) {
+            mapaReacciones[tId][emj].me = true; 
+          }
+
+          const emisorData = mapaUsuarios[r.emisor_id] || { nombre: 'Anónimo', avatar_url: null };
+          
+          mapaReacciones[tId][emj].usuarios.push({
+            nombre: esMio ? 'Tú' : emisorData.nombre,
+            avatar_url: emisorData.avatar_url
+          });
+        });
+      }
 
       const getLEV = (marcador: string) => {
         if (!marcador) return null;
@@ -60,9 +94,7 @@ export function usePosiciones(rolUsuario?: string) {
         return null;
       }
 
-      // ⚡ 3. PROCESAMIENTO EN MEMORIA (El array anidado ya trae la data lista)
       const quinielasProcesadas = qData.map(q => {
-        // 🛠️ CORRECCIÓN DE INGENIERÍA: Ordenamos los partidos cronológicamente antes de procesar
         const partidosQ = [...(q.partidos || [])].sort((a: any, b: any) => {
           const tiempoA = new Date(a.fecha_hora_partido || a.fecha_hora || 0).getTime();
           const tiempoB = new Date(b.fecha_hora_partido || b.fecha_hora || 0).getTime();
@@ -121,6 +153,7 @@ export function usePosiciones(rolUsuario?: string) {
 
           return {
             id: ticket.id,
+            usuario_id: ticket.usuario_id, 
             nombre: userData.nombre,
             avatar_url: userData.avatar_url,
             prediccionGoles: ticket.prediccion_goles_total || 0,
@@ -129,6 +162,7 @@ export function usePosiciones(rolUsuario?: string) {
             golesDiff,
             pronosticos: pronosticosTicket,
             equipoAsignado,
+            conteoReacciones: mapaReacciones[ticket.id] || {}, 
             estaEliminado: q.modalidad === 'sorteo' && ticket.puntos_totales < 0
           }
         })
@@ -201,27 +235,30 @@ export function usePosiciones(rolUsuario?: string) {
     } finally {
       setCargando(false)
     }
-  }, [rolUsuario]) 
+  }, [rolUsuario, usuario?.id]) 
 
   useEffect(() => {
     cargarDatos()
 
+    let timeoutId: NodeJS.Timeout;
+    const recargaSilenciosaRealtime = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        cargarDatos(true); // Recarga transparente
+      }, 500); 
+    };
+
+    // ✨ CORRECCIÓN: 'postgres' no existe, debe ser 'postgres_changes'
     const canalPosiciones = supabase.channel('posiciones_publicas_blindado')
-      .on('postgres', { event: '*', schema: 'public', table: 'partidos' }, () => {
-        cargarDatos(true);
-      })
-      .on('postgres', { event: '*', schema: 'public', table: 'quinielas' }, () => {
-        cargarDatos(true);
-      })
-      .on('postgres', { event: '*', schema: 'public', table: 'tickets' }, () => {
-        cargarDatos(true);
-      })
-      .on('postgres', { event: '*', schema: 'public', table: 'pronosticos' }, () => {
-        cargarDatos(true);
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'partidos' }, recargaSilenciosaRealtime)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'quinielas' }, recargaSilenciosaRealtime)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, recargaSilenciosaRealtime)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pronosticos' }, recargaSilenciosaRealtime)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reacciones' }, recargaSilenciosaRealtime)
       .subscribe();
 
     return () => {
+      clearTimeout(timeoutId);
       supabase.removeChannel(canalPosiciones);
     }
   }, [cargarDatos])
@@ -233,6 +270,6 @@ export function usePosiciones(rolUsuario?: string) {
     cargando,
     errorCarga,
     setQuinielaActiva,
-    recargarDatos: () => cargarDatos(false)
+    recargarDatos: (esSilenciosa: boolean = false) => cargarDatos(esSilenciosa)
   }
 }

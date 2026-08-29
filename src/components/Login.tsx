@@ -1,20 +1,24 @@
 'use client'
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
+// ⚡ Importamos nuestro contexto global (Modularidad Estricta)
+import { useAuth } from '@/contexts/AuthContext'
 
-export default function Login({ onLogin, onSwitchToRegister }: { onLogin: (usuario: any) => void, onSwitchToRegister?: () => void }) {
+export default function Login({ onLogin, onSwitchToRegister }: { onLogin?: (usuario: any) => void, onSwitchToRegister?: () => void }) {
   const [telefono, setTelefono] = useState('')
   const [nip, setNip] = useState('') 
   const [cargando, setCargando] = useState(false)
   const [error, setError] = useState('')
+
+  // ⚡ Extraemos la función de acceso del estado global
+  const { login } = useAuth()
 
   // 🔐 DEBE SER IDÉNTICA A LA DEL REGISTRO
   // 🔐 DEBE SER IDÉNTICA EN LOGIN, REGISTRO Y GESTOR DE USUARIOS
   const encriptarNIP = async (pin: string, tel: string) => {
     const textoAEncriptar = `${pin}-${tel}-CiberTequeSeguro2024`
     
-    // PLAN B: Si estás probando en red local HTTP desde un celular, el navegador bloquea 'crypto.subtle'.
-    // Usamos este hash matemático básico para que la app no truene en tus pruebas locales.
+    // PLAN B: Para pruebas en red local HTTP
     if (typeof window !== 'undefined' && (!window.crypto || !window.crypto.subtle)) {
       let hash = 0;
       for (let i = 0; i < textoAEncriptar.length; i++) {
@@ -25,9 +29,9 @@ export default function Login({ onLogin, onSwitchToRegister }: { onLogin: (usuar
       return Math.abs(hash).toString(16);
     }
 
-    // PLAN A: Encriptación Militar SHA-256 (Funciona en Producción HTTPS y Localhost)
+    // PLAN A: Encriptación Militar SHA-256
     const msgUint8 = new TextEncoder().encode(textoAEncriptar)
-    const hashBuffer = await window.crypto.subtle.digest('SHA-256', msgUint8) // Añadido window.
+    const hashBuffer = await window.crypto.subtle.digest('SHA-256', msgUint8)
     const hashArray = Array.from(new Uint8Array(hashBuffer))
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
   }
@@ -51,28 +55,27 @@ export default function Login({ onLogin, onSwitchToRegister }: { onLogin: (usuar
         return
       }
 
-      // 2. Encriptamos el NIP que el usuario acaba de escribir
+      // 2. Encriptamos el NIP
       const nipEncriptado = await encriptarNIP(nip, telefono)
 
-      // 3. 🧠 LÓGICA DE MIGRACIÓN SILENCIOSA
+      // 3. 🧠 LÓGICA DE MIGRACIÓN SILENCIOSA Y SETEO GLOBAL
       if (usuario.nip === nipEncriptado) {
-        // CASO A: Usuario moderno. El NIP ya estaba encriptado en BD y coincide.
-        onLogin(usuario)
+        // Usuario moderno
+        login(usuario) // ⚡ Dispara el contexto global
+        if (onLogin) onLogin(usuario) // ⚡ Mantiene compatibilidad con el Layout/Page
       } 
       else if (usuario.nip === nip) {
-        // CASO B: Usuario antiguo. El NIP en la BD es texto plano y coincide.
-        // Lo actualizamos silenciosamente a la versión segura en Supabase.
+        // Usuario antiguo, migración silenciosa
         await supabase
           .from('usuarios')
           .update({ nip: nipEncriptado })
           .eq('id', usuario.id)
         
-        // Actualizamos el usuario en memoria y le damos acceso
         const usuarioActualizado = { ...usuario, nip: nipEncriptado }
-        onLogin(usuarioActualizado)
+        login(usuarioActualizado) // ⚡ Dispara el contexto global
+        if (onLogin) onLogin(usuarioActualizado)
       } 
       else {
-        // CASO C: NIP incorrecto.
         setError('NIP incorrecto. Verifica tus datos.')
       }
 
