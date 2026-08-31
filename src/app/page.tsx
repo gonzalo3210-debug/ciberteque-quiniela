@@ -12,6 +12,8 @@ import Perfil from '@/components/Perfil'
 import ModuloFinanzas from '@/components/ModuloFinanzas'
 // 👇 IMPORTAMOS EL NUEVO GESTOR DE USUARIOS (Ajusta la ruta si lo guardaste en admin/)
 import GestorUsuarios from '@/components/GestorUsuarios' 
+// 🔔 Importamos el Centro de Notificaciones
+import CentroNotificaciones from '@/components/CentroNotificaciones'
 
 export default function Home() {
   const [usuarioActivo, setUsuarioActivo] = useState<any>(null)
@@ -100,15 +102,25 @@ export default function Home() {
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center py-4 px-6 bg-slate-950 text-white selection:bg-blue-500/30">
+    <main className="flex min-h-screen flex-col items-center py-4 px-6 bg-slate-950 text-white selection:bg-blue-500/30 relative">
       
-      <div className="text-center mb-4">
-        <h1 className="text-6xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-blue-400 to-blue-700 drop-shadow-[0_0_15px_rgba(37,99,235,0.4)]">
-          CLUB PRONÓSTICOS
-        </h1>
-        <p className="text-slate-500 mt-3 text-lg font-medium tracking-wide uppercase">
-          Demuestra que eres el que más sabe de fútbol
-        </p>
+      {/* 🔔 ENCABEZADO CON CAMPANITA FIJA EN LA ESQUINA SUPERIOR DERECHA */}
+      <div className="w-full max-w-5xl flex items-center justify-between mb-4 relative px-2">
+        <div className="w-10"></div> {/* Espaciador izquierdo para equilibrar */}
+        
+        <div className="text-center flex-1">
+          <h1 className="text-5xl md:text-6xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-blue-400 to-blue-700 drop-shadow-[0_0_15px_rgba(37,99,235,0.4)]">
+            CLUB PRONÓSTICOS
+          </h1>
+          <p className="text-slate-500 mt-2 text-sm md:text-lg font-medium tracking-wide uppercase">
+            Demuestra que eres el que más sabe de fútbol
+          </p>
+        </div>
+
+        {/* Campana posicionada estéticamente en la esquina superior derecha */}
+        <div className="absolute right-0 top-0">
+          <CentroNotificaciones />
+        </div>
       </div>
 
       {usuarioActivo ? (

@@ -369,8 +369,6 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
   const cerrarJornadaDefinitivo = async () => {
     if (!quiniela) return;
     
-    // 🛡️ INGENIERÍA: BLOQUEO DEFENSIVO ESTRICTO
-    // Evita cerrar caja si faltan partidos por capturar.
     if (quiniela.modalidad !== 'sorteo') {
       const faltan = partidos.filter(p => !resultadosReales[p.id]).length;
       if (faltan > 0) {
@@ -410,10 +408,14 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     const idToast = toast.loading('Liquidando premios y cerrando jornada...');
     
     try {
+      let idsGanadores: string[] = [];
+
       if (quiniela.modalidad === 'sorteo') {
         const vivos = rankingAdmin.filter(r => !r.estaEliminado);
         if (vivos.length === 1) {
             const ganador = vivos[0];
+            idsGanadores.push(ganador.usuario_id); // ⚡ Guardamos ID ganador
+
             const { data: userData } = await supabase.from('usuarios').select('creditos_disponibles').eq('id', ganador.usuario_id).single();
             const nuevoSaldo = (userData?.creditos_disponibles || 0) + premioSorteo;
             
@@ -445,6 +447,8 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
         
         if (ganadores.length > 0) {
           for (const ganador of ganadores) {
+            idsGanadores.push(ganador.usuario_id); // ⚡ Guardamos ID ganador
+
             const { data: userData } = await supabase.from('usuarios').select('creditos_disponibles').eq('id', ganador.usuario_id).single();
             const nuevoSaldo = (userData?.creditos_disponibles || 0) + ganador.cantidad; 
             
@@ -458,6 +462,32 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
           toast.success(`🎉 ¡Jornada Cerrada!\nLos premios en efectivo han sido depositados.`, { id: idToast, duration: 6000 });
         } else {
           toast.success(`🎉 ¡Jornada Cerrada Exitosamente!\nNo hubo ganadores.`, { id: idToast, duration: 5000 });
+        }
+      }
+
+      // 📢 NUEVO: Notificación Masiva de Cierre y Resultados
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data: usuariosRegistrados } = await supabase.from('usuarios').select('id');
+
+      if (usuariosRegistrados && usuariosRegistrados.length > 0) {
+        const notificacionesResultados = usuariosRegistrados
+          .filter(u => u.id !== user?.id) 
+          .map(u => {
+            const esGanador = idsGanadores.includes(u.id);
+            const mensaje = esGanador 
+              ? `te felicita porque GANASTE en la ${quiniela.nombre_jornada} 🏆. ¡Tu premio ha sido depositado a tu cuenta!`
+              : `cerró oficialmente la ${quiniela.nombre_jornada}. 🏁 Los premios han sido repartidos, ¡revisa el podio!`;
+
+            return {
+              usuario_emisor_id: user?.id || null,
+              usuario_receptor_id: u.id,
+              tipo: 'resultado',
+              contenido: mensaje
+            };
+          });
+
+        if (notificacionesResultados.length > 0) {
+          await supabase.from('notificaciones').insert(notificacionesResultados);
         }
       }
 

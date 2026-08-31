@@ -3,7 +3,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNotificaciones } from '@/hooks/useNotificaciones';
 
 export default function CentroNotificaciones() {
-  // 👇 Agregamos limpiarTodasLasNotificaciones al destructuring
   const { notificaciones, noLeidas, cargando, marcarComoLeidas, limpiarTodasLasNotificaciones } = useNotificaciones();
   const [menuAbierto, setMenuAbierto] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -61,9 +60,10 @@ export default function CentroNotificaciones() {
   };
 
   if (!montado) {
+    // 🔥 CAMBIO: Se usa 'fixed' anclado a la parte superior derecha (top-4 right-4)
     return (
-      <div className="fixed bottom-24 right-6 md:bottom-24 md:right-10 z-[9999]">
-        <button className="w-14 h-14 bg-[#1a2035] border-2 border-slate-800 rounded-full flex items-center justify-center text-2xl shadow-2xl text-slate-400">
+      <div className="fixed top-4 right-4 md:top-6 md:right-8 z-[9999]">
+        <button className="w-12 h-12 md:w-14 md:h-14 bg-[#1a2035] border-2 border-slate-800 rounded-full flex items-center justify-center text-xl md:text-2xl shadow-2xl text-slate-400">
           🔔
         </button>
       </div>
@@ -71,7 +71,8 @@ export default function CentroNotificaciones() {
   }
 
   return (
-    <div className="fixed bottom-24 right-6 md:bottom-24 md:right-10 z-[9999]" ref={menuRef}>
+    // 🔥 CAMBIO: Contenedor 'fixed' para que flote al hacer scroll
+    <div className="fixed top-4 right-4 md:top-6 md:right-8 z-[9999]" ref={menuRef}>
       
       <div className="pointer-events-none fixed inset-0 z-[9999] overflow-hidden flex items-center justify-center">
         {animacionesFlotantes.map((anim) => (
@@ -90,11 +91,10 @@ export default function CentroNotificaciones() {
       </div>
 
       {menuAbierto && (
-        <div className="absolute right-0 bottom-full mb-4 w-72 md:w-80 bg-slate-900 border border-slate-700 rounded-2xl shadow-[0_0_30px_rgba(0,0,0,0.5)] overflow-hidden animate-in slide-in-from-bottom-5 origin-bottom-right">
+        <div className="absolute right-0 top-full mt-3 w-72 md:w-80 bg-slate-900 border border-slate-700 rounded-2xl shadow-[0_0_30px_rgba(0,0,0,0.5)] overflow-hidden animate-in slide-in-from-top-5 origin-top-right">
           
           <div className="bg-slate-950 p-4 border-b border-slate-800 flex justify-between items-center">
             <h3 className="text-slate-200 font-black uppercase text-[11px] tracking-widest">Notificaciones</h3>
-            {/* 👇 Cambiamos la validación y el evento onClick para limpiar todo */}
             {notificaciones.length > 0 && (
               <button onClick={() => limpiarTodasLasNotificaciones()} className="text-[9px] text-red-500 hover:text-red-400 font-bold uppercase transition-colors">
                 Limpiar Todo
@@ -161,11 +161,11 @@ export default function CentroNotificaciones() {
 
       <button 
         onClick={() => setMenuAbierto(!menuAbierto)}
-        className="w-14 h-14 bg-[#1a2035] border-2 border-slate-800 rounded-full flex items-center justify-center text-2xl shadow-2xl hover:scale-110 hover:border-amber-500/50 transition-all relative"
+        className="w-12 h-12 md:w-14 md:h-14 bg-[#1a2035] border-2 border-slate-800 rounded-full flex items-center justify-center text-xl md:text-2xl shadow-2xl hover:scale-110 hover:border-amber-500/50 transition-all relative"
       >
         <span className={`${noLeidas.length > 0 ? 'animate-wiggle text-amber-400' : 'text-slate-400'}`}>🔔</span>
         {noLeidas.length > 0 && (
-          <span className="absolute top-0 right-0 translate-x-1/4 -translate-y-1/4 bg-red-500 text-white text-[10px] font-black w-6 h-6 flex items-center justify-center rounded-full border-2 border-slate-900 shadow-md">
+          <span className="absolute top-0 right-0 translate-x-1/4 -translate-y-1/4 bg-red-500 text-white text-[10px] font-black w-5 h-5 md:w-6 md:h-6 flex items-center justify-center rounded-full border-2 border-slate-900 shadow-md">
             {noLeidas.length > 9 ? '9+' : noLeidas.length}
           </span>
         )}

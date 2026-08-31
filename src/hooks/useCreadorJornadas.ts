@@ -175,13 +175,44 @@ export function useCreadorJornadas() {
           quiniela_id: q.id, 
           equipo_local: p.local, 
           equipo_visitante: p.visitante, 
-          // ⚡ INGENIERÍA: Aplicamos la misma conversión estricta a la hora de cada partido
           fecha_hora_partido: p.fecha_hora ? new Date(p.fecha_hora).toISOString() : null 
         }));
         
         // 3. Insertar Partidos
         const { error: pErr } = await supabase.from('partidos').insert(partidosData);
         if (pErr) throw pErr;
+      }
+
+      // 📢 4. NUEVO: Notificación Masiva a Jugadores
+      if (!soloAdmins) {
+        // Obtenemos al usuario que crea la jornada (Tú)
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        // Obtenemos todos los usuarios registrados
+        const { data: usuariosRegistrados, error: errUsuarios } = await supabase
+          .from('usuarios')
+          .select('id');
+
+        if (!errUsuarios && usuariosRegistrados && usuariosRegistrados.length > 0) {
+          
+          // 👇 AQUÍ ESTÁ EL CAMBIO A "boleto"
+          const mensajeExtra = modalidad === 'sorteo' 
+            ? 'La sala de Supervivencia está abierta. ¡Consigue tu boleto!'
+            : '¡Ya puedes ingresar tu boleto!';
+
+          const notificacionesMasivas = usuariosRegistrados
+            .filter(u => u.id !== user?.id) // No te notificas a ti mismo
+            .map(u => ({
+              usuario_emisor_id: user?.id || null,
+              usuario_receptor_id: u.id,
+              tipo: 'jornada', // Este tipo renderiza "Club Pronósticos" y el ⚽
+              contenido: `ha publicado la ${nombreJornada}. ${mensajeExtra}`
+            }));
+
+          if (notificacionesMasivas.length > 0) {
+            await supabase.from('notificaciones').insert(notificacionesMasivas);
+          }
+        }
       }
 
       resetearFormulario();

@@ -3,8 +3,6 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 // 🔥 Importamos nuestro nuevo proveedor de autenticación global (Modularidad Estricta)
 import { AuthProvider } from "@/contexts/AuthContext";
-// 🔔 Importamos el Centro de Notificaciones global
-import CentroNotificaciones from "@/components/CentroNotificaciones";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -49,13 +47,6 @@ export default function RootLayout({
           
           {/* Contenido principal de la aplicación */}
           {children}
-          
-          {/* 
-            🔔 INGENIERÍA: Widget flotante global. 
-            Lo colocamos aquí al final del body para que flote naturalmente.
-            El componente en sí ya contiene las coordenadas "fixed".
-          */}
-          <CentroNotificaciones />
           
         </AuthProvider>
       </body>
