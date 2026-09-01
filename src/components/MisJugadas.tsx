@@ -3,6 +3,69 @@ import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useSincronizacionRealtime } from '@/hooks/useSincronizacionRealtime'
 
+// ⚡ MINI-COMPONENTE ACTUALIZADO: Maneja la cuenta regresiva y la transición automática a 0-0
+const ContadorPartido = ({ fechaHora }: { fechaHora: string | null }) => {
+  const [estado, setEstado] = useState<'espera' | 'vivo'>('espera');
+  const [texto, setTexto] = useState('');
+
+  useEffect(() => {
+    if (!fechaHora) return;
+
+    const actualizarReloj = () => {
+      const ahora = new Date().getTime();
+      const objetivo = new Date(fechaHora).getTime();
+      const diferencia = objetivo - ahora;
+
+      if (diferencia <= 0) {
+        setEstado('vivo');
+        return;
+      }
+
+      setEstado('espera');
+      const dias = Math.floor(diferencia / (1000 * 60 * 60 * 24));
+      const horas = Math.floor((diferencia % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const minutos = Math.floor((diferencia % (1000 * 60 * 60)) / (1000 * 60));
+      const segundos = Math.floor((diferencia % (1000 * 60)) / 1000);
+
+      if (dias > 0) {
+        setTexto(`${dias}D ${horas}H`);
+      } else {
+        const h = horas > 0 ? `${horas}h ` : '';
+        const m = minutos.toString().padStart(2, '0');
+        const s = segundos.toString().padStart(2, '0');
+        setTexto(`${h}${m}m ${s}s`);
+      }
+    };
+
+    actualizarReloj();
+    const intervalo = setInterval(actualizarReloj, 1000);
+    return () => clearInterval(intervalo);
+  }, [fechaHora]);
+
+  if (!fechaHora) return <span className="text-slate-600 font-mono text-[10px]">-</span>;
+
+  if (estado === 'vivo') {
+    return (
+      <div className="flex flex-col items-center gap-0.5 justify-center animate-in zoom-in duration-300">
+        <span className="text-[10px] font-black text-white leading-none">0-0</span>
+        <div className="flex items-center gap-1 mt-1">
+          <span className="text-[7px] font-black uppercase tracking-widest text-red-400">En Juego</span>
+          <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_5px_rgba(239,68,68,0.8)]"></span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col items-center justify-center text-slate-400">
+      <span className="text-[10px] mb-0.5">⏳</span>
+      <span className="text-[7px] md:text-[8px] font-black uppercase tracking-widest leading-none text-slate-300">
+        {texto}
+      </span>
+    </div>
+  );
+};
+
 export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
   const [gruposActivos, setGruposActivos] = useState<any[]>([])
   const [gruposCompletados, setGruposCompletados] = useState<any[]>([])
@@ -37,7 +100,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
           pronosticos (
             id,
             eleccion_usuario,
-            partidos (id, equipo_local, equipo_visitante, resultado_real, fecha_hora, goles_local, goles_visitante, es_final)
+            partidos (id, equipo_local, equipo_visitante, resultado_real, fecha_hora_partido, goles_local, goles_visitante, es_final)
           )
         `)
         .eq('usuario_id', usuarioId)
@@ -103,7 +166,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
             goles_local: pr.partidos?.goles_local,
             goles_visitante: pr.partidos?.goles_visitante,
             es_final: pr.partidos?.es_final,
-            fecha_hora: pr.partidos?.fecha_hora
+            fecha_hora: pr.partidos?.fecha_hora_partido 
           })).sort((a: any, b: any) => {
             if (!a.fecha_hora) return 1;
             if (!b.fecha_hora) return -1;
@@ -226,9 +289,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
   }
 
   const TarjetaGrupoAgrupado = ({ grupo, esActivo }: { grupo: any, esActivo: boolean }) => {
-    
-    const fechaCierreCorta = grupo.fecha_cierre ? grupo.fecha_cierre.substring(0, 16) : null;
-    const fechaCierreObj = new Date(fechaCierreCorta || grupo.fecha_cierre || 0);
+    const fechaCierreObj = new Date(grupo.fecha_cierre || 0);
     const ahora = new Date();
     const yaPasoLaHora = grupo.fecha_cierre ? (ahora > fechaCierreObj) : false;
     const yaHayResultados = grupo.partidos.some((p: any) => p.real !== null);
@@ -353,7 +414,8 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
                             </div>
                           </div>
                         ) : (
-                          <span className="text-slate-600 font-mono text-[10px]">-</span>
+                          // ⚡ El componente ahora se encarga de mostrar la fecha o el 0-0 automáticamente
+                          <ContadorPartido fechaHora={p.fecha_hora} />
                         )}
                       </td>
 
@@ -368,29 +430,23 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
                             const realV = p.goles_visitante;
 
                             if (!isNaN(pickL) && !isNaN(pickV) && realL !== null && realV !== null) {
-                              // Evaluamos la tendencia que pronosticó el usuario
                               const tendenciaPick = pickL > pickV ? 'L' : pickL < pickV ? 'V' : 'E';
                               
                               if (pickL === realL && pickV === realV) {
-                                // 🟢 Acierto Exacto
                                 color = 'bg-green-600 text-white shadow-[0_0_8px_rgba(34,197,94,0.3)] border border-green-500';
                               } else if (tendenciaPick === p.real) {
-                                // 🟡 Acierto de Tendencia (Atinó quién ganó o el empate)
                                 color = 'bg-amber-600 text-white shadow-[0_0_8px_rgba(217,119,6,0.3)] border border-amber-500';
                               } else {
-                                // 🔴 Fallo Total
                                 color = 'bg-red-950/60 text-red-500/50 border border-red-900/30';
                               }
                             } else {
                               color = 'bg-red-950/60 text-red-500/50 border border-red-900/30';
                             }
                           } else {
-                            // Modalidad Clásica L-E-V
                             if (pick === p.real) color = 'bg-green-600 text-white shadow-[0_0_8px_rgba(34,197,94,0.3)] border border-green-500'; 
                             else color = 'bg-red-950/60 text-red-500/50 border border-red-900/30'; 
                           }
                         } else {
-                          // Ajuste visual pre-partido
                           if (grupo.modalidad === 'marcador_exacto') {
                              color = 'bg-slate-800 text-slate-300 border border-slate-700'; 
                           } else {
