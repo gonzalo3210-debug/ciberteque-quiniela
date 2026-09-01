@@ -15,7 +15,7 @@ export const obtenerQuinielasActivas = async (rolUsuario?: string) => {
     .from('quinielas')
     .select(`
       id, nombre_jornada, precio_ticket, fecha_cierre, tipo_premiacion, modalidad, solo_admins,
-      partidos (id, equipo_local, equipo_visitante, fecha_hora, resultado_real)
+      partidos (id, equipo_local, equipo_visitante, fecha_hora_partido, resultado_real)
     `)
     .eq('estado', 'abierta')
     .order('fecha_cierre', { ascending: true });

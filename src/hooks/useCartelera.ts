@@ -14,7 +14,6 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
   const [guardando, setGuardando] = useState(false)
   const [errorCarga, setErrorCarga] = useState<string | null>(null)
   
-  // Para modalidad clásica (L,E,V) seguimos usando estado manual.
   const [golesTotales, setGolesTotales] = useState<string>('')
   
   const [mostrarReglas, setMostrarReglas] = useState(false) 
@@ -49,7 +48,8 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
         if (qData && qData.length > 0) {
           const ahora = new Date().getTime();
           const jornadasDisponibles = qData.filter(q => {
-            const cierre = new Date(q.fecha_cierre ? q.fecha_cierre.substring(0, 16) : q.fecha_cierre).getTime();
+            // ⚡ CORRECCIÓN AQUÍ: Quitamos substring(0, 16) de la fecha de cierre de la jornada
+            const cierre = new Date(q.fecha_cierre).getTime();
             return cierre > ahora;
           });
 
@@ -124,9 +124,9 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
     setQuinielaActual(quiniela)
     
     const partidosAcomodados = [...(quiniela.partidos || [])].sort((a: any, b: any) => {
-      if (!a.fecha_hora) return 1;
-      if (!b.fecha_hora) return -1;
-      return new Date(a.fecha_hora).getTime() - new Date(b.fecha_hora).getTime();
+      if (!a.fecha_hora_partido) return 1;
+      if (!b.fecha_hora_partido) return -1;
+      return new Date(a.fecha_hora_partido).getTime() - new Date(b.fecha_hora_partido).getTime();
     });
     
     setPartidos(partidosAcomodados)
@@ -153,7 +153,6 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
   
   const bloqueadoPorParticipacion = (esGratis && yaParticipo) || (esSorteo && lugaresDisponibles === 0);
 
-  // ⚡ INGENIERÍA: CÁLCULO DERIVADO DE GOLES EN TIEMPO REAL
   const golesAutomaticos = Object.values(selecciones).reduce((acc, val) => {
     if (!val) return acc;
     const [l, v] = val.split('-');
@@ -172,7 +171,8 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
   const guardarQuiniela = async () => {
     if (peticionEnCurso.current) return { error: 'Tu jugada ya se está procesando...' }
     
-    const cierre = new Date(quinielaActual.fecha_cierre ? quinielaActual.fecha_cierre.substring(0, 16) : quinielaActual.fecha_cierre).getTime();
+    // ⚡ CORRECCIÓN AQUÍ TAMBIÉN: Quitamos substring(0, 16) de la validación al guardar
+    const cierre = new Date(quinielaActual.fecha_cierre).getTime();
     if (new Date().getTime() > cierre) return { error: '¡El tiempo límite acaba de expirar!' }
 
     if (bloqueadoPorParticipacion) {
@@ -183,7 +183,6 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
     if (!aceptoReglas) return { error: 'Debes aceptar el reglamento.' }
     
     if (!esSorteo) {
-        // Validaciones estrictas unificadas
         const todasSeleccionadas = partidos.every(p => selecciones[p.id] && selecciones[p.id].trim() !== '');
         if (!todasSeleccionadas) return { error: 'Debes pronosticar todos los partidos antes de pagar.' }
 
@@ -227,7 +226,6 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
             usuario_id: usuarioActivo.id, 
             quiniela_id: quinielaActual.id, 
             metodo_ingreso: 'digital',
-            // ⚡ INGENIERÍA: Si es marcador exacto inyectamos la suma automática
             prediccion_goles_total: esMarcadorExacto ? golesAutomaticos : (parseInt(golesTotales) || 0)
           }];
 
@@ -295,7 +293,7 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
   return {
     cargando, errorCarga, quinielasActivas, quinielaActual, partidos, selecciones, golesTotales, guardando, 
     mostrarReglas, aceptoReglas, yaParticipo, esGratis, esSorteo, esMarcadorExacto, bloqueadoPorParticipacion, 
-    lugaresDisponibles, cantidadBoletos, golesAutomaticos, // ⚡ Exportamos la nueva variable
+    lugaresDisponibles, cantidadBoletos, golesAutomaticos, 
     setCantidadBoletos, setGolesTotales, setMostrarReglas, setAceptoReglas, cambiarQuinielaVisible, seleccionarOpcion, guardarQuiniela, obtenerLogo
   }
 }

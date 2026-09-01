@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
 import { useCartelera } from '@/hooks/useCartelera'
-import { useCuentaRegresiva } from '@/hooks/useCuentaRegresiva' // 🆕 NUEVA IMPORTACIÓN MODULAR
+import { useCuentaRegresiva } from '@/hooks/useCuentaRegresiva' 
 import ModalReglas from '@/components/ModalReglas' 
 
 export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioActivo: any, actualizarSaldo: (nuevoSaldo: number) => void }) {
@@ -12,7 +12,6 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
     setAceptoReglas, cambiarQuinielaVisible, seleccionarOpcion, guardarQuiniela, obtenerLogo
   } = useCartelera(usuarioActivo, actualizarSaldo)
 
-  // ⚡ INGENIERÍA: Inyectamos nuestro reloj maestro
   const { textoCuenta, esUrgente, yaCerro } = useCuentaRegresiva(quinielaActual?.fecha_cierre)
 
   const [mensajeUI, setMensajeUI] = useState({ tipo: '', texto: '' })
@@ -28,7 +27,9 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
   const formatearFechaObj = (fechaStr: string) => {
     if (!fechaStr) return null;
     try {
-      const d = new Date(fechaStr.substring(0, 16));
+      // ⚡ CORRECCIÓN AQUÍ: Se eliminó el .substring(0, 16) para que JavaScript
+      // lea la zona horaria UTC completa y la convierta correctamente a la hora local de Nayarit.
+      const d = new Date(fechaStr);
       const fecha = d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short' }).toUpperCase().replace('.', '');
       const hora = d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
       return { fecha, hora };
@@ -79,7 +80,6 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
   const costoUnitario = quinielaActual.precio_ticket || 0;
   const costoTotal = esSorteo ? costoUnitario * cantidadBoletos : costoUnitario;
 
-  // ⚡ LÓGICA DE BARRA DE PROGRESO
   const totalPartidos = partidos.length;
   const partidosLlenos = partidos.filter(p => {
       const sel = selecciones[p.id];
@@ -94,7 +94,6 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
   return (
     <div className="w-full max-w-4xl mx-auto mt-2 mb-20 animate-in fade-in duration-500 relative">
       
-      {/* SELECTOR DE QUINIELAS ABIERTAS */}
       {quinielasActivas.length > 1 && (
         <div className="flex flex-wrap gap-2 justify-center mb-4 bg-slate-900/80 p-2 rounded-2xl border border-slate-800 shadow-xl w-full mx-auto">
           {quinielasActivas.map(q => (
@@ -111,10 +110,8 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
         </div>
       )}
 
-      {/* CONTENEDOR PRINCIPAL */}
       <div className={`bg-slate-900/50 p-4 md:p-6 rounded-2xl border shadow-2xl relative overflow-hidden w-full mx-auto ${esSorteo ? 'border-blue-900/50' : 'border-slate-800'}`}>
         
-        {/* CABECERA */}
         <div className="text-center mb-6 border-b border-slate-800 pb-4 relative">
           <button onClick={() => setMostrarReglas(true)} className="absolute top-0 right-0 bg-slate-950 border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-white text-[9px] md:text-[10px] font-black uppercase px-2 py-1.5 rounded-lg transition-all shadow-inner">
             📜 Reglas
@@ -130,7 +127,6 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
               🏆 Premiación: {prem === 'unico' ? 'Ganador Único' : prem === 'top2' ? 'Top 2' : prem === 'top3' ? 'Top 3' : 'Promocional'}
             </span>
             
-            {/* ⚡ RELOJ FOMO DINÁMICO */}
             {textoCuenta && (
               <span className={`px-2.5 py-1 rounded-lg text-[9px] md:text-[10px] font-black uppercase tracking-widest shadow-inner flex items-center gap-1 border ${
                 yaCerro ? 'bg-slate-950/40 border-slate-900/50 text-slate-500' :
@@ -154,7 +150,6 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
           </div>
         </div>
 
-        {/* ⚡ VISTA CONDICIONAL: SORTEO VS PARTIDOS TRADICIONALES */}
         {esSorteo ? (
           <div className="flex flex-col items-center justify-center py-6 px-4 bg-blue-950/20 rounded-xl border border-blue-900/40 mb-6">
             <span className="text-6xl mb-4 opacity-90 drop-shadow-[0_0_15px_rgba(59,130,246,0.6)]">🎟️</span>
@@ -177,17 +172,18 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
           </div>
         ) : (
           <>
-            {/* 🎟️ VISTA JUGAR TICKET NORMAL (CLÁSICA O EXACTO) */}
             <div className="space-y-2 md:space-y-3">
               {partidos.map((partido) => {
                 const seleccion = selecciones[partido.id] || '';
                 const logoL = obtenerLogo(partido.equipo_local);
                 const logoV = obtenerLogo(partido.equipo_visitante);
-                const fechaObj = formatearFechaObj(partido.fecha_hora);
+                const fechaObj = formatearFechaObj(partido.fecha_hora_partido);
 
                 const [golesL, golesV] = seleccion.split('-');
                 const valL = golesL !== undefined ? golesL : '';
                 const valV = golesV !== undefined ? golesV : '';
+                
+                const marcadorCompleto = valL !== '' && valV !== '';
 
                 return (
                   <div key={partido.id} className={`bg-slate-800/60 px-3 py-2.5 md:p-3 rounded-lg border flex flex-col md:flex-row justify-between items-center gap-3 md:gap-4 transition-all shadow-sm relative group ${(bloqueadoPorParticipacion || yaCerro) ? 'border-slate-800 opacity-60' : 'border-slate-700 hover:border-slate-500 hover:bg-slate-800/90'}`}>
@@ -214,32 +210,49 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
 
                     <div className="w-full md:w-[130px] shrink-0 mt-1 md:mt-0 flex justify-center">
                       {esMarcadorExacto ? (
-                        <div className="flex items-center justify-center gap-1.5 w-full">
+                        <div className="flex items-center justify-center gap-1.5 w-full relative">
                           <input
                             type="number"
                             min="0"
-                            placeholder="L"
+                            placeholder="-"
                             value={valL}
                             onChange={(e) => { 
                               setMensajeUI({ tipo: '', texto: '' }); 
                               seleccionarOpcion(partido.id, `${e.target.value}-${valV}`); 
                             }}
                             disabled={bloqueadoPorParticipacion || yaCerro}
-                            className="w-12 bg-slate-900 border border-slate-700 rounded-md p-1.5 text-center text-sm font-black text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-inner transition-all"
+                            className={`w-12 border rounded-md p-1.5 text-center text-sm font-black focus:outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-inner ${
+                              marcadorCompleto 
+                                ? 'bg-green-950/30 border-green-500 text-green-400 focus:border-green-400 focus:ring-1 focus:ring-green-400' 
+                                : 'bg-slate-900 border-slate-700 text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
+                            }`}
                           />
-                          <span className="text-slate-500 font-bold text-xs">-</span>
+                          <div className={`flex flex-col items-center justify-center ${marcadorCompleto ? 'text-green-500' : 'text-slate-500'}`}>
+                            <span className="font-bold text-[8px] uppercase tracking-widest leading-none">Goles</span>
+                            <span className="font-bold text-xs leading-none mt-0.5">-</span>
+                          </div>
                           <input
                             type="number"
                             min="0"
-                            placeholder="V"
+                            placeholder="-"
                             value={valV}
                             onChange={(e) => { 
                               setMensajeUI({ tipo: '', texto: '' }); 
                               seleccionarOpcion(partido.id, `${valL}-${e.target.value}`); 
                             }}
                             disabled={bloqueadoPorParticipacion || yaCerro}
-                            className="w-12 bg-slate-900 border border-slate-700 rounded-md p-1.5 text-center text-sm font-black text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-inner transition-all"
+                            className={`w-12 border rounded-md p-1.5 text-center text-sm font-black focus:outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-inner ${
+                              marcadorCompleto 
+                                ? 'bg-green-950/30 border-green-500 text-green-400 focus:border-green-400 focus:ring-1 focus:ring-green-400' 
+                                : 'bg-slate-900 border-slate-700 text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
+                            }`}
                           />
+                          
+                          <div className="absolute -right-5 flex items-center justify-center w-4 h-full">
+                            {marcadorCompleto && (
+                              <span className="text-green-500 text-xs md:text-sm animate-in zoom-in duration-300">✅</span>
+                            )}
+                          </div>
                         </div>
                       ) : (
                         <div className="flex gap-1 md:gap-1.5 w-full">
@@ -264,7 +277,6 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
               })}
             </div>
 
-            {/* ⚡ UI INTELIGENTE: CRITERIO DESEMPATE AUTOMÁTICO VS MANUAL */}
             {esMarcadorExacto ? (
               <div className={`mt-6 mb-5 p-4 bg-green-950/20 border border-green-900/40 rounded-2xl max-w-[280px] mx-auto text-center shadow-inner z-10 relative ${(bloqueadoPorParticipacion || yaCerro) ? 'opacity-60' : ''}`}>
                 <label className="block text-green-400 font-black uppercase text-[9px] md:text-[10px] tracking-[0.2em] mb-1">Criterio Desempate</label>
@@ -286,7 +298,6 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
               </div>
             )}
             
-            {/* ⚡ BARRA DE PROGRESO DE PREDICCIONES */}
             {totalPartidos > 0 && (
                 <div className="w-full max-w-[280px] mx-auto mb-6">
                     <div className="flex justify-between items-center mb-1.5 px-1">
@@ -306,7 +317,6 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
           </>
         )}
 
-        {/* ZONA DE CHECKOUT COMÚN */}
         <div className="w-full max-w-[280px] mx-auto flex items-start gap-2 mb-5 bg-slate-950/40 p-2.5 rounded-xl border border-slate-800">
           <input 
             type="checkbox" id="check-reglas" checked={aceptoReglas} 
@@ -333,7 +343,6 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
         <div className="flex flex-col items-center pt-2 border-t border-slate-800 z-10 relative">
           <button 
             onClick={handleGuardar}
-            // ⚡ BOTÓN BLOQUEADO SI CUALQUIERA DE ESTAS CONDICIONES SE CUMPLE
             disabled={guardando || !aceptoReglas || bloqueadoPorParticipacion || mensajeUI.tipo === 'exito' || (!esSorteo && faltanPartidos) || yaCerro}
             className={`w-full max-w-[280px] py-3 md:py-4 rounded-xl font-black uppercase text-xs tracking-widest transition-all ${
               mensajeUI.tipo === 'exito' ? 'bg-green-900 text-green-400 border border-green-700 cursor-default'
