@@ -156,10 +156,13 @@ export default function PlantillaReciboJugada({ quiniela, partidos, ticketAImpri
                       <td className="p-1.5 border-r border-slate-200">
                         <div className="flex items-center justify-end gap-2 pr-1">
                           <span className="truncate max-w-[130px] text-slate-800">{partido.equipo_local}</span>
+                          {/* ⚡ Carga forzada del logo local */}
                           {logoL ? (
                             <img 
                               src={logoL} 
                               alt="" 
+                              loading="eager"
+                              decoding="sync"
                               className="w-6 h-6 object-contain drop-shadow-sm recibo-logo-equipo" 
                               onError={(e) => { e.currentTarget.style.display = 'none'; }} 
                             />
@@ -199,10 +202,13 @@ export default function PlantillaReciboJugada({ quiniela, partidos, ticketAImpri
                       {/* EQUIPO VISITANTE */}
                       <td className="p-1.5">
                         <div className="flex items-center justify-start gap-2 pl-1">
+                          {/* ⚡ Carga forzada del logo visitante */}
                           {logoV ? (
                             <img 
                               src={logoV} 
                               alt="" 
+                              loading="eager"
+                              decoding="sync"
                               className="w-6 h-6 object-contain drop-shadow-sm recibo-logo-equipo" 
                               onError={(e) => { e.currentTarget.style.display = 'none'; }}
                             />
@@ -223,7 +229,7 @@ export default function PlantillaReciboJugada({ quiniela, partidos, ticketAImpri
         {/* Bloque inferior agrupado para garantizar que nunca se separe */}
         <div>
           {/* Pie del Boleto - Criterio de Desempate */}
-          <div className="bg-amber-100 border-2 border-amber-400 p-3 rounded-xl text-center flex flex-col items-center justify-center mb-4 shadow-sm recibo-desemp">
+          <div className="bg-amber-100 border-2 border-amber-400 p-3 rounded-xl text-center flex flex-col items-center justify-center mb-4 shadow-sm recibo-desempate">
             <span className="text-[11px] font-bold uppercase tracking-widest text-amber-800 mb-0.5 recibo-desempate-titulo">Desempate Oficial (Goles Totales)</span>
             <span className="text-3xl font-black text-amber-900 recibo-desempate-goles">{ticketAImprimir.goles} <span className="text-base font-bold text-amber-700">GOLES</span></span>
           </div>

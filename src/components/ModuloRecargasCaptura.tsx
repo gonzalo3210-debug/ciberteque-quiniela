@@ -12,7 +12,6 @@ interface ModuloRecargasCapturaProps {
 }
 
 export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: ModuloRecargasCapturaProps) {
-  // 👇 1. NUEVO: Obtenemos el ID del Admin logueado para que nunca sea nulo
   const [adminId, setAdminId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -23,9 +22,7 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
     });
   }, []);
 
-  // 👇 2. AHORA SÍ: Le pasamos el adminId a nuestro hook del cajero
   const cajero = useCajero(actualizarSaldoGlobal, adminId);
-  
   const captura = useCapturaFisica(actualizarSaldoGlobal);
 
   const [metodoPago, setMetodoPago] = useState<'efectivo' | 'transferencia' | 'fiado'>('efectivo');
@@ -139,15 +136,9 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
     <>
       <Toaster position="top-right" reverseOrder={false} />
 
-      {/* VISTA: VENTAS Y RETIROS (CAJERO) */}
       {vista === 'recargas' && (
         <div className="animate-in fade-in duration-300 w-full max-w-2xl mx-auto space-y-4">
-          <div className="bg-slate-900/80 p-1.5 rounded-xl border border-slate-700 shadow-inner flex flex-col sm:flex-row gap-1">
-            <button onClick={() => setMetodoPago('efectivo')} className={`flex-1 py-2 rounded-lg text-[10px] md:text-xs font-black uppercase tracking-wider transition-all flex justify-center items-center gap-2 ${metodoPago === 'efectivo' ? 'bg-green-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800'}`}>💵 Efectivo</button>
-            <button onClick={() => setMetodoPago('transferencia')} className={`flex-1 py-2 rounded-lg text-[10px] md:text-xs font-black uppercase tracking-wider transition-all flex justify-center items-center gap-2 ${metodoPago === 'transferencia' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800'}`}>📱 Transferencia</button>
-            <button onClick={() => setMetodoPago('fiado')} className={`flex-1 py-2 rounded-lg text-[10px] md:text-xs font-black uppercase tracking-wider transition-all flex justify-center items-center gap-2 ${metodoPago === 'fiado' ? 'bg-red-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800'}`}>✍️ Fiado (Deuda)</button>
-          </div>
-
+          
           <div className="flex gap-2 relative">
             <input type="text" placeholder="Buscar cliente (Nombre o WhatsApp)..." className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-[10px] md:text-xs text-white outline-none focus:border-green-500 transition-all uppercase font-bold tracking-widest placeholder:text-slate-600" value={cajero.busqueda} onChange={(e) => cajero.setBusqueda(e.target.value)} />
             {cajero.cargando && <span className="absolute right-4 top-3 text-slate-500 animate-spin">⏳</span>}
@@ -194,7 +185,12 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                       <button 
                         onClick={() => {
                           if (modalOperacion?.id === u.id && modalOperacion?.tipo === 'recarga') setModalOperacion(null);
-                          else { setModalOperacion({id: u.id, tipo: 'recarga'}); setMontoOperacion(''); }
+                          else { 
+                            setModalOperacion({id: u.id, tipo: 'recarga'}); 
+                            setMontoOperacion(''); 
+                            // 🔥 Reseteo automático a efectivo por seguridad
+                            setMetodoPago('efectivo'); 
+                          }
                         }} 
                         className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase transition-all flex-1 md:flex-none shadow-md border ${
                           modalOperacion?.id === u.id && modalOperacion?.tipo === 'recarga' 
@@ -227,7 +223,7 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                         <label className={`text-[10px] font-black uppercase tracking-widest block flex flex-col sm:flex-row sm:items-center gap-1 ${
                           modalOperacion.tipo === 'recarga' ? 'text-green-500' : 'text-red-400'
                         }`}>
-                          <span>{modalOperacion.tipo === 'recarga' ? `Recepción de dinero (${metodoPago})` : '¿Cuánto dinero vas a retirar?'}</span>
+                          <span>{modalOperacion.tipo === 'recarga' ? 'Recepción de dinero' : '¿Cuánto dinero vas a retirar?'}</span>
                           {modalOperacion.tipo === 'recarga' && deudaTotal > 0 && metodoPago !== 'fiado' && (
                             <span className="text-[9px] text-red-400 bg-red-950/40 px-2 py-0.5 rounded border border-red-900/50 animate-pulse">
                               Se abonará automáticamente a la deuda de ${deudaTotal}
@@ -236,6 +232,15 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
                         </label>
                         <button onClick={() => setModalOperacion(null)} className="text-slate-500 hover:text-white font-mono text-sm">✕</button>
                       </div>
+
+                      {/* 🔥 SELECTOR DE MÉTODO DE PAGO INCRUSTADO (Solo en Ingresos) */}
+                      {modalOperacion.tipo === 'recarga' && (
+                        <div className="flex gap-2 mb-3 bg-slate-950/60 p-1.5 rounded-lg border border-green-900/30">
+                          <button onClick={() => setMetodoPago('efectivo')} className={`flex-1 py-1.5 rounded text-[10px] uppercase font-bold tracking-wider transition-all ${metodoPago === 'efectivo' ? 'bg-green-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800'}`}>💵 Efectivo</button>
+                          <button onClick={() => setMetodoPago('transferencia')} className={`flex-1 py-1.5 rounded text-[10px] uppercase font-bold tracking-wider transition-all ${metodoPago === 'transferencia' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800'}`}>📱 Transf</button>
+                          <button onClick={() => setMetodoPago('fiado')} className={`flex-1 py-1.5 rounded text-[10px] uppercase font-bold tracking-wider transition-all ${metodoPago === 'fiado' ? 'bg-red-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800'}`}>✍️ Fiado</button>
+                        </div>
+                      )}
                       
                       <div className="flex flex-col sm:flex-row gap-2">
                         <div className="relative flex-1">

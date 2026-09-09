@@ -324,6 +324,13 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
 
   const enviarWhatsAppBoleto = (jugador: any) => {
     if (!jugador.telefono || jugador.telefono.trim() === '') return toast.error(`Sin WhatsApp registrado para ${jugador.nombre}.`);
+    
+    let telefonoLimpio = jugador.telefono.replace(/\D/g, '');
+    
+    if (telefonoLimpio.length === 10) {
+      telefonoLimpio = `52${telefonoLimpio}`;
+    }
+
     let msg = '';
     if (quiniela.modalidad === 'sorteo') {
       const eqSorteado = jugador.equipo_asignado_id ? equipos.find((e:any) => e.id === jugador.equipo_asignado_id) : null;
@@ -339,7 +346,8 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
       });
       msg = `🎫 *QUINIELA CIBERTEQUE*\nHola ${jugador.nombre}, tu jugada para *${quiniela.nombre_jornada}* está registrada.\n\n*Tus pronósticos:*\n${seleccionesTexto}\nDesempate: *${jugador.prediccionGoles}*\n\nRanking en vivo:\n👉 ${ENLACE_PUBLICO_RANKING}\n\n🍀 ¡Suerte!`;
     }
-    window.open(`https://wa.me/52${jugador.telefono}?text=${encodeURIComponent(msg)}`, '_blank');
+    
+    window.open(`https://api.whatsapp.com/send?phone=${telefonoLimpio}&text=${encodeURIComponent(msg)}`, '_blank');
   };
 
   const cerrarJornadaDefinitivo = async () => {
@@ -379,7 +387,6 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     try {
       let idsGanadores: string[] = [];
 
-      // ⚡ FUNCIÓN AUXILIAR PARA PAGAR PREMIO Y COBRAR DEUDA AUTOMÁTICAMENTE
       const procesarPagoPremio = async (usuarioId: string, cantidadPremio: number, descripcionPremio: string) => {
         const { data: userData } = await supabase
           .from('usuarios')
@@ -476,7 +483,7 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
 
   const activarImpresion = (tipo: 'tickets' | 'sabana' | 'recibo' | 'tabla') => {
     setTipoImpresion(tipo);
-    setTimeout(() => window.print(), 200);
+    setTimeout(() => window.print(), 1500); 
   };
 
   const eliminarTicket = async (ticketId: string, nombreJugador: string) => {

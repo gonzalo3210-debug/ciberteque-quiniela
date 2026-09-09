@@ -111,7 +111,19 @@ export default function PlantillaTicketsBlanco({ quiniela, partidos, obtenerLogo
                         <td className="border-2 border-black text-right overflow-hidden bg-gray-50">
                           <div className="flex items-center justify-end gap-1">
                             <span className="font-bold uppercase truncate max-w-[80%]">{p.equipo_local}</span>
-                            {logoL ? <img src={logoL} alt="" className="w-4 h-4 md:w-5 md:h-5 object-contain" /> : <div className="w-3 h-3 md:w-4 md:h-4 rounded-full border border-black flex items-center justify-center text-[5px]">?</div>}
+                            {/* ⚡ Carga forzada del logo local */}
+                            {logoL ? (
+                              <img 
+                                src={logoL} 
+                                alt="" 
+                                loading="eager" 
+                                decoding="sync"
+                                className="w-4 h-4 md:w-5 md:h-5 object-contain" 
+                                onError={(e: any) => { e.target.src = 'https://a.espncdn.com/i/teamlogos/default-soccer-35.png' }}
+                              />
+                            ) : (
+                              <div className="w-3 h-3 md:w-4 md:h-4 rounded-full border border-black flex items-center justify-center text-[5px]">?</div>
+                            )}
                           </div>
                         </td>
                         
@@ -134,7 +146,19 @@ export default function PlantillaTicketsBlanco({ quiniela, partidos, obtenerLogo
 
                         <td className="border-2 border-black text-left overflow-hidden bg-gray-50">
                           <div className="flex items-center justify-start gap-1">
-                            {logoV ? <img src={logoV} alt="" className="w-4 h-4 md:w-5 md:h-5 object-contain" /> : <div className="w-3 h-3 md:w-4 md:h-4 rounded-full border border-black flex items-center justify-center text-[5px]">?</div>}
+                            {/* ⚡ Carga forzada del logo visitante */}
+                            {logoV ? (
+                              <img 
+                                src={logoV} 
+                                alt="" 
+                                loading="eager" 
+                                decoding="sync"
+                                className="w-4 h-4 md:w-5 md:h-5 object-contain" 
+                                onError={(e: any) => { e.target.src = 'https://a.espncdn.com/i/teamlogos/default-soccer-35.png' }}
+                              />
+                            ) : (
+                              <div className="w-3 h-3 md:w-4 md:h-4 rounded-full border border-black flex items-center justify-center text-[5px]">?</div>
+                            )}
                             <span className="font-bold uppercase truncate max-w-[80%]">{p.equipo_visitante}</span>
                           </div>
                         </td>
