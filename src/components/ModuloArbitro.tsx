@@ -15,10 +15,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
   const arbitro = useArbitro(actualizarSaldoGlobal);
   const { state: s, setters: set, actions: a, edicionJornada: ej, edicionTicket: et, constantes: c } = arbitro;
 
-  // ESTADO DE UX: Loader para impresión
   const [cargandoImpresion, setCargandoImpresion] = useState(false);
-
-  // ⚡ ESTADOS DE ANIMACIÓN DEL SORTEO
   const [faseSorteo, setFaseSorteo] = useState<'inactivo' | 'preparando' | 'girando' | 'revelando'>('inactivo');
   const [tickAnimacion, setTickAnimacion] = useState(0);
 
@@ -26,43 +23,34 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
   const sorteoRealizado = s.rankingAdmin?.some((r: any) => r.equipo_asignado_id);
   const equiposEnBombo = useMemo(() => s.equipos?.filter(e => s.quiniela?.equipos_sorteo?.includes(e.id)) || [], [s.equipos, s.quiniela?.equipos_sorteo]);
 
-  // 🛡️ UX DE PREVENCIÓN: Candado de base de datos para Marcador Exacto
   const guardadoBloqueado = useMemo(() => {
     if (!s.marcadoresReales) return false;
-    // Evita guardar si hay un gol capturado pero falta el del rival
     return Object.values(s.marcadoresReales).some((m: any) => 
       (m.l !== '' && m.v === '') || (m.l === '' && m.v !== '')
     );
   }, [s.marcadoresReales]);
 
-  // Motor de Animación de Alta Velocidad (Efecto Ruleta)
   useEffect(() => {
     let intervalo: NodeJS.Timeout;
     if (faseSorteo === 'girando' || faseSorteo === 'revelando') {
       intervalo = setInterval(() => {
         setTickAnimacion(prev => prev + 1);
-      }, 50); // Velocidad de cambio de logos (50ms)
+      }, 50); 
     }
     return () => clearInterval(intervalo);
   }, [faseSorteo]);
 
   const iniciarSorteoAnimado = () => {
     if (s.rankingAdmin.length !== 8) return toast.error('Se requieren exactamente 8 jugadores.');
-    
-    // Inicia el Overlay
     setFaseSorteo('preparando');
-    
     setTimeout(() => {
-      setFaseSorteo('girando'); // Arranca la ruleta visual
-      
-      // Llamada real a la BD en segundo plano mientras gira visualmente
+      setFaseSorteo('girando'); 
       a.ejecutarSorteoMundial(s.quiniela.equipos_sorteo || []).then(() => {
-        // Le damos 3.5 segundos de suspenso visual obligado antes de detener la ruleta
         setTimeout(() => {
           setFaseSorteo('revelando');
           setTimeout(() => {
             setFaseSorteo('inactivo');
-          }, 3000); // Muestra el resultado final 3 segundos antes de cerrar el modal
+          }, 3000); 
         }, 3500); 
       }).catch(() => {
         setFaseSorteo('inactivo');
@@ -132,7 +120,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
 
   return (
     <>
-      {/* 🚀 OVERLAY DEL SORTEO EN VIVO (ANIMACIÓN) */}
       {faseSorteo !== 'inactivo' && (
         <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md z-[100] flex flex-col items-center justify-center p-4 animate-in fade-in duration-300">
           <h2 className="text-3xl md:text-5xl font-black text-white uppercase tracking-[0.2em] mb-2 drop-shadow-[0_0_15px_rgba(59,130,246,0.8)]">
@@ -212,8 +199,18 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                 </h2>
                 {esHistoricoLiquidado && <span className="bg-slate-800 text-slate-400 px-2 py-1 rounded text-[8px] font-black uppercase flex items-center border border-slate-700">🔒 Cerrada</span>}
               </div>
-              {!esHistoricoLiquidado && !esSorteo && (
-                <button onClick={ej.iniciarEdicionJornada} className="bg-slate-900 border border-slate-700 hover:border-slate-500 text-slate-300 text-[9px] font-bold uppercase px-3 py-1.5 rounded-lg transition-all shadow-sm">✏️ Ajustar</button>
+              
+              {!esHistoricoLiquidado && (
+                <div className="flex items-center gap-2">
+                  {!esSorteo && (
+                    <button onClick={ej.iniciarEdicionJornada} className="bg-slate-900 border border-slate-700 hover:border-slate-500 hover:bg-slate-800 text-slate-300 text-[9px] font-bold uppercase px-3 py-1.5 rounded-lg transition-all shadow-sm">
+                      ✏️ Ajustar
+                    </button>
+                  )}
+                  <button onClick={a.eliminarJornadaDefinitiva} className="bg-red-950/40 border border-red-900/50 hover:bg-red-900/60 hover:border-red-500 text-red-400 text-[9px] font-bold uppercase px-3 py-1.5 rounded-lg transition-all shadow-sm">
+                    🗑️ Eliminar
+                  </button>
+                </div>
               )}
             </div>
 
@@ -250,7 +247,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
               🏆 Formato: <span className={`${esCualquierPromo ? 'text-white' : 'text-blue-400'} font-black`}>{s.quiniela.tipo_premiacion}</span>
             </div>
 
-            {/* VISTA CONDICIONAL: BOMBO VIRTUAL VS TABLA TRADICIONAL */}
             {esSorteo ? (
               <div className="bg-blue-950/20 border border-blue-900/50 rounded-xl p-4 md:p-6 shadow-inner mt-4">
                 <div className="flex flex-col md:flex-row items-center justify-between mb-6 gap-3">
@@ -285,7 +281,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                               <span>📲</span> Notificar
                             </button>
                             
-                            {/* ⚡ BOTONES RÁPIDOS DE ELIMINACIÓN Y REVIVIR */}
                             {sorteoRealizado && !esHistoricoLiquidado && (
                                <button 
                                  onClick={() => a.toggleEstadoSupervivencia(jugador.id, jugador.estaEliminado, jugador.nombre)} 
@@ -317,7 +312,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                     )
                   })}
                   
-                  {/* LUGARES VACÍOS PLACEHOLDER */}
                   {Array.from({ length: 8 - s.rankingAdmin.length }).map((_, i) => (
                     <div key={`empty-${i}`} className="bg-slate-950/50 border-2 border-slate-800 border-dashed p-4 rounded-xl flex justify-between items-center opacity-40">
                       <div className="flex flex-col">
@@ -349,7 +343,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                         </button>
                         <div className="border-t border-blue-900/50 pt-4 mt-2">
                            <p className="text-center text-[10px] text-blue-400 font-bold uppercase mb-3">¿El torneo ya terminó en la vida real?</p>
-                           {/* ⚡ CONEXIÓN A LA FUNCIÓN REAL DE CIERRE */}
                            <button onClick={a.cerrarJornadaDefinitivo} className="w-full py-3.5 rounded-xl font-black text-[10px] uppercase text-white transition-all bg-amber-600 hover:bg-amber-500 shadow-[0_0_15px_rgba(217,119,6,0.3)] active:scale-95">
                              🏆 Declarar Campeón y Pagar Premio
                            </button>
@@ -413,7 +406,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                   </div>
                 </div>
 
-                {/* BOTONES DE DIFUSIÓN CON UX DE IMPRESIÓN */}
                 <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-3 flex flex-wrap justify-center gap-2 mt-4">
                   {!esHistoricoLiquidado ? (
                     <button onClick={() => ejecutarImpresionUX('tickets')} className="bg-slate-800 border border-slate-600 text-white font-bold px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-slate-700 transition-colors">🖨️ Formatos Blanco</button>
@@ -424,7 +416,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                   <button onClick={a.compartirAvanceGrupo} className="bg-green-700 border border-green-600 text-white font-bold px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-green-600 transition-colors">📢 Copiar Avance</button>
                 </div>
 
-                {/* LISTA DE PARTIDOS Y MARCADORES */}
                 <div className="space-y-2 mt-4">
                   {(s.partidos || []).map((partido: any, idx: number) => {
                     const seleccionado = s.resultadosReales[partido.id];
@@ -467,11 +458,9 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                   })}
                 </div>
 
-                {/* SECCIÓN FINAL (CERRAR JORNADA TRADICIONAL) */}
                 {!esHistoricoLiquidado && (
                   <div className="flex flex-col md:flex-row items-center gap-3 border-t border-slate-800 pt-4 mt-2">
                     
-                    {/* 🛡️ BLOQUEO DEFENSIVO VISUAL: Advertencia de partidos faltantes */}
                     {s.partidosPendientes > 0 && !esSorteo && (
                         <div className="w-full col-span-full mb-2 p-2 bg-amber-950/40 border border-amber-900/50 rounded-lg text-center text-[10px] md:text-xs font-bold text-amber-500 animate-pulse">
                             ⚠️ Faltan {s.partidosPendientes} partido(s) por capturar resultado. La liquidación está bloqueada.
@@ -518,10 +507,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
         )}
       </div>
 
-      {/* ========================================================= */}
-      {/* OVERLAYS Y MODALES DE EDICIÓN (UX Y MANEJO DE ESTADOS) */}
-      {/* ========================================================= */}
-
       {cargandoImpresion && (
         <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-sm z-[9999] flex flex-col items-center justify-center animate-in fade-in duration-200">
           <div className="w-16 h-16 border-4 border-slate-500 border-t-white rounded-full animate-spin mb-4"></div>
@@ -537,29 +522,50 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
         </div>
       )}
 
-      {/* MODAL: EDICIÓN DE JORNADA */}
+      {/* ⚡ MODAL MEJORADO: EDICIÓN DE JORNADA AVANZADA */}
       {ej.editandoQuinielaId && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 w-full max-w-xl max-h-[90vh] overflow-y-auto animate-in zoom-in-95">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-2 mb-4">
-              <h3 className="text-white font-black uppercase tracking-widest">✏️ Editar Jornada</h3>
-              <button onClick={() => ej.setEditandoQuinielaId(null)} className="text-slate-500 hover:text-white font-mono text-lg">✕</button>
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 md:p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-in zoom-in-95 shadow-[0_0_50px_rgba(0,0,0,0.8)]">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3 mb-5">
+              <h3 className="text-white font-black uppercase tracking-widest">✏️ Ajustar Jornada</h3>
+              <button onClick={() => ej.setEditandoQuinielaId(null)} className="text-slate-500 hover:text-white font-mono text-xl">✕</button>
             </div>
+            
+            <datalist id="lista-equipos">
+              {s.equipos?.map((eq: any) => (
+                <option key={eq.id} value={eq.nombre} />
+              ))}
+            </datalist>
             
             <div className="space-y-4">
               <div>
                 <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Nombre Jornada</label>
-                <input type="text" value={ej.editNombreJornada} onChange={e => ej.setEditNombreJornada(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm focus:outline-none focus:border-blue-500" />
+                <input type="text" value={ej.editNombreJornada} onChange={e => ej.setEditNombreJornada(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm focus:outline-none focus:border-blue-500" />
               </div>
               
-              <div className="grid grid-cols-2 gap-3">
-                <div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="col-span-2">
                   <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Fecha Cierre</label>
-                  <input type="datetime-local" value={ej.editFechaCierre} onChange={e => ej.setEditFechaCierre(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm focus:outline-none focus:border-blue-500" />
+                  <input type="datetime-local" value={ej.editFechaCierre} onChange={e => ej.setEditFechaCierre(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm focus:outline-none focus:border-blue-500" />
                 </div>
-                <div>
+                
+                <div className="col-span-2 md:col-span-1">
+                  <label className="text-[10px] text-amber-500 font-bold uppercase block mb-1">Precio Boleto ($)</label>
+                  <input type="number" min="1" value={ej.editPrecioTicket} onChange={e => ej.setEditPrecioTicket(e.target.value)} className="w-full bg-slate-950 border border-amber-900/50 rounded-lg p-2.5 text-white font-black text-sm focus:outline-none focus:border-amber-500" />
+                </div>
+
+                <div className="col-span-2 md:col-span-1">
+                  <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Juego</label>
+                  <select value={ej.editModalidad} onChange={e => ej.setEditModalidad(e.target.value as any)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm focus:outline-none focus:border-blue-500">
+                    <option value="clasica">Clásica</option>
+                    <option value="marcador_exacto">M. Exacto</option>
+                    <option value="sorteo">Sorteo</option>
+                  </select>
+                </div>
+
+                <div className="col-span-2 md:col-span-4">
                   <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Tipo Premiación</label>
-                  <select value={ej.editTipoPremiacion} onChange={e => ej.setEditTipoPremiacion(e.target.value as any)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm focus:outline-none focus:border-blue-500">
+                  <select value={ej.editTipoPremiacion} onChange={e => ej.setEditTipoPremiacion(e.target.value as any)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm focus:outline-none focus:border-blue-500">
                     <option value="unico">1er Lugar (Único)</option>
                     <option value="top2">Top 2 (Dividido)</option>
                     <option value="top3">Top 3 (Dividido)</option>
@@ -569,22 +575,53 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                 </div>
               </div>
 
-              <div className="border-t border-slate-800 pt-4 mt-4 space-y-2">
-                <label className="text-[10px] text-slate-400 font-bold uppercase block mb-2">Editar Partidos</label>
-                {ej.editPartidos.map((p: any, index: number) => (
-                  <div key={p.id} className="flex items-center gap-2 bg-slate-950 p-2 rounded border border-slate-800 focus-within:border-blue-500 transition-colors">
-                    <span className="text-[10px] text-slate-500 font-black w-4">{index + 1}</span>
-                    <input type="text" value={p.equipo_local} onChange={e => ej.actualizarPartidoEditado(index, 'equipo_local', e.target.value)} className="flex-1 bg-slate-900 border border-slate-700 rounded p-1 text-xs text-white text-center focus:outline-none focus:bg-slate-800" />
-                    <span className="text-[10px] text-slate-600 font-black">VS</span>
-                    <input type="text" value={p.equipo_visitante} onChange={e => ej.actualizarPartidoEditado(index, 'equipo_visitante', e.target.value)} className="flex-1 bg-slate-900 border border-slate-700 rounded p-1 text-xs text-white text-center focus:outline-none focus:bg-slate-800" />
-                  </div>
-                ))}
+              <div className="border-t border-slate-800 pt-5 mt-5">
+                <div className="mb-3">
+                  <label className="text-[10px] text-slate-400 font-bold uppercase">Lista de Partidos ({ej.editPartidos.length})</label>
+                </div>
+                
+                <div className="space-y-3">
+                  {ej.editPartidos.map((p: any, index: number) => (
+                    <div key={p.id} className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 focus-within:border-slate-500 transition-colors flex flex-col gap-2 relative">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[9px] text-slate-400 font-black px-2 py-0.5 bg-slate-900 rounded-md border border-slate-800 uppercase tracking-widest">
+                          Partido {index + 1}
+                        </span>
+                        <button onClick={() => ej.eliminarPartidoEditado(index)} className="text-[10px] text-red-500 hover:text-red-400 font-bold uppercase flex items-center gap-1 bg-red-950/20 px-2 py-1 rounded">
+                          🗑️ Quitar
+                        </button>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row items-center gap-2">
+                        <input type="text" list="lista-equipos" placeholder="Local" value={p.equipo_local} onChange={e => ej.actualizarPartidoEditado(index, 'equipo_local', e.target.value)} className="w-full sm:flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white text-center font-bold focus:outline-none focus:border-blue-500" />
+                        <span className="text-[10px] text-slate-600 font-black">VS</span>
+                        <input type="text" list="lista-equipos" placeholder="Visitante" value={p.equipo_visitante} onChange={e => ej.actualizarPartidoEditado(index, 'equipo_visitante', e.target.value)} className="w-full sm:flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white text-center font-bold focus:outline-none focus:border-blue-500" />
+                      </div>
+                      
+                      <input type="datetime-local" value={p.fecha_hora_partido || ''} onChange={e => ej.actualizarPartidoEditado(index, 'fecha_hora_partido', e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-slate-300 focus:outline-none focus:border-blue-500" />
+                    </div>
+                  ))}
+                  
+                  {ej.editPartidos.length === 0 && (
+                    <div className="text-center p-6 bg-slate-950 border border-dashed border-slate-700 rounded-xl">
+                      <span className="text-slate-500 text-xs font-bold uppercase">No hay partidos configurados</span>
+                    </div>
+                  )}
+
+                  {/* ⚡ BOTÓN GIGANTE PARA AÑADIR PARTIDO */}
+                  <button 
+                    onClick={ej.agregarPartidoEditado} 
+                    className="w-full mt-4 py-4 rounded-xl border-2 border-dashed border-blue-900/50 bg-blue-950/20 hover:bg-blue-900/40 hover:border-blue-500 text-blue-400 hover:text-white font-black uppercase tracking-widest text-xs transition-all shadow-inner"
+                  >
+                    + ⚽ Agregar Nuevo Partido
+                  </button>
+                </div>
               </div>
             </div>
 
             <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-800">
-              <button onClick={() => ej.setEditandoQuinielaId(null)} className="px-4 py-2 rounded text-slate-400 font-bold text-xs uppercase hover:bg-slate-800 transition-colors">Cancelar</button>
-              <button onClick={ej.guardarCambiosJornada} disabled={ej.guardandoEdicion} className="px-4 py-2 rounded bg-blue-600 text-white font-black text-xs uppercase hover:bg-blue-500 disabled:opacity-50 transition-colors shadow-md">
+              <button onClick={() => ej.setEditandoQuinielaId(null)} className="px-4 py-3 rounded-lg text-slate-400 font-bold text-xs uppercase hover:bg-slate-800 transition-colors">Cancelar</button>
+              <button onClick={ej.guardarCambiosJornada} disabled={ej.guardandoEdicion} className="px-6 py-3 rounded-lg bg-blue-600 text-white font-black text-xs uppercase hover:bg-blue-500 disabled:opacity-50 transition-colors shadow-md">
                 {ej.guardandoEdicion ? 'Guardando...' : '💾 Guardar Cambios'}
               </button>
             </div>

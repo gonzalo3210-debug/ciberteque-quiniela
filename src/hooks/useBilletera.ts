@@ -1,15 +1,22 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 
+const TAMANO_PAGINA = 30; // 👈 Cantidad de registros por carga
+
 export function useBilletera(usuarioId: string) {
   // 🧠 ESTADOS
   const [saldoTotalPesos, setSaldoTotalPesos] = useState<number>(0) 
-  const [deudaPesos, setDeudaPesos] = useState<number>(0) // 👈 NUEVO: Estado para la deuda
+  const [deudaPesos, setDeudaPesos] = useState<number>(0)
+  const [nombreUsuario, setNombreUsuario] = useState<string>('')
+  
   const [transacciones, setTransacciones] = useState<any[]>([])
+  
   const [cargando, setCargando] = useState(true)
+  const [cargandoMas, setCargandoMas] = useState(false) // 👈 Nuevo: Para el botón de Cargar Más
   const [error, setError] = useState<string | null>(null)
+  const [hayMas, setHayMas] = useState(true) // 👈 Nuevo: Saber si llegamos al final
 
-  // Envolvemos en useCallback para poder usarla en tiempo real sin redibujos infinitos
+  // 🔄 CARGA INICIAL
   const cargarBilletera = useCallback(async (silencioso = false) => {
     if (!usuarioId) {
       setCargando(false)
@@ -20,10 +27,10 @@ export function useBilletera(usuarioId: string) {
     setError(null) 
     
     try {
-      // 1. Traer saldo y DEUDA de la BD
+      // 1. Traer saldo, deuda y NOMBRE
       const { data: userData, error: userError } = await supabase
         .from('usuarios')
-        .select('creditos_disponibles, saldo_pesos, deuda_pesos') // 👈 Agregamos deuda_pesos
+        .select('nombre, creditos_disponibles, saldo_pesos, deuda_pesos')
         .eq('id', usuarioId)
         .single()
         
@@ -32,21 +39,24 @@ export function useBilletera(usuarioId: string) {
       if (userData) {
         const totalUnificado = Number(userData.creditos_disponibles || 0) + Number(userData.saldo_pesos || 0)
         setSaldoTotalPesos(totalUnificado)
-        setDeudaPesos(Number(userData.deuda_pesos || 0)) // 👈 Guardamos la deuda
+        setDeudaPesos(Number(userData.deuda_pesos || 0))
+        setNombreUsuario(userData.nombre || 'Usuario')
       }
 
-      // 2. Traer el historial
+      // 2. Traer el historial inicial (Primeros 30)
       const { data: txData, error: txError } = await supabase
         .from('transacciones_creditos')
         .select('*')
         .eq('usuario_id', usuarioId)
         .order('created_at', { ascending: false })
-        .limit(30)
+        .range(0, TAMANO_PAGINA - 1) // 👈 Rango de 0 a 29
 
       if (txError) throw txError
 
       if (txData) {
         setTransacciones(txData)
+        // Si nos trajo exactamente 30, asumimos que puede haber más
+        setHayMas(txData.length === TAMANO_PAGINA)
       }
     } catch (err: any) {
       console.error("Error al cargar la billetera:", err.message)
@@ -56,10 +66,44 @@ export function useBilletera(usuarioId: string) {
     }
   }, [usuarioId]);
 
+  // ➕ FUNCIÓN PARA CARGAR MÁS
+  const cargarMas = async () => {
+    if (!usuarioId || cargandoMas || !hayMas) return;
+    
+    setCargandoMas(true);
+    try {
+      const inicio = transacciones.length;
+      const fin = inicio + TAMANO_PAGINA - 1;
+
+      const { data: txData, error: txError } = await supabase
+        .from('transacciones_creditos')
+        .select('*')
+        .eq('usuario_id', usuarioId)
+        .order('created_at', { ascending: false })
+        .range(inicio, fin); // 👈 Traemos el siguiente bloque (ej. 30 a 59)
+
+      if (txError) throw txError;
+
+      if (txData) {
+        // Agregamos los nuevos registros a los que ya teníamos
+        setTransacciones(prev => [...prev, ...txData]);
+        setHayMas(txData.length === TAMANO_PAGINA);
+      }
+    } catch (err: any) {
+      console.error("Error al cargar más transacciones:", err.message);
+    } finally {
+      setCargandoMas(false);
+    }
+  };
+
   useEffect(() => {
     cargarBilletera()
   }, [cargarBilletera])
 
-  // 👈 Exportamos deudaPesos y la función recargar
-  return { saldoTotalPesos, deudaPesos, transacciones, cargando, error, recargar: cargarBilletera }
+  // Exportamos todo al componente visual
+  return { 
+    nombreUsuario, saldoTotalPesos, deudaPesos, transacciones, 
+    cargando, cargandoMas, error, hayMas, 
+    recargar: cargarBilletera, cargarMas 
+  }
 }
