@@ -4,10 +4,15 @@ import React from 'react';
 export default function PlantillaTicketsBlanco({ quiniela, partidos, obtenerLogo }: any) {
   if (!quiniela) return null;
 
+  // ⚡ CORRECCIÓN DE ZONA HORARIA ⚡
   const formatearFechaLocal = (fechaDB: string) => {
     if (!fechaDB) return '';
-    const d = new Date(fechaDB.substring(0, 16));
-    return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: true}).toUpperCase()}`;
+    // Nos aseguramos de que el navegador sepa que viene en UTC (Greenwich) para que haga la resta de horas local
+    const fechaUTC = fechaDB.includes('Z') || fechaDB.includes('+') ? fechaDB : `${fechaDB}Z`;
+    const d = new Date(fechaUTC);
+    
+    // Forzamos el formato de México (DD/MM/AAAA)
+    return `${d.toLocaleDateString('es-MX')} ${d.toLocaleTimeString('es-MX', {hour: '2-digit', minute:'2-digit', hour12: true}).toUpperCase()}`;
   }
 
   // 💡 Lógica centralizada: Determinamos la modalidad
@@ -15,8 +20,8 @@ export default function PlantillaTicketsBlanco({ quiniela, partidos, obtenerLogo
 
   // 💡 Ordenamiento cronológico defensivo
   const partidosOrdenados = [...(partidos || [])].sort((a, b) => {
-    const fechaA = new Date(a.fecha_hora_partido || a.fecha_hora || 0).getTime();
-    const fechaB = new Date(b.fecha_hora_partido || b.fecha_hora || 0).getTime();
+    const fechaA = new Date(a.fecha_hora_partido ? (a.fecha_hora_partido.includes('Z') ? a.fecha_hora_partido : `${a.fecha_hora_partido}Z`) : 0).getTime();
+    const fechaB = new Date(b.fecha_hora_partido ? (b.fecha_hora_partido.includes('Z') ? b.fecha_hora_partido : `${b.fecha_hora_partido}Z`) : 0).getTime();
     return fechaA - fechaB;
   });
 
@@ -53,8 +58,8 @@ export default function PlantillaTicketsBlanco({ quiniela, partidos, obtenerLogo
           /* TAMAÑOS DE FUENTE ESCALADOS PARA CABER PERFECTO */
           .tabla-impresion th, .tabla-impresion td { padding: 2px !important; font-size: 9px !important; }
           .texto-reglamento { font-size: 7px !important; line-height: 1.1 !important; }
-          .encabezado-impresion { margin-bottom: 8px !important; }
-          .titulo-impresion { font-size: 1.25rem !important; margin-bottom: 8px !important; }
+          .encabezado-impresion { margin-bottom: 6px !important; }
+          .titulo-impresion { font-size: 1.25rem !important; margin-bottom: 4px !important; }
         }
       `}</style>
 
@@ -70,20 +75,20 @@ export default function PlantillaTicketsBlanco({ quiniela, partidos, obtenerLogo
                 </div>
               </div>
               
-              <h2 className="text-center font-black text-sm md:text-lg uppercase mb-2 md:mb-4 bg-amber-400 py-1 border-y-2 border-black text-black">
+              <h2 className="text-center font-black text-sm md:text-lg uppercase mb-2 md:mb-3 bg-amber-400 py-1 border-y-2 border-black text-black">
                 {quiniela.nombre_jornada} {esMarcadorExacto && "- MARCADORES"}
               </h2>
               
-              <div className="mb-2 md:mb-4 space-y-1.5 md:space-y-3">
+              <div className="mb-2 md:mb-3 space-y-1 md:space-y-2">
                 <div className="flex justify-between items-end border-b-2 border-black border-dashed pb-1">
-                  <span className="font-bold text-[10px] md:text-sm uppercase">Nombre:</span><span className="w-4/5"></span>
+                  <span className="font-bold text-[9px] md:text-xs uppercase">Nombre:</span><span className="w-4/5"></span>
                 </div>
                 <div className="flex justify-between items-end border-b-2 border-black border-dashed pb-1">
-                  <span className="font-bold text-[10px] md:text-sm uppercase">WhatsApp:</span><span className="w-4/5"></span>
+                  <span className="font-bold text-[9px] md:text-xs uppercase">WhatsApp:</span><span className="w-4/5"></span>
                 </div>
               </div>
               
-              <table className="w-full mb-2 md:mb-4 border-collapse table-fixed tabla-impresion">
+              <table className="w-full mb-2 border-collapse table-fixed tabla-impresion">
                 <thead>
                   <tr className="bg-blue-900 text-white uppercase">
                     <th className="border-2 border-black text-right w-[40%]">Local</th>
@@ -111,7 +116,6 @@ export default function PlantillaTicketsBlanco({ quiniela, partidos, obtenerLogo
                         <td className="border-2 border-black text-right overflow-hidden bg-gray-50">
                           <div className="flex items-center justify-end gap-1">
                             <span className="font-bold uppercase truncate max-w-[80%]">{p.equipo_local}</span>
-                            {/* ⚡ Carga forzada del logo local */}
                             {logoL ? (
                               <img 
                                 src={logoL} 
@@ -146,7 +150,6 @@ export default function PlantillaTicketsBlanco({ quiniela, partidos, obtenerLogo
 
                         <td className="border-2 border-black text-left overflow-hidden bg-gray-50">
                           <div className="flex items-center justify-start gap-1">
-                            {/* ⚡ Carga forzada del logo visitante */}
                             {logoV ? (
                               <img 
                                 src={logoV} 
@@ -167,17 +170,74 @@ export default function PlantillaTicketsBlanco({ quiniela, partidos, obtenerLogo
                   })}
                 </tbody>
               </table>
-              
-              <div className="border-2 border-black p-1.5 md:p-3 text-center rounded-xl bg-gray-100 mt-2 md:mt-4">
-                <span className="font-bold uppercase text-[7px] md:text-[9px] block mb-1 md:mb-2">Desempate (Total de Goles):</span>
-                <div className="w-16 border-b-2 border-black mx-auto h-3 md:h-4"></div>
+
+              {/* ⚡ NUEVA SECCIÓN INFERIOR: DESEMPATE, COSTO, PAGOS Y CONTACTO */}
+              <div className="flex flex-col gap-1.5 mt-2 md:mt-3">
+                {/* Fila 1: Desempate y Costo */}
+                <div className="flex gap-2 items-stretch">
+                  {!esMarcadorExacto && (
+                    <div className="flex-1 border-2 border-black p-1 text-center rounded-xl bg-gray-100 flex flex-col justify-center">
+                      <span className="font-bold uppercase text-[7px] md:text-[8px] block mb-0.5">Desempate (Goles):</span>
+                      <div className="w-16 border-b-2 border-black mx-auto h-3"></div>
+                    </div>
+                  )}
+                  <div className={`border-2 border-black p-1 text-center rounded-xl bg-amber-400 flex flex-col justify-center shadow-[2px_2px_0px_#000] ${esMarcadorExacto ? 'w-full py-1.5' : 'flex-1'}`}>
+                    <span className="font-black uppercase text-[7px] md:text-[8px] text-black">Costo del Boleto</span>
+                    <span className="font-black text-sm md:text-lg text-black leading-none mt-0.5">
+                      ${Number(quiniela.precio_ticket ?? 30).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Fila 2: Información de Pago y QRs SEPARADOS */}
+                <div className="border-2 border-black rounded-xl p-1.5 flex justify-between items-center bg-white mt-0.5">
+                  
+                  {/* QR Izquierdo: App */}
+                  <div className="text-center flex flex-col items-center shrink-0 px-1">
+                    <img 
+                      src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://ciberteque-quiniela.vercel.app" 
+                      alt="QR App" 
+                      loading="eager"
+                      decoding="sync"
+                      className="w-10 h-10 md:w-12 md:h-12 object-contain"
+                    />
+                    <span className="text-[5px] md:text-[6px] font-black uppercase mt-1 text-blue-900">La App</span>
+                  </div>
+                  
+                  {/* Datos en texto (Centro) - Fuentes más grandes */}
+                  <div className="flex-1 flex flex-col justify-center items-center text-center border-x-2 border-dashed border-gray-400 px-2 mx-1">
+                    <p className="text-[6px] md:text-[8px] font-black text-black leading-tight">
+                      📲 WA: <span className="font-mono text-green-700">311 877 6263</span>
+                    </p>
+                    <p className="text-[6px] md:text-[8px] font-black text-black leading-tight mt-1">
+                      🏦 PAGO CLABE (Mercado Pago):
+                    </p>
+                    <p className="text-[8px] md:text-[11px] font-mono font-black text-blue-900 leading-none mt-0.5 tracking-wider">
+                      722969010548321155
+                    </p>
+                    <p className="text-[5.5px] md:text-[7px] font-bold text-gray-600 uppercase mt-1">
+                      A nombre de: Gonzalo Montero Inda
+                    </p>
+                  </div>
+
+                  {/* QR Derecho: WhatsApp */}
+                  <div className="text-center flex flex-col items-center shrink-0 px-1">
+                    <img 
+                      src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://wa.me/523118776263" 
+                      alt="QR WA" 
+                      loading="eager"
+                      decoding="sync"
+                      className="w-10 h-10 md:w-12 md:h-12 object-contain"
+                    />
+                    <span className="text-[5px] md:text-[6px] font-black uppercase mt-1 text-green-700">WhatsApp</span>
+                  </div>
+
+                </div>
               </div>
-              <p className="text-center text-[6px] md:text-[8px] font-bold uppercase mt-2 md:mt-4 text-blue-900">
-                Costo del Boleto: {quiniela.precio_ticket ?? 1} {(quiniela.precio_ticket ?? 1) === 1 ? 'Crédito' : 'Créditos'}
-              </p>
+
             </div>
             
-            <div className="mt-2 md:mt-4 pt-2 md:pt-4 border-t-2 border-black border-dashed">
+            <div className="mt-2 md:mt-3 pt-2 md:pt-3 border-t-2 border-black border-dashed">
               <p className="texto-reglamento text-justify font-bold uppercase text-black">
                 <b>REGLAMENTO:</b> 1. PAGO ANTICIPADO: Boleto pagado antes del 1er partido. 2. CORRECCIONES: Revise su jugada, cambios SOLO ANTES de la hora de cierre. Iniciada la jornada participa tal cual. 3. SUSPENDIDOS/APLAZADOS: Si ya inició vale el marcador en ese momento; si no inició, se declara Empate a 0. 4. RESULTADOS: Válidos a los 90 min (sin extras).
               </p>
