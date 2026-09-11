@@ -1,7 +1,7 @@
 'use client'
 import { useState, useMemo, useEffect } from 'react'
 import { usePerfilUsuario } from '@/hooks/usePerfilUsuario'
-import { supabase } from '@/lib/supabase' // 👈 Importamos el cliente nativo de Supabase
+import { supabase } from '@/lib/supabase'
 
 const SelectorConLogo = ({ label, opciones, valorActual, onChange, placeholder }: any) => {
   const [abierto, setAbierto] = useState(false)
@@ -103,26 +103,19 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
 
   const [editando, setEditando] = useState(false)
   const [avatarAmpliado, setAvatarAmpliado] = useState(false)
-  const [formPrefs, setFormPrefs] = useState({ fecha_nacimiento: '', equipo_favorito: '', pais_favorito: '' })
+  const [formPrefs, setFormPrefs] = useState({ fecha_nacimiento: '', equipo_favorito: '', pais_favorito: '', biografia: '' })
 
-  // 📡 NUEVO: CONEXIÓN NATIVA A SUPABASE PARA TIEMPO REAL
   useEffect(() => {
     if (!usuarioActivo?.id) return;
-
     const canalPerfil = supabase.channel(`perfil_activo_${usuarioActivo.id}`)
-      // Escucha cambios en el saldo o perfil del usuario
       .on('postgres', { event: 'UPDATE', schema: 'public', table: 'usuarios', filter: `id=eq.${usuarioActivo.id}` }, () => {
         if (onUpdate) onUpdate(usuarioActivo);
       })
-      // Escucha cambios en los partidos para recalcular efectividad y medallas en vivo
       .on('postgres', { event: 'UPDATE', schema: 'public', table: 'partidos' }, () => {
         if (onUpdate) onUpdate(usuarioActivo);
       })
       .subscribe();
-
-    return () => {
-      supabase.removeChannel(canalPerfil);
-    }
+    return () => { supabase.removeChannel(canalPerfil); }
   }, [usuarioActivo?.id, onUpdate])
 
   const opcionesPaises = useMemo(() => {
@@ -143,7 +136,8 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
     setFormPrefs({
       fecha_nacimiento: perfil.fecha_nacimiento || '',
       equipo_favorito: perfil.equipo_favorito || '',
-      pais_favorito: perfil.pais_favorito || ''
+      pais_favorito: perfil.pais_favorito || '',
+      biografia: perfil.biografia || ''
     })
     setEditando(true)
   }
@@ -166,11 +160,7 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
   if (cargando || !perfil) {
     return (
       <div className="w-full max-w-3xl mx-auto mt-2 animate-pulse space-y-4">
-        <div className="bg-slate-900/50 rounded-3xl border border-slate-800 h-56 flex flex-col items-center pt-20">
-          <div className="w-24 h-24 bg-slate-800 rounded-full mb-4 border-4 border-slate-900"></div>
-          <div className="h-6 bg-slate-800 rounded w-1/3 mb-2"></div>
-          <div className="h-4 bg-slate-800 rounded w-1/4"></div>
-        </div>
+        <div className="bg-slate-900/50 rounded-3xl border border-slate-800 h-56"></div>
         <div className="flex gap-2">
           <div className="h-24 bg-slate-900/50 rounded-2xl border border-slate-800 flex-1"></div>
           <div className="h-24 bg-slate-900/50 rounded-2xl border border-slate-800 flex-1"></div>
@@ -181,9 +171,8 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
     )
   }
 
-  const porcentajeEfectividad = estadisticas.seleccionesTotales > 0 
-    ? Math.round((estadisticas.aciertos / estadisticas.seleccionesTotales) * 100) 
-    : 0;
+  const pctTendencia = estadisticas.tendenciaTotal > 0 ? Math.round((estadisticas.tendenciaAciertos / estadisticas.tendenciaTotal) * 100) : 0;
+  const pctExacto = estadisticas.exactosTotal > 0 ? Math.round((estadisticas.exactosAciertos / estadisticas.exactosTotal) * 100) : 0;
   
   const equipoFavSafe = perfil?.equipo_favorito || '';
   const paisFavSafe = perfil?.pais_favorito || '';
@@ -192,22 +181,21 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
   const logoPaisFav = equiposInfo.find(e => e.nombre?.toLowerCase().trim() === paisFavSafe.toLowerCase().trim())?.logo_url
   
   const edad = calcularEdad(perfil.fecha_nacimiento)
-
   const avatarFallbackBasico = `https://ui-avatars.com/api/?name=${encodeURIComponent(perfil.nombre || 'U')}&background=1e293b&color=3b82f6&size=200&bold=true`
-  
   const avatarMostrado = perfil.avatar_url || logoEquipoFav || avatarFallbackBasico;
-  const imagenEstadioGenerico = 'https://images.unsplash.com/photo-1518605368461-1e1e1141505c?auto=format&fit=crop&q=80&w=1000';
   
+  const imagenEstadioGenerico = 'https://images.unsplash.com/photo-1518605368461-1e1e1141505c?auto=format&fit=crop&q=80&w=1000';
   const usuarioTienePortada = Boolean(perfil?.portada_url && perfil.portada_url.length > 10);
   const portadaMostrada = usuarioTienePortada ? perfil.portada_url : (logoPaisFav || imagenEstadioGenerico);
 
-  // 💰 LÓGICA DE SUMA UNIFICADA EN PESOS
   const totalBilleteraPesos = Number(perfil.creditos_disponibles || 0) + Number(perfil.saldo_pesos || 0);
+  const miembroDesde = perfil.created_at ? new Date(perfil.created_at).getFullYear() : new Date().getFullYear();
 
   return (
     <div className="w-full max-w-3xl mx-auto mt-2 animate-in fade-in duration-500 mb-20 space-y-4 relative">
       
-      <div className="bg-slate-900/80 rounded-3xl border border-slate-800 shadow-2xl text-center relative overflow-hidden group/header">
+      {/* 📸 HEADER ESTILO TARJETA (AVATAR LATERAL) */}
+      <div className="bg-slate-900/80 rounded-3xl border border-slate-800 shadow-2xl relative overflow-hidden group/header">
         
         <div 
           className={`absolute top-0 left-0 w-full h-32 md:h-40 bg-center border-b border-slate-800 transition-all duration-500 ${subiendoPortada ? 'opacity-50 blur-md' : ''}`}
@@ -218,59 +206,71 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
             opacity: usuarioTienePortada ? 1 : 0.4
           }}
         >
-          <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/60 to-transparent"></div>
+          <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/40 to-transparent"></div>
         </div>
 
         <div className="absolute top-3 right-3 z-50 md:opacity-0 md:group-hover/header:opacity-100 transition-opacity">
-          <div className="relative bg-slate-950/80 hover:bg-slate-800 border border-slate-700 text-white py-2 px-3 rounded-lg overflow-hidden flex items-center justify-center gap-2 backdrop-blur-sm shadow-lg">
-            <span className="text-[10px] font-bold uppercase tracking-widest z-10 select-none pointer-events-none">
+          <div className="relative bg-slate-950/80 hover:bg-slate-800 border border-slate-700 text-white py-1.5 px-3 rounded-lg overflow-hidden flex items-center justify-center gap-2 backdrop-blur-sm shadow-lg">
+            <span className="text-[9px] md:text-[10px] font-bold uppercase tracking-widest z-10 select-none pointer-events-none">
               {subiendoPortada ? '⏳ Subiendo...' : '📸 Cambiar Portada'}
             </span>
             <input 
-              type="file" 
-              accept="image/*" 
-              title=""
+              type="file" accept="image/*" title=""
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20 text-transparent file:hidden" 
-              onChange={subirPortada} 
-              disabled={subiendoPortada} 
+              onChange={subirPortada} disabled={subiendoPortada} 
             />
           </div>
         </div>
         
-        <div className="relative z-10 flex flex-col items-center pt-16 md:pt-24 pb-6 px-4">
-          <div className="relative group mb-3">
+        <div className="relative z-10 pt-20 md:pt-28 pb-6 px-5 md:px-8 flex flex-col md:flex-row items-center md:items-end gap-4 md:gap-6">
+          <div className="relative group shrink-0">
             <img 
               src={avatarMostrado} 
               alt="Avatar" 
               onClick={() => setAvatarAmpliado(true)}
-              className={`w-24 h-24 md:w-28 md:h-28 rounded-full border-4 border-slate-900 object-contain bg-slate-800 shadow-xl transition-all cursor-zoom-in ${subiendoAvatar ? 'opacity-50 blur-sm' : 'hover:scale-105 hover:border-blue-500'}`} 
+              className={`w-28 h-28 md:w-36 md:h-36 rounded-full border-4 border-slate-900 object-cover bg-slate-800 shadow-2xl transition-all cursor-zoom-in ${subiendoAvatar ? 'opacity-50 blur-sm' : 'hover:scale-105 hover:border-blue-500'}`} 
             />
             {subiendoAvatar && <div className="absolute inset-0 flex items-center justify-center font-black text-xs text-white drop-shadow-md">...</div>}
             
-            <div className="absolute bottom-0 right-0 z-50 bg-blue-600 w-8 h-8 md:w-9 md:h-9 rounded-full hover:bg-blue-500 hover:scale-110 transition-all shadow-lg border-2 border-slate-900 flex items-center justify-center overflow-hidden">
+            <div className="absolute bottom-1 right-1 z-50 bg-blue-600 w-8 h-8 md:w-10 md:h-10 rounded-full hover:bg-blue-500 hover:scale-110 transition-all shadow-lg border-2 border-slate-900 flex items-center justify-center overflow-hidden">
               <span className="text-xs md:text-sm z-10 select-none pointer-events-none">📷</span>
               <input 
-                type="file" 
-                accept="image/*" 
-                title=""
+                type="file" accept="image/*" title=""
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20 text-transparent file:hidden" 
-                onChange={subirAvatar} 
-                disabled={subiendoAvatar} 
+                onChange={subirAvatar} disabled={subiendoAvatar} 
               />
             </div>
           </div>
           
-          <h2 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tight leading-none drop-shadow-lg">{perfil.nombre}</h2>
-          <p className="text-slate-400 font-mono text-xs mt-1 bg-slate-950/50 px-3 py-1 rounded-full">{perfil.telefono}</p>
+          <div className="flex-1 text-center md:text-left md:pb-2">
+            <h2 className="text-2xl md:text-4xl font-black text-white uppercase tracking-tight leading-none drop-shadow-lg">{perfil.nombre}</h2>
+            
+            <div className="flex items-center justify-center md:justify-start gap-2 mt-1.5 flex-wrap">
+              <span className="text-slate-400 font-mono text-[10px] md:text-xs bg-slate-950/60 px-3 py-1 rounded-full border border-slate-800">{perfil.telefono}</span>
+              <span className="text-blue-400 font-bold text-[9px] md:text-[10px] uppercase tracking-widest bg-blue-950/40 border border-blue-900/40 px-3 py-1 rounded-full">
+                MIEMBRO DESDE {miembroDesde}
+              </span>
+            </div>
+
+            {perfil.biografia ? (
+              <p className="text-amber-400 text-xs md:text-sm font-bold italic mt-3 bg-amber-950/20 px-4 py-2 rounded-xl inline-block border border-amber-900/30">
+                "{perfil.biografia}"
+              </p>
+            ) : (
+              <button onClick={abrirModalEdicion} className="text-slate-500 text-[10px] font-bold uppercase tracking-widest hover:text-slate-300 mt-3 inline-block transition-colors">
+                + Añadir estado o frase
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
       <div className="flex flex-row w-full gap-2 md:gap-4 justify-between items-stretch">
         
-        {/* 🌟 ACTUALIZACIÓN BILLETERA ÚNICA EN PESOS */}
-        <div className="flex-1 bg-slate-900/80 py-3 px-1 md:p-5 rounded-2xl border border-slate-800 flex flex-col items-center justify-center text-center shadow-md relative overflow-hidden group">
+        {/* 💰 BILLETERA */}
+        <div className="flex-1 bg-slate-900/80 py-3 px-1 md:p-4 rounded-2xl border border-slate-800 flex flex-col items-center justify-center text-center shadow-md relative overflow-hidden group">
           <div className="absolute inset-0 bg-amber-500/5 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
-          <span className="relative z-10 block text-[8px] md:text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 truncate w-full">Billetera</span>
+          <span className="relative z-10 block text-[8px] md:text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1 truncate w-full">Billetera</span>
           
           <div className="relative z-10 flex flex-col items-center justify-center w-full">
             <span className="text-lg sm:text-xl md:text-3xl font-black text-amber-500 drop-shadow-[0_0_8px_rgba(245,158,11,0.2)]">
@@ -279,18 +279,24 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
           </div>
         </div>
 
-        <div className="flex-1 bg-slate-900/80 py-3 px-1 md:p-5 rounded-2xl border border-slate-800 flex flex-col items-center justify-center text-center shadow-md">
-          <span className="block text-[8px] md:text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 truncate w-full">Jugadas</span>
+        {/* 🎟️ JUGADAS */}
+        <div className="flex-1 bg-slate-900/80 py-3 px-1 md:p-4 rounded-2xl border border-slate-800 flex flex-col items-center justify-center text-center shadow-md">
+          <span className="block text-[8px] md:text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1 truncate w-full">Jugadas Totales</span>
           <span className="text-lg sm:text-xl md:text-3xl font-black text-white">{estadisticas.jugadas}</span>
         </div>
 
-        <div className="flex-1 bg-slate-900/80 py-3 px-1 md:p-5 rounded-2xl border border-slate-800 flex flex-col items-center justify-center text-center shadow-md">
-          <span className="block text-[8px] md:text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 truncate w-full">Efectividad</span>
-          <div className="flex flex-col items-center">
-            <span className="text-lg sm:text-xl md:text-3xl font-black text-blue-400">{porcentajeEfectividad}%</span>
-            <span className="text-[7px] sm:text-[8px] md:text-[9px] font-bold text-slate-500 tracking-wide mt-0.5">
-              {estadisticas.aciertos}/{estadisticas.seleccionesTotales}
-            </span>
+        {/* 🎯 EFECTIVIDAD DETALLADA */}
+        <div className="flex-1 bg-slate-900/80 py-2.5 px-2 md:p-4 rounded-2xl border border-slate-800 flex flex-col items-center justify-center shadow-md">
+          <span className="block text-[8px] md:text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-2 text-center w-full">Efectividad</span>
+          <div className="w-full flex flex-col gap-1.5 md:gap-2">
+            <div className="flex justify-between items-center bg-slate-950 px-2 py-1 md:py-1.5 rounded border border-slate-800">
+              <span className="text-[7px] md:text-[9px] uppercase font-bold text-slate-400">Tendencia</span>
+              <span className="text-[10px] md:text-xs font-black text-blue-400">{pctTendencia}%</span>
+            </div>
+            <div className="flex justify-between items-center bg-slate-950 px-2 py-1 md:py-1.5 rounded border border-slate-800">
+              <span className="text-[7px] md:text-[9px] uppercase font-bold text-slate-400 truncate">Marc. Exacto</span>
+              <span className="text-[10px] md:text-xs font-black text-amber-400 ml-1">{pctExacto}%</span>
+            </div>
           </div>
         </div>
       </div>
@@ -389,11 +395,23 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
         <div className="fixed inset-0 z-[90] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 max-w-sm w-full p-5 rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
-              <h3 className="text-sm font-black text-white uppercase tracking-tight">⚙️ Editar Ficha Técnica</h3>
+              <h3 className="text-sm font-black text-white uppercase tracking-tight">⚙️ Editar Perfil</h3>
               <button onClick={() => setEditando(false)} className="text-slate-500 hover:text-slate-300 font-mono text-xl">✕</button>
             </div>
 
             <div className="space-y-4 mb-6">
+              <div>
+                <label className="text-[9px] text-slate-400 font-bold uppercase mb-1 block tracking-widest">Estado / Frase (Max 60 chars)</label>
+                <input 
+                  type="text" 
+                  maxLength={60}
+                  value={formPrefs.biografia} 
+                  onChange={(e) => setFormPrefs({...formPrefs, biografia: e.target.value})} 
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white text-xs outline-none focus:border-blue-500 font-bold placeholder:text-slate-600" 
+                  placeholder="Ej. ¡A por todas! ⚽🔥"
+                />
+              </div>
+
               <div>
                 <label className="text-[9px] text-slate-400 font-bold uppercase mb-1 block tracking-widest">Fecha de Nacimiento</label>
                 <input 

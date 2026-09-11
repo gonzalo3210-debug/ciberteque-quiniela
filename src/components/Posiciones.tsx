@@ -26,6 +26,9 @@ export default function Posiciones() {
   const [animacionesFlotantes, setAnimacionesFlotantes] = useState<{id: number, emoji: string}[]>([]);
   const [quinielaExpandidaId, setQuinielaExpandidaId] = useState<string | null>(null)
   const [jugadorExpandidoId, setJugadorExpandidoId] = useState<string | null>(null)
+  
+  // 🔍 Nuevo estado para la búsqueda
+  const [busqueda, setBusqueda] = useState('');
 
   const toggleExpandirHistorial = (id: string) => setQuinielaExpandidaId(prevId => prevId === id ? null : id)
   const toggleExpandirJugador = (id: string) => setJugadorExpandidoId(prevId => prevId === id ? null : id)
@@ -168,6 +171,11 @@ export default function Posiciones() {
   const esSorteo = quinielaActiva.modalidad === 'sorteo'
   const esPromo = quinielaActiva.tipo_premiacion?.toLowerCase().includes('promo')
 
+  // 🔍 Filtrar jugadores según la búsqueda
+  const rankingFiltrado = quinielaActiva.ranking.filter((jugador: any) => 
+    jugador.nombre.toLowerCase().includes(busqueda.toLowerCase())
+  );
+
   const opcionesFecha: Intl.DateTimeFormatOptions = { day: '2-digit', month: 'short', hour: '2-digit', minute:'2-digit' };
   const fechaTextoVisible = fechaCierre.toLocaleDateString('es-MX', opcionesFecha).replace(',', ' a las');
 
@@ -236,7 +244,11 @@ export default function Posiciones() {
             {quinielasAbiertas.map(qa => (
               <button
                 key={qa.id}
-                onClick={() => { setQuinielaActiva(qa); setJugadorExpandidoId(null); }}
+                onClick={() => { 
+                  setQuinielaActiva(qa); 
+                  setJugadorExpandidoId(null); 
+                  setBusqueda('');
+                }}
                 className={`px-3 py-1.5 rounded-lg text-[10px] md:text-xs font-black uppercase transition-all ${
                   quinielaActiva?.id === qa.id
                     ? 'bg-amber-500 text-slate-900 shadow-md scale-105'
@@ -287,7 +299,44 @@ export default function Posiciones() {
               </>
             )}
           </div>
+
+          {/* 🌍 BOTÓN DE RANKING PÚBLICO */}
+          <div className="flex justify-center mt-3 relative z-10">
+            <a
+              href="/ranking"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 bg-blue-600/20 text-blue-400 border border-blue-500/30 px-4 py-2 rounded-lg text-[10px] md:text-xs font-black uppercase tracking-widest hover:bg-blue-600/40 hover:text-white transition-all shadow-[0_0_10px_rgba(59,130,246,0.15)]"
+            >
+              <span className="text-sm">🌍</span> RANKING PUBLICO
+            </a>
+          </div>
+
         </div>
+
+        {/* 🔍 BARRA DE BÚSQUEDA DE JUGADORES */}
+        {totalJugadores > 0 && (
+          <div className="relative mb-4 max-w-md mx-auto z-10 group">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <span className="text-slate-500 text-sm group-focus-within:text-amber-500 transition-colors">🔍</span>
+            </div>
+            <input
+              type="text"
+              placeholder="Buscar jugador..."
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              className="w-full bg-slate-900/80 border border-slate-700 text-white text-xs rounded-xl pl-9 pr-4 py-2.5 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all placeholder:text-slate-500 uppercase font-bold shadow-inner"
+            />
+            {busqueda && (
+              <button 
+                onClick={() => setBusqueda('')} 
+                className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-300"
+              >
+                ✖
+              </button>
+            )}
+          </div>
+        )}
 
         {!mostrarPicks && !esSorteo && (
           <div className="mb-3 text-center border border-amber-900/50 bg-amber-950/20 text-amber-500/80 text-[10px] py-1.5 rounded-lg font-bold uppercase tracking-widest">
@@ -299,7 +348,7 @@ export default function Posiciones() {
            <div className="bg-slate-900/80 rounded-xl border border-blue-900/30 shadow-2xl p-3 md:p-5">
               <h3 className="text-center font-black text-slate-300 uppercase tracking-widest text-xs mb-4">Bombo de Asignaciones</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
-                 {quinielaActiva.ranking.map((jugador: any) => {
+                 {rankingFiltrado.map((jugador: any) => {
                     const idReceptorSeguro = obtenerIdReceptorReal(jugador);
                     const eq = jugador.equipoAsignado;
                     const eliminado = jugador.estaEliminado;
@@ -413,6 +462,11 @@ export default function Posiciones() {
                      La sala del sorteo está vacía.
                    </div>
                  )}
+                 {rankingFiltrado.length === 0 && busqueda !== '' && (
+                   <div className="col-span-full p-8 text-center text-slate-500 text-[10px] md:text-xs font-bold uppercase tracking-widest italic border border-dashed border-slate-700 rounded-xl">
+                     No se encontró a "{busqueda}"
+                   </div>
+                 )}
               </div>
            </div>
         ) : (
@@ -429,7 +483,7 @@ export default function Posiciones() {
                    </tr>
                  </thead>
                  <tbody className="divide-y divide-slate-800/40">
-                   {quinielaActiva.ranking.map((jugador: any) => {
+                   {rankingFiltrado.map((jugador: any) => {
                      const idReceptorSeguro = obtenerIdReceptorReal(jugador);
                      const esLider = jugador.posicion === 1 && totalJugadores > 1 && jugador.puntos > 0
                      const estaExpandido = jugadorExpandidoId === jugador.id
@@ -646,6 +700,11 @@ export default function Posiciones() {
                </table>
                {quinielaActiva.ranking.length === 0 && (
                  <div className="p-6 text-center text-slate-500 text-[10px] font-bold uppercase tracking-widest italic">Aún no hay boletos para esta jornada.</div>
+               )}
+               {rankingFiltrado.length === 0 && busqueda !== '' && (
+                 <div className="p-6 text-center text-slate-500 text-[10px] font-bold uppercase tracking-widest italic border-t border-slate-800/40">
+                   No se encontró a "{busqueda}"
+                 </div>
                )}
              </div>
            </div>

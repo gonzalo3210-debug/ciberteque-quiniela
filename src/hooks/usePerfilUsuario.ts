@@ -3,7 +3,14 @@ import { supabase } from '@/lib/supabase'
 
 export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => void) {
   const [perfil, setPerfil] = useState<any>(usuarioActivo)
-  const [estadisticas, setEstadisticas] = useState({ jugadas: 0, aciertos: 0, seleccionesTotales: 0, oros: 0, platas: 0, bronces: 0 })
+  const [estadisticas, setEstadisticas] = useState({ 
+    jugadas: 0, 
+    tendenciaTotal: 0, 
+    tendenciaAciertos: 0, 
+    exactosTotal: 0, 
+    exactosAciertos: 0, 
+    oros: 0, platas: 0, bronces: 0 
+  })
   const [equiposInfo, setEquiposInfo] = useState<any[]>([]) 
   const [cargando, setCargando] = useState(true)
   
@@ -33,8 +40,7 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
           
         if (userErr) throw userErr;
 
-        // ⚡ INGENIERÍA: CÁLCULO DE GANANCIAS (LIBRO MAYOR)
-        // Consultamos todas las transacciones positivas del usuario
+        // CÁLCULO DE GANANCIAS
         const { data: txData } = await supabase
           .from('transacciones_creditos')
           .select('cantidad, descripcion')
@@ -42,13 +48,9 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
           .gt('cantidad', 0); 
 
         if (txData) {
-          // Filtramos y sumamos solo aquellas cuya descripción indique que es un premio
-          const totalCalculado = txData
+          userData.total_ganado = txData
             .filter((tx: any) => tx.descripcion && tx.descripcion.toUpperCase().includes('PREMIO'))
             .reduce((suma: number, tx: any) => suma + tx.cantidad, 0);
-          
-          // Sobrescribimos el dato estático de la BD con el cálculo matemático real
-          userData.total_ganado = totalCalculado;
         }
 
         if (isMounted) setPerfil(userData);
@@ -56,9 +58,10 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
         const { data: eqData } = await supabase.from('equipos').select('id, nombre, logo_url, liga');
         if (eqData && isMounted) setEquiposInfo(eqData);
 
+        // EXTRAER TICKETS PARA ESTADÍSTICAS DETALLADAS
         const { data: misTickets } = await supabase
           .from('tickets')
-          .select('quiniela_id, puntos_totales, pronosticos(partidos(resultado_real))')
+          .select('quiniela_id, puntos_totales, quinielas(modalidad), pronosticos(eleccion_usuario, partidos(resultado_real, goles_local, goles_visitante))')
           .eq('usuario_id', usuarioActivo.id);
 
         if (!misTickets || misTickets.length === 0) {
@@ -67,18 +70,46 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
         }
 
         const totalJugadas = misTickets.length;
-        let totalAciertos = 0;
-        let seleccionesCalificadas = 0;
+        let tendenciaTotal = 0;
+        let tendenciaAciertos = 0;
+        let exactosTotal = 0;
+        let exactosAciertos = 0;
 
         misTickets.forEach((t: any) => {
-          totalAciertos += (t.puntos_totales || 0);
-          if (t.pronosticos) {
-            t.pronosticos.forEach((pr: any) => {
-              if (pr.partidos && pr.partidos.resultado_real !== null) seleccionesCalificadas++;
-            });
-          }
+          const mod = t.quinielas?.modalidad;
+          if (mod === 'sorteo' || !mod) return; 
+
+          t.pronosticos?.forEach((pr: any) => {
+            const p = pr.partidos;
+            if (p && p.resultado_real !== null && p.goles_local !== null && p.goles_visitante !== null) {
+              tendenciaTotal++;
+              let userTendency = pr.eleccion_usuario;
+              let matchExacto = false;
+
+              if (userTendency.includes('-')) {
+                const [ul, uv] = userTendency.split('-').map(Number);
+                if (ul > uv) userTendency = 'LOCAL';
+                else if (uv > ul) userTendency = 'VISITANTE';
+                else userTendency = 'EMPATE';
+
+                if (pr.eleccion_usuario === `${p.goles_local}-${p.goles_visitante}`) {
+                  matchExacto = true;
+                }
+              }
+
+              if (userTendency === p.resultado_real) {
+                tendenciaAciertos++;
+              }
+
+              if (mod === 'marcador_exacto') {
+                exactosTotal++;
+                if (matchExacto) exactosAciertos++;
+              }
+            }
+          });
         });
 
+        // CÁLCULO DE PODIOS
         let oros = 0, platas = 0, bronces = 0;
         const idsQuinielasJugadas = [...new Set(misTickets.map((t: any) => t.quiniela_id))];
 
@@ -115,13 +146,12 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
         }
 
         if (isMounted) {
-          setEstadisticas({ jugadas: totalJugadas, aciertos: totalAciertos, seleccionesTotales: seleccionesCalificadas, oros, platas, bronces });
+          setEstadisticas({ jugadas: totalJugadas, tendenciaTotal, tendenciaAciertos, exactosTotal, exactosAciertos, oros, platas, bronces });
         }
 
       } catch (err: any) {
-        const mensajeReal = err?.message || err?.details || err?.hint || JSON.stringify(err);
-        console.error("Error cargando perfil completo:", mensajeReal, err);
-        if (isMounted) setError('No pudimos cargar toda tu información. Intenta recargar la página.');
+        console.error("Error cargando perfil completo:", err);
+        if (isMounted) setError('No pudimos cargar toda tu información.');
       } finally {
         if (isMounted) setCargando(false);
       }
@@ -154,9 +184,9 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
       setPerfil((prev: any) => ({ ...prev, avatar_url: linkPublico }));
       if (onUpdate) onUpdate({ avatar_url: linkPublico }); 
       
-      alert('¡Foto de perfil actualizada con éxito!');
+      alert('¡Foto de perfil actualizada!');
     } catch (error: any) {
-      alert('Error al subir la imagen. Asegúrate de que pesa menos de 2MB.');
+      alert('Error al subir la imagen.');
       console.error(error);
     } finally {
       setSubiendoAvatar(false);
@@ -180,27 +210,24 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
       if (uploadError) throw uploadError;
 
       const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
-      
       const linkPublico = `${data.publicUrl}?t=${Date.now()}`;
 
-      const { error: dbError } = await supabase.from('usuarios').update({ portada_url: linkPublico }).eq('id', usuarioActivo.id);
-      if (dbError) throw dbError;
+      await supabase.from('usuarios').update({ portada_url: linkPublico }).eq('id', usuarioActivo.id);
       
       setPerfil((prev: any) => ({ ...prev, portada_url: linkPublico }));
       if (onUpdate) onUpdate({ portada_url: linkPublico });
       
-      alert('¡Foto de portada actualizada con éxito!');
+      alert('¡Foto de portada actualizada!');
     } catch (error: any) {
-      const msg = error.message || error.details || 'Error desconocido';
-      alert(`⚠️ Falló la subida de portada: ${msg}`);
-      console.error("Detalle del error al subir portada:", error);
+      alert(`⚠️ Falló la subida de portada.`);
+      console.error(error);
     } finally {
       setSubiendoPortada(false);
       if(e.target) e.target.value = ''; 
     }
   };
 
-  const actualizarPreferencias = async (datos: { fecha_nacimiento: string, equipo_favorito: string, pais_favorito: string }) => {
+  const actualizarPreferencias = async (datos: { fecha_nacimiento: string, equipo_favorito: string, pais_favorito: string, biografia: string }) => {
     try {
       setGuardandoPreferencias(true);
       const { error } = await supabase.from('usuarios').update(datos).eq('id', usuarioActivo.id);
