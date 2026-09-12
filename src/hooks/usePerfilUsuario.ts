@@ -5,11 +5,13 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
   const [perfil, setPerfil] = useState<any>(usuarioActivo)
   const [estadisticas, setEstadisticas] = useState({ 
     jugadas: 0, 
-    tendenciaTotal: 0, 
-    tendenciaAciertos: 0, 
-    exactosTotal: 0, 
-    exactosAciertos: 0, 
-    oros: 0, platas: 0, bronces: 0 
+    oros: 0, platas: 0, bronces: 0,
+    pctPodios: 0,
+    actividad: {
+      enJuego: [] as any[],
+      porJugar: [] as any[],
+      ultimaCerrada: null as any
+    }
   })
   const [equiposInfo, setEquiposInfo] = useState<any[]>([]) 
   const [cargando, setCargando] = useState(true)
@@ -55,14 +57,31 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
 
         if (isMounted) setPerfil(userData);
 
+        // CATÁLOGO DE EQUIPOS
         const { data: eqData } = await supabase.from('equipos').select('id, nombre, logo_url, liga');
+        const equiposMap = eqData || [];
         if (eqData && isMounted) setEquiposInfo(eqData);
 
-        // EXTRAER TICKETS PARA ESTADÍSTICAS DETALLADAS
-        const { data: misTickets } = await supabase
+        const getNombreEquipo = (val: any) => {
+          if (!val) return 'Desconocido';
+          const valStr = String(val).toLowerCase().trim();
+          const eq = equiposMap.find((e: any) => e.id === val || (e.nombre && e.nombre.toLowerCase().trim() === valStr));
+          return eq?.nombre || val;
+        };
+        const getLogoEquipo = (val: any) => {
+          if (!val) return null;
+          const valStr = String(val).toLowerCase().trim();
+          const eq = equiposMap.find((e: any) => e.id === val || (e.nombre && e.nombre.toLowerCase().trim() === valStr));
+          return eq?.logo_url || null;
+        };
+
+        // 🚀 EXTRAER TICKETS COMPLETOS CON goles_totales_real
+        const { data: misTickets, error: ticketsErr } = await supabase
           .from('tickets')
-          .select('quiniela_id, puntos_totales, quinielas(modalidad), pronosticos(eleccion_usuario, partidos(resultado_real, goles_local, goles_visitante))')
+          .select('id, fecha_creacion, quiniela_id, puntos_totales, quinielas(nombre_jornada, estado, fecha_cierre, modalidad, goles_totales_real), pronosticos(eleccion_usuario, partidos(resultado_real, goles_local, goles_visitante, equipo_local, equipo_visitante))')
           .eq('usuario_id', usuarioActivo.id);
+
+        if (ticketsErr) throw ticketsErr;
 
         if (!misTickets || misTickets.length === 0) {
           if (isMounted) setCargando(false);
@@ -70,83 +89,93 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
         }
 
         const totalJugadas = misTickets.length;
-        let tendenciaTotal = 0;
-        let tendenciaAciertos = 0;
-        let exactosTotal = 0;
-        let exactosAciertos = 0;
+
+        // 🚀 OBTENER TODOS LOS COMPETIDORES PARA CALCULAR RANKING
+        const idsQuinielasJugadas = [...new Set(misTickets.map((t: any) => t.quiniela_id))];
+        const { data: todosLosTickets } = await supabase
+          .from('tickets')
+          .select('usuario_id, quiniela_id, puntos_totales, prediccion_goles_total')
+          .in('quiniela_id', idsQuinielasJugadas);
+
+        // ORGANIZAR LA ACTIVIDAD RECIENTE Y RANKING
+        const arrEnJuego: any[] = [];
+        const arrPorJugar: any[] = [];
+        const arrCerradas: any[] = [];
+        const quinielasProcesadas = new Set<string>();
+        
+        let oros = 0, platas = 0, bronces = 0;
+        let totalCerradas = 0;
+        const ahora = new Date().getTime();
+
+        misTickets.sort((a: any, b: any) => new Date(b.fecha_creacion).getTime() - new Date(a.fecha_creacion).getTime());
 
         misTickets.forEach((t: any) => {
-          const mod = t.quinielas?.modalidad;
-          if (mod === 'sorteo' || !mod) return; 
+          const q = t.quinielas;
+          
+          if (q && todosLosTickets) {
+            // Calcular Ranking de este Ticket
+            const competidores = todosLosTickets.filter(ct => ct.quiniela_id === t.quiniela_id);
+            const golesReal = q.goles_totales_real || 0;
+            
+            competidores.sort((a, b) => {
+              if (b.puntos_totales !== a.puntos_totales) return (b.puntos_totales || 0) - (a.puntos_totales || 0);
+              const diffA = Math.abs((a.prediccion_goles_total || 0) - golesReal);
+              const diffB = Math.abs((b.prediccion_goles_total || 0) - golesReal);
+              return diffA - diffB;
+            });
 
-          t.pronosticos?.forEach((pr: any) => {
-            const p = pr.partidos;
-            if (p && p.resultado_real !== null && p.goles_local !== null && p.goles_visitante !== null) {
-              tendenciaTotal++;
-              let userTendency = pr.eleccion_usuario;
-              let matchExacto = false;
+            const miIdx = competidores.findIndex(ct => ct.usuario_id === usuarioActivo.id);
+            t.ranking = { posicion: miIdx >= 0 ? miIdx + 1 : 0, total: competidores.length };
 
-              if (userTendency.includes('-')) {
-                const [ul, uv] = userTendency.split('-').map(Number);
-                if (ul > uv) userTendency = 'LOCAL';
-                else if (uv > ul) userTendency = 'VISITANTE';
-                else userTendency = 'EMPATE';
+            // Calcular Podios si está cerrada
+            if (q.estado === 'cerrada') {
+              totalCerradas++;
+              if (miIdx === 0) oros++;
+              else if (miIdx === 1) platas++;
+              else if (miIdx === 2) bronces++;
+            }
+          }
 
-                if (pr.eleccion_usuario === `${p.goles_local}-${p.goles_visitante}`) {
-                  matchExacto = true;
-                }
+          if (q && !quinielasProcesadas.has(q.nombre_jornada)) {
+            quinielasProcesadas.add(q.nombre_jornada);
+
+            // Inyectamos nombres y logos al ticket
+            t.pronosticos?.forEach((pr: any) => {
+              if (pr.partidos) {
+                pr.partidos.nombre_local = getNombreEquipo(pr.partidos.equipo_local);
+                pr.partidos.nombre_visitante = getNombreEquipo(pr.partidos.equipo_visitante);
+                pr.partidos.logo_local = getLogoEquipo(pr.partidos.equipo_local);
+                pr.partidos.logo_visitante = getLogoEquipo(pr.partidos.equipo_visitante);
               }
+            });
 
-              if (userTendency === p.resultado_real) {
-                tendenciaAciertos++;
-              }
-
-              if (mod === 'marcador_exacto') {
-                exactosTotal++;
-                if (matchExacto) exactosAciertos++;
+            if (q.estado === 'cerrada') {
+              arrCerradas.push(t);
+            } else {
+              const fechaCierre = q.fecha_cierre ? new Date(q.fecha_cierre).getTime() : 0;
+              if (fechaCierre > 0 && fechaCierre < ahora) {
+                arrEnJuego.push(t);
+              } else {
+                arrPorJugar.push(t);
               }
             }
-          });
+          }
         });
 
-        // CÁLCULO DE PODIOS
-        let oros = 0, platas = 0, bronces = 0;
-        const idsQuinielasJugadas = [...new Set(misTickets.map((t: any) => t.quiniela_id))];
-
-        const { data: quinielasCerradas } = await supabase
-          .from('quinielas')
-          .select('id, goles_totales_real')
-          .in('id', idsQuinielasJugadas)
-          .eq('estado', 'cerrada')
-          .not('goles_totales_real', 'is', null);
-
-        if (quinielasCerradas && quinielasCerradas.length > 0) {
-          const idsCerradas = quinielasCerradas.map(q => q.id);
-          const { data: todosLosTickets } = await supabase
-            .from('tickets')
-            .select('usuario_id, quiniela_id, puntos_totales, prediccion_goles_total')
-            .in('quiniela_id', idsCerradas);
-
-          if (todosLosTickets) {
-            quinielasCerradas.forEach(quiniela => {
-              const competidores = todosLosTickets.filter(t => t.quiniela_id === quiniela.id);
-              competidores.sort((a, b) => {
-                if (b.puntos_totales !== a.puntos_totales) return (b.puntos_totales || 0) - (a.puntos_totales || 0);
-                const diffA = Math.abs((a.prediccion_goles_total || 0) - quiniela.goles_totales_real);
-                const diffB = Math.abs((b.prediccion_goles_total || 0) - quiniela.goles_totales_real);
-                return diffA - diffB;
-              });
-
-              const miPosicion = competidores.findIndex(t => t.usuario_id === usuarioActivo.id);
-              if (miPosicion === 0) oros++;
-              else if (miPosicion === 1) platas++;
-              else if (miPosicion === 2) bronces++;
-            });
-          }
-        }
+        const ultimaCerrada = arrCerradas.length > 0 ? arrCerradas[0] : null;
+        const pctPodios = totalCerradas > 0 ? Math.round(((oros + platas + bronces) / totalCerradas) * 100) : 0;
 
         if (isMounted) {
-          setEstadisticas({ jugadas: totalJugadas, tendenciaTotal, tendenciaAciertos, exactosTotal, exactosAciertos, oros, platas, bronces });
+          setEstadisticas({ 
+            jugadas: totalJugadas, 
+            oros, platas, bronces, 
+            pctPodios,
+            actividad: {
+              enJuego: arrEnJuego,
+              porJugar: arrPorJugar,
+              ultimaCerrada
+            }
+          });
         }
 
       } catch (err: any) {
@@ -166,28 +195,17 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
       setSubiendoAvatar(true);
       const file = e.target.files[0];
       if (!file) return;
-
       const fileExt = file.name.split('.').pop() || 'jpg';
       const filePath = `avatar_${usuarioActivo.id}_${Date.now()}.${fileExt}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(filePath, file, { upsert: true, cacheControl: '3600' });
-
+      const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file, { upsert: true, cacheControl: '3600' });
       if (uploadError) throw uploadError;
-
       const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
-      const linkPublico = data.publicUrl;
-
-      await supabase.from('usuarios').update({ avatar_url: linkPublico }).eq('id', usuarioActivo.id);
-      
-      setPerfil((prev: any) => ({ ...prev, avatar_url: linkPublico }));
-      if (onUpdate) onUpdate({ avatar_url: linkPublico }); 
-      
+      await supabase.from('usuarios').update({ avatar_url: data.publicUrl }).eq('id', usuarioActivo.id);
+      setPerfil((prev: any) => ({ ...prev, avatar_url: data.publicUrl }));
+      if (onUpdate) onUpdate({ avatar_url: data.publicUrl }); 
       alert('¡Foto de perfil actualizada!');
     } catch (error: any) {
       alert('Error al subir la imagen.');
-      console.error(error);
     } finally {
       setSubiendoAvatar(false);
       if(e.target) e.target.value = ''; 
@@ -199,28 +217,18 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
       setSubiendoPortada(true);
       const file = e.target.files[0];
       if (!file) return;
-
       const fileExt = file.name.split('.').pop() || 'jpg';
       const filePath = `portada_${usuarioActivo.id}_${Date.now()}.${fileExt}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(filePath, file, { upsert: true, cacheControl: '3600' });
-
+      const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file, { upsert: true, cacheControl: '3600' });
       if (uploadError) throw uploadError;
-
       const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
       const linkPublico = `${data.publicUrl}?t=${Date.now()}`;
-
       await supabase.from('usuarios').update({ portada_url: linkPublico }).eq('id', usuarioActivo.id);
-      
       setPerfil((prev: any) => ({ ...prev, portada_url: linkPublico }));
       if (onUpdate) onUpdate({ portada_url: linkPublico });
-      
       alert('¡Foto de portada actualizada!');
     } catch (error: any) {
       alert(`⚠️ Falló la subida de portada.`);
-      console.error(error);
     } finally {
       setSubiendoPortada(false);
       if(e.target) e.target.value = ''; 
@@ -232,13 +240,11 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
       setGuardandoPreferencias(true);
       const { error } = await supabase.from('usuarios').update(datos).eq('id', usuarioActivo.id);
       if (error) throw error;
-
       setPerfil((prev: any) => ({ ...prev, ...datos }));
       alert('¡Preferencias actualizadas con éxito!');
       return true;
     } catch (err) {
       alert('Hubo un error al guardar tus preferencias.');
-      console.error(err);
       return false;
     } finally {
       setGuardandoPreferencias(false);
@@ -251,24 +257,9 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
     const nacimiento = new Date(fechaNacimiento);
     let edad = hoy.getFullYear() - nacimiento.getFullYear();
     const mes = hoy.getMonth() - nacimiento.getMonth();
-    if (mes < 0 || (mes === 0 && hoy.getDate() < nacimiento.getDate())) {
-      edad--;
-    }
+    if (mes < 0 || (mes === 0 && hoy.getDate() < nacimiento.getDate())) edad--;
     return edad;
   };
 
-  return { 
-    perfil, 
-    estadisticas, 
-    equiposInfo, 
-    cargando, 
-    subiendoAvatar, 
-    subiendoPortada, 
-    guardandoPreferencias, 
-    error, 
-    subirAvatar, 
-    subirPortada, 
-    actualizarPreferencias, 
-    calcularEdad 
-  };
+  return { perfil, estadisticas, equiposInfo, cargando, subiendoAvatar, subiendoPortada, guardandoPreferencias, error, subirAvatar, subirPortada, actualizarPreferencias, calcularEdad };
 }
