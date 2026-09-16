@@ -10,10 +10,12 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
     actividad: {
       enJuego: [] as any[],
       porJugar: [] as any[],
-      ultimaCerrada: null as any
+      ultimaCerrada: null as any,
+      historial: [] as any[]
     }
   })
   const [equiposInfo, setEquiposInfo] = useState<any[]>([]) 
+  const [niveles, setNiveles] = useState<any[]>([])
   const [cargando, setCargando] = useState(true)
   
   const [subiendoAvatar, setSubiendoAvatar] = useState(false)
@@ -41,6 +43,10 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
           .single();
           
         if (userErr) throw userErr;
+
+        
+        const { data: dataNiveles } = await supabase.from('cat_niveles').select('*')
+        if (dataNiveles && isMounted) setNiveles(dataNiveles)
 
         // CÁLCULO DE GANANCIAS
         const { data: txData } = await supabase
@@ -75,10 +81,9 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
           return eq?.logo_url || null;
         };
 
-        // 🚀 EXTRAER TICKETS COMPLETOS CON goles_totales_real
         const { data: misTickets, error: ticketsErr } = await supabase
           .from('tickets')
-          .select('id, fecha_creacion, quiniela_id, puntos_totales, quinielas(nombre_jornada, estado, fecha_cierre, modalidad, goles_totales_real), pronosticos(eleccion_usuario, partidos(resultado_real, goles_local, goles_visitante, equipo_local, equipo_visitante))')
+          .select('id, fecha_creacion, quiniela_id, puntos_totales, quinielas(nombre_jornada, estado, fecha_cierre, modalidad, goles_totales_real), pronosticos(eleccion_usuario, partidos(*))')
           .eq('usuario_id', usuarioActivo.id);
 
         if (ticketsErr) throw ticketsErr;
@@ -90,7 +95,7 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
 
         const totalJugadas = misTickets.length;
 
-        // 🚀 OBTENER TODOS LOS COMPETIDORES PARA CALCULAR RANKING
+        // OBTENER TODOS LOS COMPETIDORES PARA CALCULAR RANKING
         const idsQuinielasJugadas = [...new Set(misTickets.map((t: any) => t.quiniela_id))];
         const { data: todosLosTickets } = await supabase
           .from('tickets')
@@ -101,7 +106,7 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
         const arrEnJuego: any[] = [];
         const arrPorJugar: any[] = [];
         const arrCerradas: any[] = [];
-        const quinielasProcesadas = new Set<string>();
+        const ticketsProcesados = new Set<string>();
         
         let oros = 0, platas = 0, bronces = 0;
         let totalCerradas = 0;
@@ -113,7 +118,6 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
           const q = t.quinielas;
           
           if (q && todosLosTickets) {
-            // Calcular Ranking de este Ticket
             const competidores = todosLosTickets.filter(ct => ct.quiniela_id === t.quiniela_id);
             const golesReal = q.goles_totales_real || 0;
             
@@ -127,7 +131,6 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
             const miIdx = competidores.findIndex(ct => ct.usuario_id === usuarioActivo.id);
             t.ranking = { posicion: miIdx >= 0 ? miIdx + 1 : 0, total: competidores.length };
 
-            // Calcular Podios si está cerrada
             if (q.estado === 'cerrada') {
               totalCerradas++;
               if (miIdx === 0) oros++;
@@ -136,18 +139,51 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
             }
           }
 
-          if (q && !quinielasProcesadas.has(q.nombre_jornada)) {
-            quinielasProcesadas.add(q.nombre_jornada);
+          if (q && !ticketsProcesados.has(t.id)) {
+            ticketsProcesados.add(t.id);
 
-            // Inyectamos nombres y logos al ticket
+            let ptosEnVivo = 0;
+
             t.pronosticos?.forEach((pr: any) => {
               if (pr.partidos) {
-                pr.partidos.nombre_local = getNombreEquipo(pr.partidos.equipo_local);
-                pr.partidos.nombre_visitante = getNombreEquipo(pr.partidos.equipo_visitante);
-                pr.partidos.logo_local = getLogoEquipo(pr.partidos.equipo_local);
-                pr.partidos.logo_visitante = getLogoEquipo(pr.partidos.equipo_visitante);
+                const p = pr.partidos;
+                p.nombre_local = getNombreEquipo(p.equipo_local);
+                p.nombre_visitante = getNombreEquipo(p.equipo_visitante);
+                p.logo_local = getLogoEquipo(p.equipo_local);
+                p.logo_visitante = getLogoEquipo(p.equipo_visitante);
+
+                // 🚀 CÁLCULO DINÁMICO DE PUNTOS EN VIVO
+                if (p.goles_local !== null && p.goles_local !== undefined) {
+                  let miTendencia = pr.eleccion_usuario;
+                  let aciertoExacto = false;
+                  let tendenciaReal = p.resultado_real || (p.goles_local > p.goles_visitante ? 'L' : p.goles_visitante > p.goles_local ? 'V' : 'E');
+
+                  if (miTendencia.includes('-')) {
+                    const [ul, uv] = miTendencia.split('-').map(Number);
+                    miTendencia = ul > uv ? 'L' : uv > ul ? 'V' : 'E';
+                    aciertoExacto = pr.eleccion_usuario === `${p.goles_local}-${p.goles_visitante}`;
+                  } else {
+                    if (miTendencia === 'LOCAL') miTendencia = 'L';
+                    if (miTendencia === 'VISITANTE') miTendencia = 'V';
+                    if (miTendencia === 'EMPATE') miTendencia = 'E';
+                    aciertoExacto = miTendencia === tendenciaReal;
+                  }
+
+                  const esExacto = q.modalidad?.toLowerCase().includes('exacto');
+                  if (esExacto) {
+                    if (aciertoExacto) ptosEnVivo += 3;
+                    else if (miTendencia === tendenciaReal) ptosEnVivo += 1;
+                  } else {
+                    if (miTendencia === tendenciaReal) ptosEnVivo += 1;
+                  }
+                }
               }
             });
+
+            // Sobrescribimos los puntos si estamos en juego o si el frontend detecta más puntos que el backend
+            if (q.estado !== 'cerrada' || ptosEnVivo > (t.puntos_totales || 0)) {
+               t.puntos_totales = ptosEnVivo;
+            }
 
             if (q.estado === 'cerrada') {
               arrCerradas.push(t);
@@ -173,7 +209,8 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
             actividad: {
               enJuego: arrEnJuego,
               porJugar: arrPorJugar,
-              ultimaCerrada
+              ultimaCerrada,
+              historial: arrCerradas.slice(0, 5)
             }
           });
         }
@@ -261,5 +298,5 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
     return edad;
   };
 
-  return { perfil, estadisticas, equiposInfo, cargando, subiendoAvatar, subiendoPortada, guardandoPreferencias, error, subirAvatar, subirPortada, actualizarPreferencias, calcularEdad };
+  return { perfil, estadisticas, equiposInfo, niveles, cargando, subiendoAvatar, subiendoPortada, guardandoPreferencias, error, subirAvatar, subirPortada, actualizarPreferencias, calcularEdad };
 }

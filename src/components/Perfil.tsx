@@ -1,7 +1,8 @@
 'use client'
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { usePerfilUsuario } from '@/hooks/usePerfilUsuario'
 import { supabase } from '@/lib/supabase'
+import { toPng } from 'html-to-image'
 
 const SelectorConLogo = ({ label, opciones, valorActual, onChange, placeholder }: any) => {
   const [abierto, setAbierto] = useState(false)
@@ -66,7 +67,7 @@ const SelectorConLogo = ({ label, opciones, valorActual, onChange, placeholder }
 }
 
 export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any, onUpdate?: (datos: any) => void }) {
-  const { perfil, estadisticas, equiposInfo, cargando, subiendoAvatar, subiendoPortada, guardandoPreferencias, error, subirAvatar, subirPortada, actualizarPreferencias, calcularEdad } = usePerfilUsuario(usuarioActivo, onUpdate)
+  const { perfil, estadisticas, equiposInfo, niveles = [], cargando, subiendoAvatar, subiendoPortada, guardandoPreferencias, error, subirAvatar, subirPortada, actualizarPreferencias, calcularEdad } = usePerfilUsuario(usuarioActivo, onUpdate)
   
   const [editando, setEditando] = useState(false)
   const [editandoBio, setEditandoBio] = useState(false)
@@ -74,6 +75,9 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
   const [avatarAmpliado, setAvatarAmpliado] = useState(false)
   const [ticketModal, setTicketModal] = useState<any>(null)
   const [formPrefs, setFormPrefs] = useState({ fecha_nacimiento: '', equipo_favorito: '', pais_favorito: '', biografia: '' })
+  
+  const tarjetaRef = useRef<HTMLDivElement>(null)
+  const [generandoTarjeta, setGenerandoTarjeta] = useState(false)
 
   useEffect(() => {
     if (!usuarioActivo?.id) return;
@@ -104,8 +108,42 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
     if (exito) setEditandoBio(false)
   }
 
-  const determinarColorJugada = (pr: any, p: any) => {
-    if (p.resultado_real === null) return 'bg-slate-950 border-slate-700 text-slate-400';
+  const compartirTarjeta = async () => {
+    if (!tarjetaRef.current) return;
+    setGenerandoTarjeta(true);
+    try {
+      const dataUrl = await toPng(tarjetaRef.current, {
+        pixelRatio: 2, 
+        cacheBust: true, 
+      });
+
+      const res = await fetch(dataUrl);
+      const blob = await res.blob();
+
+      if (navigator.canShare && navigator.canShare({ files: [new File([blob], 'tarjeta.png', { type: 'image/png' })] })) {
+        await navigator.share({
+          title: `Tarjeta de ${perfil.nombre}`,
+          text: '¡Mira mis estadísticas de quinielas!',
+          files: [new File([blob], 'tarjeta.png', { type: 'image/png' })]
+        });
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `tarjeta_quiniela_${perfil.nombre.replace(/\s+/g, '_')}.png`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (error) {
+      console.error('Error capturando la tarjeta:', error);
+      alert('Hubo un error al generar la tarjeta.');
+    } finally {
+      setGenerandoTarjeta(false);
+    }
+  }
+
+  const determinarColorJugada = (pr: any, p: any, esEnJuego: boolean) => {
+    if (p.resultado_real === null && p.goles_local === null) return 'bg-slate-950 border-slate-700 text-slate-400';
     let miTendencia = pr.eleccion_usuario;
     let aciertoExacto = false;
     
@@ -117,12 +155,16 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
       if (miTendencia === 'LOCAL') miTendencia = 'L';
       if (miTendencia === 'VISITANTE') miTendencia = 'V';
       if (miTendencia === 'EMPATE') miTendencia = 'E';
-      aciertoExacto = miTendencia === p.resultado_real; 
+      const tendenciaReal = p.goles_local > p.goles_visitante ? 'L' : p.goles_visitante > p.goles_local ? 'V' : 'E';
+      aciertoExacto = miTendencia === (p.resultado_real || tendenciaReal); 
     }
 
-    if (aciertoExacto) return 'bg-green-950/60 border-green-700 text-green-400 shadow-[0_0_10px_rgba(34,197,94,0.15)]';
-    if (miTendencia === p.resultado_real) return 'bg-yellow-950/60 border-yellow-700 text-yellow-400 shadow-[0_0_10px_rgba(234,179,8,0.15)]';
-    return 'bg-red-950/60 border-red-900/60 text-red-400';
+    const animacion = esEnJuego ? ' animate-pulse opacity-90 ' : ' ';
+    const tendenciaRealParaColor = p.resultado_real || (p.goles_local > p.goles_visitante ? 'L' : p.goles_visitante > p.goles_local ? 'V' : 'E');
+
+    if (aciertoExacto) return `bg-green-950/60 border-green-700 text-green-400 shadow-[0_0_10px_rgba(34,197,94,0.15)] ${animacion}`;
+    if (miTendencia === tendenciaRealParaColor) return `bg-yellow-950/60 border-yellow-700 text-yellow-400 shadow-[0_0_10px_rgba(234,179,8,0.15)] ${animacion}`;
+    return `bg-red-950/60 border-red-900/60 text-red-400 ${animacion}`;
   }
 
   if (error) return ( <div className="w-full max-w-3xl mx-auto mt-10 p-6 bg-red-950/30 border border-red-900/50 rounded-2xl text-center"><span className="text-4xl mb-3 block">⚠️</span><h2 className="text-red-400 font-black uppercase text-sm mb-2">Error de conexión</h2><p className="text-slate-400 text-xs font-mono">{error}</p></div> )
@@ -144,18 +186,122 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
 
   const fechaRegistroParseada = perfil.fecha_registro ? new Date(perfil.fecha_registro) : new Date();
   const miembroDesde = fechaRegistroParseada.toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' });
+  
+  const rangoEncontrado = niveles.find((n: any) => estadisticas.jugadas >= n.min_jugadas && estadisticas.jugadas <= n.max_jugadas);
+  
+  const obtenerHexColor = (nombreRango: string) => {
+    switch (nombreRango) {
+      case 'RECLUTA': return { bg: '#94a3b8', text: '#0f172a' };
+      case 'AVENTURERO': return { bg: '#3b82f6', text: '#ffffff' };
+      case 'VETERANO': return { bg: '#a855f7', text: '#ffffff' };
+      case 'CAMPEÓN': return { bg: '#f59e0b', text: '#0f172a' };
+      case 'MÍTICO': return { bg: '#dc2626', text: '#ffffff' };
+      default: return { bg: '#a855f7', text: '#ffffff' };
+    }
+  };
+
+  const colorHex = obtenerHexColor(rangoEncontrado?.nombre || 'VETERANO');
+  const rangoActual = {
+    nombre: rangoEncontrado?.nombre || 'VETERANO',
+    icono: rangoEncontrado?.icono || '🛡️',
+    ...colorHex
+  };
 
   return (
     <div className="w-full max-w-3xl mx-auto mt-2 animate-in fade-in duration-500 mb-20 space-y-4 relative">
       
+      {/* 🚀 TARJETA FUT OCULTA PARA EXPORTACIÓN */}
+      <div className="absolute left-[-9999px] top-[-9999px]">
+        <div ref={tarjetaRef} className="w-[420px] h-[700px] bg-slate-950 border-[6px] border-amber-500 rounded-[2.5rem] p-6 flex flex-col justify-between relative overflow-hidden shadow-2xl text-white">
+          
+          <div className="absolute inset-0 bg-cover bg-center opacity-30" style={{ backgroundImage: `url('${portadaMostrada}')` }}></div>
+          <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-amber-600/30 via-slate-950/60 to-slate-950/95 pointer-events-none"></div>
+
+          <div className="flex justify-between items-start relative z-10 w-full">
+            <div className="text-amber-500 font-black tracking-tighter text-3xl leading-none drop-shadow-md">
+              CLUB<br/><span className="text-white text-base uppercase tracking-widest">Pronósticos</span>
+            </div>
+            {logoEquipoFav && <img src={logoEquipoFav} className="w-16 h-16 object-contain drop-shadow-[0_0_15px_rgba(245,158,11,0.4)]" alt="" crossOrigin="anonymous" />}
+          </div>
+
+          <div className="flex flex-col items-center relative z-10 mt-6">
+            <div className="relative">
+               <img src={avatarMostrado} className="w-48 h-48 rounded-full border-[6px] border-amber-500 object-cover shadow-[0_0_30px_rgba(245,158,11,0.5)] bg-slate-900" crossOrigin="anonymous" />
+               <div 
+                 style={{ backgroundColor: rangoActual.bg, color: rangoActual.text }}
+                 className="absolute -bottom-4 left-1/2 -translate-x-1/2 px-5 py-1.5 rounded-full font-black text-sm uppercase tracking-widest border-4 border-slate-950 shadow-lg whitespace-unique flex items-center gap-1.5 whitespace-nowrap"
+               >
+                 <span>{rangoActual.icono}</span> {rangoActual.nombre}
+               </div>
+            </div>
+            
+            <h2 className="text-[28px] font-black uppercase mt-8 tracking-tight text-center drop-shadow-lg leading-none max-w-full px-2 break-words">
+              {perfil.nombre}
+            </h2>
+            
+            {perfil.biografia && (
+              <p className="text-amber-400 italic text-sm mt-3 text-center max-w-[90%] font-bold leading-tight break-words whitespace-normal">"{perfil.biografia}"</p>
+            )}
+          </div>
+
+          <div className="w-full bg-slate-900/90 border border-amber-500/40 rounded-3xl p-5 relative z-10 mt-6 shadow-inner">
+            <div className="flex justify-around items-center mb-5">
+              <div className="text-center">
+                <span className="block text-slate-400 text-[11px] uppercase font-bold tracking-widest mb-1">Efectividad Top 3</span>
+                <span className="text-4xl font-black text-white drop-shadow-md">{estadisticas.pctPodios}%</span>
+              </div>
+              <div className="w-[2px] h-12 bg-slate-700/50"></div>
+              <div className="text-center">
+                <span className="block text-slate-400 text-[11px] uppercase font-bold tracking-widest mb-1">Part. Totales</span>
+                <span className="text-4xl font-black text-white drop-shadow-md">{estadisticas.jugadas}</span>
+              </div>
+            </div>
+            
+            <div className="flex justify-center items-center gap-6 border-t-2 border-slate-800/80 pt-4">
+               <div className="flex items-center gap-2"><span className="text-2xl">🥇</span><span className="font-black text-xl">{estadisticas.oros}</span></div>
+               <div className="flex items-center gap-2"><span className="text-2xl">🥈</span><span className="font-black text-xl">{estadisticas.platas}</span></div>
+               <div className="flex items-center gap-2"><span className="text-2xl">🥉</span><span className="font-black text-xl">{estadisticas.bronces}</span></div>
+            </div>
+            
+            {/* MINI RACHA EN TARJETA */}
+            {estadisticas.actividad.historial && estadisticas.actividad.historial.length > 0 && (
+              <div className="flex justify-center items-center gap-2 mt-4 pt-4 border-t border-slate-800/80">
+                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mr-1">RACHA:</span>
+                {[...estadisticas.actividad.historial].reverse().map((t: any, i: number) => {
+                  let icon = '🔴'; 
+                  if (t.ranking?.posicion === 1) icon = '🥇';
+                  else if (t.ranking?.posicion === 2) icon = '🥈';
+                  else if (t.ranking?.posicion === 3) icon = '🥉';
+                  else if (t.ranking?.posicion <= 5) icon = '🟢';
+                  return <span key={i} className="text-xl drop-shadow-md">{icon}</span>
+                })}
+              </div>
+            )}
+          </div>
+
+        </div>
+      </div>
+      {/* 🚀 FIN TARJETA OCULTA */}
+
       {/* 📸 HEADER ESTILO TARJETA (Alineado izquierda en móvil y PC) */}
       <div className="bg-slate-900/80 rounded-3xl border border-slate-800 shadow-2xl relative overflow-hidden group/header">
+        
+        {/* FONDO PORTADA */}
         <div className={`absolute top-0 left-0 w-full h-32 md:h-40 bg-center border-b border-slate-800 transition-all duration-500 ${subiendoPortada ? 'opacity-50 blur-md' : ''}`} style={{ backgroundImage: `url('${portadaMostrada}')`, backgroundSize: (!usuarioTienePortada && logoPaisFav) ? 'contain' : 'cover', backgroundRepeat: (!usuarioTienePortada && logoPaisFav) ? 'space' : 'no-repeat', opacity: usuarioTienePortada ? 1 : 0.4 }}>
           <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/40 to-transparent"></div>
         </div>
+        
+        {/* BOTÓN COMPARTIR (NUEVO) - ARRIBA A LA IZQUIERDA */}
+        <div className="absolute top-3 left-3 z-50">
+          <button onClick={compartirTarjeta} disabled={generandoTarjeta} className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-black px-3 py-1.5 rounded-lg flex items-center justify-center gap-1.5 shadow-[0_0_15px_rgba(245,158,11,0.4)] transition-all transform hover:scale-105 active:scale-95 border-2 border-amber-600">
+            {generandoTarjeta ? '⏳...' : '📲 COMPARTIR'}
+          </button>
+        </div>
+
+        {/* BOTÓN CAMBIAR PORTADA - ARRIBA A LA DERECHA */}
         <div className="absolute top-3 right-3 z-50 md:opacity-0 md:group-hover/header:opacity-100 transition-opacity">
           <div className="relative bg-slate-950/80 hover:bg-slate-800 border border-slate-700 text-white py-1.5 px-3 rounded-lg overflow-hidden flex items-center justify-center gap-2 backdrop-blur-sm shadow-lg">
-            <span className="text-[9px] md:text-[10px] font-bold uppercase tracking-widest z-10 select-none pointer-events-none">{subiendoPortada ? '⏳ Subiendo...' : '📸 Cambiar Portada'}</span>
+            <span className="text-[9px] md:text-[10px] font-bold uppercase tracking-widest z-10 select-none pointer-events-none">{subiendoPortada ? '⏳ Subiendo...' : '📸 Portada'}</span>
             <input type="file" accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20 text-transparent file:hidden" onChange={subirPortada} disabled={subiendoPortada} />
           </div>
         </div>
@@ -179,7 +325,6 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
               </span>
             </div>
             
-            {/* LÓGICA DE EDICIÓN INLINE DE BIOGRAFÍA */}
             {editandoBio ? (
               <div className="mt-3 flex items-center gap-2 bg-slate-950/60 p-1 rounded-lg border border-slate-800 max-w-sm">
                 <input type="text" maxLength={60} autoFocus value={bioTemp} onChange={(e) => setBioTemp(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleGuardarBioInline()} className="flex-1 bg-transparent border-none text-amber-400 font-bold italic text-xs md:text-sm outline-none px-2 placeholder:text-slate-600" placeholder="Escribe tu frase..." />
@@ -187,7 +332,7 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
                 <button onClick={() => setEditandoBio(false)} className="bg-slate-800 hover:bg-slate-700 text-slate-400 px-2 py-1.5 rounded text-[10px] font-black uppercase transition-colors">✕</button>
               </div>
             ) : perfil.biografia ? (
-              <p onClick={() => { setBioTemp(perfil.biografia); setEditandoBio(true); }} className="text-amber-400 text-xs md:text-sm font-bold italic mt-3 bg-amber-950/20 px-3 md:px-4 py-1.5 md:py-2 rounded-xl inline-block border border-amber-900/30 cursor-pointer hover:bg-amber-950/40 transition-colors group/bio truncate max-w-full" title="Toca para editar">
+              <p onClick={() => { setBioTemp(perfil.biografia); setEditandoBio(true); }} className="text-amber-400 text-xs md:text-sm font-bold italic mt-3 bg-amber-950/20 px-3 md:px-4 py-1.5 md:py-2 rounded-xl inline-block border border-amber-900/30 cursor-pointer hover:bg-amber-950/40 transition-colors group/bio break-words whitespace-normal max-w-full" title="Toca para editar">
                 "{perfil.biografia}" <span className="opacity-0 group-hover/bio:opacity-100 transition-opacity text-slate-400 ml-1 text-[10px]">✏️</span>
               </p>
             ) : (
@@ -219,7 +364,43 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
         </div>
       </div>
 
-      {/* ⚙️ FICHA TÉCNICA (MOVIDA HACIA ARRIBA) */}
+      {/* 📈 RACHA RECIENTE (Sin filtros grises para el rojo) */}
+      {estadisticas.actividad.historial && estadisticas.actividad.historial.length > 0 && (
+        <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-4 md:p-5 shadow-lg flex flex-col items-center justify-center relative overflow-hidden">
+          <span className="text-[10px] md:text-[11px] text-slate-400 uppercase font-bold tracking-widest mb-3 flex items-center gap-2">
+            <span>📈</span> Racha Reciente (Últimas {estadisticas.actividad.historial.length})
+          </span>
+          <div className="flex items-center justify-center gap-3 md:gap-4 w-full">
+            {[...estadisticas.actividad.historial].reverse().map((t: any, i: number) => {
+              
+              let icon = '🔴';
+              let bgColor = 'bg-red-950/40 border-red-900/50 shadow-sm text-red-500'; 
+              
+              if (t.ranking?.posicion === 1) { 
+                icon = '🥇'; bgColor = 'bg-amber-950/60 border-amber-500/60 shadow-[0_0_15px_rgba(245,158,11,0.3)]'; 
+              } else if (t.ranking?.posicion === 2) { 
+                icon = '🥈'; bgColor = 'bg-slate-800 border-slate-400/50 shadow-[0_0_15px_rgba(148,163,184,0.3)]'; 
+              } else if (t.ranking?.posicion === 3) { 
+                icon = '🥉'; bgColor = 'bg-orange-950/60 border-orange-700/50 shadow-[0_0_15px_rgba(194,65,12,0.3)]'; 
+              } else if (t.ranking?.posicion <= 5) { 
+                icon = '🟢'; bgColor = 'bg-green-950/60 border-green-600/50 shadow-[0_0_10px_rgba(22,163,74,0.2)]'; 
+              }
+
+              return (
+                <div key={t.id} title={`${t.quinielas.nombre_jornada} - Lugar #${t.ranking?.posicion}`} onClick={() => setTicketModal(t)} className={`w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center border-2 ${bgColor} text-lg md:text-xl cursor-pointer transition-all transform hover:scale-110 relative group/racha`}>
+                  {icon}
+                  {/* Tooltip personalizado */}
+                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[9px] px-2 py-1 rounded opacity-0 group-hover/racha:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 shadow-lg border border-slate-700 font-bold">
+                    Lugar #{t.ranking?.posicion}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ⚙️ FICHA TÉCNICA */}
       <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-5 shadow-lg relative">
         <div className="flex justify-between items-center mb-4 border-b border-slate-800 pb-3">
           <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><span>⚙️</span> Ficha Técnica</h3>
@@ -385,11 +566,17 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
                         #{ticketModal.ranking.posicion} <span className="text-[8px] sm:text-[9px] text-slate-500 font-normal">/ {ticketModal.ranking.total}</span>
                       </span>
                     </div>
-                    <div className="bg-slate-950 border border-blue-900/40 rounded-lg px-2 sm:px-3 py-1 flex flex-col items-center justify-center shadow-inner">
+                    <div className="bg-slate-950 border border-blue-900/40 rounded-lg px-2 sm:px-3 py-1 flex flex-col items-center justify-center shadow-inner relative group/ptos">
                       <span className="text-[7px] sm:text-[8px] text-slate-500 uppercase font-bold tracking-widest mb-0.5">Puntos</span>
                       <span className="text-xs sm:text-sm font-black text-blue-400">
                         {ticketModal.puntos_totales || 0}
                       </span>
+                      {/* Tooltip de aviso para en juego */}
+                      {estadisticas.actividad.enJuego.some(t => t.id === ticketModal.id) && (
+                        <div className="absolute -bottom-6 right-0 w-32 bg-slate-800 text-white text-[8px] px-2 py-1 rounded opacity-0 group-hover/ptos:opacity-100 transition-opacity pointer-events-none text-center z-50">
+                          Suma en vivo según marcadores actuales
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -410,10 +597,16 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
                 const p = pr.partidos;
                 if(!p) return null;
                 
-                const colorJugada = determinarColorJugada(pr, p);
+                const estaFinalizado = 
+                  p.es_final === true || p.es_final === 'true' || p.es_final === 1 || p.es_final === '1' ||
+                  (p.estado && ['finalizado', 'terminado', 'cerrado', 'ft'].includes(String(p.estado).toLowerCase()));
+                
+                const esEnJuego = (p.goles_local !== null && p.goles_local !== undefined) && !estaFinalizado;
+                
+                const colorJugada = determinarColorJugada(pr, p, esEnJuego);
                 
                 return (
-                  <div key={idx} className="flex items-center py-2 px-1 sm:px-2 hover:bg-slate-800/50 rounded-lg transition-colors border-b border-slate-800/40 last:border-0">
+                  <div key={idx} className="flex items-center py-2 px-1 sm:px-2 hover:bg-slate-800/50 rounded-lg transition-colors border-b border-slate-800/40 last:border-0 relative">
                     
                     {/* COLUMNA: PARTIDO */}
                     <div className="flex-[2] flex items-center justify-center gap-1.5 sm:gap-2 overflow-hidden">
@@ -425,9 +618,21 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
                     </div>
                     
                     {/* COLUMNA: REAL */}
-                    <div className="flex-1 flex flex-col items-center justify-center border-l border-slate-800/50">
+                    <div className="flex-1 flex flex-col items-center justify-center border-l border-slate-800/50 relative">
+                      
+                      {/* INDICADOR EN VIVO */}
+                      {esEnJuego && (
+                        <div className="absolute top-1 right-2 sm:right-4 flex items-center gap-1" title="Partido en vivo">
+                          <span className="flex h-2 w-2 relative">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                          </span>
+                          <span className="text-[6px] text-red-400 font-bold uppercase tracking-widest hidden sm:block mt-0.5">Live</span>
+                        </div>
+                      )}
+
                       <span className="font-black text-white text-[10px] sm:text-xs">
-                        {p.goles_local !== null ? `${p.goles_local} - ${p.goles_visitante}` : '-'}
+                        {p.goles_local !== null && p.goles_local !== undefined ? `${p.goles_local} - ${p.goles_visitante}` : '-'}
                       </span>
                       {p.resultado_real && (
                         <span className={`text-[7px] sm:text-[8px] font-black w-3.5 h-3.5 sm:w-4 sm:h-4 flex items-center justify-center rounded-full mt-0.5 text-white shadow-sm ${p.resultado_real === 'L' ? 'bg-blue-600' : p.resultado_real === 'V' ? 'bg-red-600' : 'bg-slate-500'}`}>

@@ -2,11 +2,326 @@
 import React, { useState, useEffect, Fragment } from 'react'
 import { usePosiciones } from '@/hooks/usePosiciones'
 import { useReacciones } from '@/hooks/useReacciones'
+import { usePerfilUsuario } from '@/hooks/usePerfilUsuario'
 import { useAuth } from '@/contexts/AuthContext'
 import { supabase } from '@/lib/supabase'
 
+// 🔥 LISTA MASIVA DE EMOJIS (El 👍 es el rey y va primero)
+const EMOJIS_DISPONIBLES = ['👍', '👎', '❤️', '😂', '🔥', '🐐', '👏', '🥶', '🤡', '👑', '🍀', '🚀', '🎯', '👽', '💀', '💩', '🤯', '😎', '🤬', '🍻', '💸', '🏆', '⚽', '👀', '💯'];
+
+// 🛠️ Función global para los avatares
+const getAvatarUrl = (nombre: string, url: string | null) => {
+  if (url) return url;
+  return `https://ui-avatars.com/api/?name=${encodeURIComponent(nombre)}&background=1e293b&color=3b82f6&size=100&bold=true`;
+}
+
+// 🚀 MODAL DE PERFIL PÚBLICO
+const ModalPerfilPublico = ({ usuarioId, onClose, onReaccionar }: { usuarioId: string, onClose: () => void, onReaccionar: (emoji: string) => void }) => {
+  const { perfil, estadisticas, equiposInfo, niveles = [], cargando } = usePerfilUsuario({ id: usuarioId });
+  const { enviarReaccion, enviando } = useReacciones();
+  
+  // AQUÍ se llama miUsuario para diferenciarla del prop
+  const { usuario: miUsuario } = useAuth();
+  
+  const [conteoReacciones, setConteoReacciones] = useState<Record<string, {count: number, me: boolean, usuarios: any[]}>>({});
+  
+  const [menuReaccionAbierto, setMenuReaccionAbierto] = useState(false);
+  const [tooltipListaUsuariosId, setTooltipListaUsuariosId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleClickFuera = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.reaccion-perfil-interact')) {
+        setMenuReaccionAbierto(false);
+        setTooltipListaUsuariosId(null);
+      }
+    };
+    document.addEventListener('click', handleClickFuera);
+    return () => document.removeEventListener('click', handleClickFuera);
+  }, []);
+
+  useEffect(() => {
+    const fetchReacciones = async () => {
+      const { data } = await supabase.from('reacciones')
+        .select(`
+          emoji,
+          emisor_id,
+          usuarios:emisor_id(nombre, avatar_url)
+        `)
+        .eq('entidad_id', usuarioId)
+        .eq('entidad_tipo', 'perfil');
+        
+      if (data) {
+        const agrupadas: any = {};
+        data.forEach((r: any) => {
+          if (!agrupadas[r.emoji]) agrupadas[r.emoji] = { count: 0, me: false, usuarios: [] };
+          agrupadas[r.emoji].count += 1;
+          
+          const esMio = r.emisor_id === miUsuario?.id;
+          if (esMio) agrupadas[r.emoji].me = true;
+
+          let uData = Array.isArray(r.usuarios) ? r.usuarios[0] : r.usuarios;
+          if(!uData) uData = { nombre: 'Anónimo' };
+          
+          agrupadas[r.emoji].usuarios.push({
+             nombre: esMio ? 'Tú' : (uData.nombre || 'Anónimo'),
+             avatar_url: uData.avatar_url
+          });
+        });
+        setConteoReacciones(agrupadas);
+      }
+    };
+    if (usuarioId) fetchReacciones();
+  }, [usuarioId, miUsuario]);
+
+  const handleReaccion = async (emoji: string) => {
+    onReaccionar(emoji);
+    setMenuReaccionAbierto(false);
+    
+    let tipoAccion = 'nueva';
+    
+    setConteoReacciones(prev => {
+      const nuevo = JSON.parse(JSON.stringify(prev)); // Copia profunda para evitar mutaciones raras
+      
+      if (nuevo[emoji]?.me) {
+        // ❌ SI ES EL MISMO EMOJI: Se quita la reacción por completo (Toggle off)
+        tipoAccion = 'quitar';
+        nuevo[emoji].count -= 1;
+        nuevo[emoji].me = false;
+        nuevo[emoji].usuarios = nuevo[emoji].usuarios.filter((u:any) => u.nombre !== 'Tú');
+        if (nuevo[emoji].count <= 0) delete nuevo[emoji];
+      } else {
+        // 🔄 SI ES UN EMOJI DISTINTO: Primero buscamos si ya tenía otro emoji y lo quitamos
+        Object.keys(nuevo).forEach(k => {
+          if (nuevo[k].me) {
+            tipoAccion = 'cambiar';
+            nuevo[k].count -= 1;
+            nuevo[k].me = false;
+            nuevo[k].usuarios = nuevo[k].usuarios.filter((u:any) => u.nombre !== 'Tú');
+            if (nuevo[k].count <= 0) delete nuevo[k];
+          }
+        });
+        
+        // ✨ Y luego agregamos el nuevo emoji
+        if (!nuevo[emoji]) nuevo[emoji] = { count: 0, me: false, usuarios: [] };
+        nuevo[emoji].count += 1;
+        nuevo[emoji].me = true;
+        nuevo[emoji].usuarios.push({ nombre: 'Tú', avatar_url: miUsuario?.user_metadata?.avatar_url || null });
+      }
+      return nuevo;
+    });
+
+    await enviarReaccion(usuarioId, emoji, 'perfil', usuarioId);
+    
+    // Solo enviamos notificación si la acción fue agregar o cambiar (no al quitar) y si no se la hace a sí mismo
+    if (miUsuario && miUsuario.id !== usuarioId && tipoAccion !== 'quitar') {
+      const textoNotificacion = tipoAccion === 'cambiar' 
+        ? `cambió su reacción en tu perfil por un ${emoji}` 
+        : `reaccionó a tu perfil con un ${emoji}`;
+        
+      await supabase.from('notificaciones').insert({
+        usuario_emisor_id: miUsuario.id,
+        usuario_receptor_id: usuarioId,
+        tipo: 'reaccion',
+        contenido: textoNotificacion
+      });
+    }
+  };
+
+  const renderTooltipUsuarios = (data: any) => {
+    const listaUsuarios = Array.isArray(data.usuarios) ? data.usuarios : [];
+    return (
+      <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-[999] bg-slate-900 border border-slate-700 rounded-xl p-2.5 shadow-2xl min-w-[160px] animate-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
+        <span className="text-[10px] uppercase font-black text-slate-400 mb-2 block tracking-widest border-b border-slate-800 pb-1.5 text-center">Reacciones</span>
+        <div className="max-h-36 overflow-y-auto flex flex-col gap-2 custom-scrollbar">
+          {listaUsuarios.length > 0 ? (
+            listaUsuarios.map((u: any, idx: number) => {
+              const nombre = typeof u === 'string' ? u : (u.nombre || 'Anónimo');
+              const avatar = typeof u === 'string' ? null : u.avatar_url;
+              return (
+                <div key={idx} className="flex items-center gap-2">
+                  <img src={getAvatarUrl(nombre, avatar)} className="w-5 h-5 rounded-full border border-slate-600 shrink-0 object-cover bg-slate-900" />
+                  <span className="text-[10px] text-slate-200 truncate font-medium">{nombre}</span>
+                </div>
+              );
+            })
+          ) : (
+            <span className="text-[9px] text-slate-500 text-center italic w-full block">Detalles no disponibles</span>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  if (cargando || !perfil) {
+    return (
+      <div className="fixed inset-0 z-[120] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="animate-pulse flex flex-col items-center">
+           <div className="w-24 h-24 bg-slate-800 rounded-full mb-4"></div>
+           <div className="w-32 h-6 bg-slate-800 rounded"></div>
+        </div>
+      </div>
+    );
+  }
+
+  const logoEquipoFav = equiposInfo?.find((e: any) => e.nombre?.toLowerCase().trim() === perfil.equipo_favorito?.toLowerCase().trim())?.logo_url;
+  const logoPaisFav = equiposInfo?.find((e: any) => e.nombre?.toLowerCase().trim() === perfil.pais_favorito?.toLowerCase().trim())?.logo_url;
+  const avatarMostrado = perfil.avatar_url || logoEquipoFav || getAvatarUrl(perfil.nombre || 'U', null);
+  const usuarioTienePortada = Boolean(perfil?.portada_url && perfil.portada_url.length > 10);
+  const portadaMostrada = usuarioTienePortada ? perfil.portada_url : (logoPaisFav || 'https://images.unsplash.com/photo-1518605368461-1e1e1141505c?auto=format&fit=crop&q=80&w=1000');
+  
+  const rangoEncontrado = niveles.find((n: any) => estadisticas.jugadas >= n.min_jugadas && estadisticas.jugadas <= n.max_jugadas);
+  const rangoActual = {
+    nombre: rangoEncontrado?.nombre || 'VETERANO',
+    icono: rangoEncontrado?.icono || '🛡️',
+    bg: rangoEncontrado?.nombre === 'MÍTICO' ? '#dc2626' : (rangoEncontrado?.nombre === 'CAMPEÓN' ? '#f59e0b' : '#a855f7'),
+    text: '#ffffff'
+  };
+
+  return (
+    <div className="fixed inset-0 z-[120] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 cursor-pointer" onClick={onClose}>
+      <div className="w-full max-w-sm max-h-[95vh] overflow-y-auto custom-scrollbar bg-slate-950 border-[4px] border-amber-500 rounded-[2.5rem] p-5 flex flex-col relative shadow-2xl text-white cursor-default animate-in zoom-in-95 duration-300 [&::-webkit-scrollbar]:w-0" onClick={e => e.stopPropagation()}>
+        
+        <button onClick={onClose} className="absolute top-4 right-4 z-50 bg-slate-900/80 hover:bg-slate-800 text-white w-8 h-8 rounded-full flex items-center justify-center border border-slate-700 backdrop-blur-sm transition-colors">✕</button>
+
+        <div className="absolute inset-0 bg-cover bg-center opacity-30" style={{ backgroundImage: `url('${portadaMostrada}')` }}></div>
+        <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-amber-600/30 via-slate-950/80 to-slate-950/95 pointer-events-none"></div>
+
+        <div className="flex justify-between items-start relative z-10 w-full mt-2">
+          <div className="text-amber-500 font-black tracking-tighter text-2xl leading-none drop-shadow-md">
+            CLUB<br/><span className="text-white text-xs uppercase tracking-widest">Pronósticos</span>
+          </div>
+          {logoEquipoFav && <img src={logoEquipoFav} className="w-12 h-12 object-contain drop-shadow-[0_0_15px_rgba(245,158,11,0.4)]" alt="" />}
+        </div>
+
+        <div className="flex flex-col items-center relative z-10 mt-4">
+          <div className="relative">
+             <img src={avatarMostrado} className="w-32 h-32 rounded-full border-[4px] border-amber-500 object-cover shadow-[0_0_30px_rgba(245,158,11,0.5)] bg-slate-900" />
+             <div 
+               style={{ backgroundColor: rangoActual.bg, color: rangoActual.text }}
+               className="absolute -bottom-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full font-black text-[10px] uppercase tracking-widest border-2 border-slate-950 shadow-lg whitespace-nowrap flex items-center gap-1"
+             >
+               <span>{rangoActual.icono}</span> {rangoActual.nombre}
+             </div>
+          </div>
+          
+          <h2 className="text-2xl font-black uppercase mt-6 tracking-tight text-center drop-shadow-lg leading-none max-w-full px-2 break-words">
+            {perfil.nombre}
+          </h2>
+          
+          {perfil.biografia ? (
+            <p className="text-amber-400 italic text-xs mt-2 text-center max-w-[95%] font-bold leading-tight break-words whitespace-normal">"{perfil.biografia}"</p>
+          ) : (
+            <p className="text-slate-500 italic text-[10px] mt-2 text-center max-w-[95%] font-bold">Sin estado o frase...</p>
+          )}
+        </div>
+
+        {/* CONTENEDOR PRINCIPAL DE ESTADÍSTICAS Y REACCIONES */}
+        <div className="w-full bg-slate-900/90 border border-amber-500/40 rounded-2xl p-4 relative z-10 mt-5 shadow-inner flex flex-col">
+          <div className="flex justify-around items-center mb-4">
+            <div className="text-center">
+              <span className="block text-slate-400 text-[9px] uppercase font-bold tracking-widest mb-1">Efectividad Top 3</span>
+              <span className="text-2xl font-black text-white drop-shadow-md">{estadisticas.pctPodios}%</span>
+            </div>
+            <div className="w-[1px] h-8 bg-slate-700/50"></div>
+            <div className="text-center">
+              <span className="block text-slate-400 text-[9px] uppercase font-bold tracking-widest mb-1">Part. Totales</span>
+              <span className="text-2xl font-black text-white drop-shadow-md">{estadisticas.jugadas}</span>
+            </div>
+          </div>
+          
+          <div className="flex justify-center items-center gap-4 border-t border-slate-800/80 pt-3">
+             <div className="flex items-center gap-1.5"><span className="text-xl">🥇</span><span className="font-black text-lg">{estadisticas.oros}</span></div>
+             <div className="flex items-center gap-1.5"><span className="text-xl">🥈</span><span className="font-black text-lg">{estadisticas.platas}</span></div>
+             <div className="flex items-center gap-1.5"><span className="text-xl">🥉</span><span className="font-black text-lg">{estadisticas.bronces}</span></div>
+          </div>
+
+          {estadisticas.actividad?.historial && estadisticas.actividad.historial.length > 0 && (
+            <div className="flex justify-center items-center gap-1.5 mt-4 pt-3 border-t border-slate-800/80">
+              <span className="text-[8px] text-slate-500 font-bold uppercase tracking-widest mr-1">Racha:</span>
+              {[...estadisticas.actividad.historial].reverse().map((t: any, i: number) => {
+                let icon = '🔴';
+                if (t.ranking?.posicion === 1) icon = '🥇';
+                else if (t.ranking?.posicion === 2) icon = '🥈';
+                else if (t.ranking?.posicion === 3) icon = '🥉';
+                else if (t.ranking?.posicion <= 5) icon = '🟢';
+                return <span key={i} className="text-base drop-shadow-md" title={`Lugar #${t.ranking?.posicion}`}>{icon}</span>
+              })}
+            </div>
+          )}
+
+          {/* 🚀 NUEVA SECCIÓN COMPACTA DE REACCIONES TIPO NUBECITA (PEGADA A LA RACHA) */}
+          <div className="w-full mt-4 pt-3 border-t border-slate-800/80 flex flex-col items-center">
+            <span className="block text-[8px] text-slate-500 font-bold uppercase tracking-widest mb-2">Reacciones al perfil</span>
+            
+            <div className="flex flex-wrap justify-center items-center gap-1.5 w-full reaccion-perfil-interact relative">
+              {Object.entries(conteoReacciones).map(([emoji, data]) => {
+                const isTooltipOpen = tooltipListaUsuariosId === emoji;
+                return (
+                  <div key={emoji} className="relative">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setTooltipListaUsuariosId(isTooltipOpen ? null : emoji);
+                        setMenuReaccionAbierto(false);
+                      }}
+                      className={`flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-full border transition-all hover:scale-105 shadow-sm ${
+                        data.me ? 'bg-amber-500/20 border-amber-500/50 text-amber-300' : 'bg-slate-950 border-slate-700 text-slate-400'
+                      }`}
+                    >
+                      <span className="text-sm">{emoji}</span><span className="font-bold">{data.count}</span>
+                    </button>
+                    {isTooltipOpen && renderTooltipUsuarios(data)}
+                  </div>
+                );
+              })}
+
+              {/* BOTÓN NUBECITA CIRCULAR COMPACTO 💬 */}
+              <div className="relative">
+                <button
+                  disabled={enviando}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMenuReaccionAbierto(!menuReaccionAbierto);
+                    setTooltipListaUsuariosId(null);
+                  }}
+                  className="w-7 h-7 bg-slate-800/80 hover:bg-slate-700 text-slate-300 flex items-center justify-center rounded-full transition-colors border border-slate-700 shadow-sm disabled:opacity-50"
+                  title="Reaccionar al perfil"
+                >
+                  <span className="text-[11px]">💬</span>
+                </button>
+                
+                {/* Grid de 25 Emojis Flotante */}
+                {menuReaccionAbierto && (
+                  <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-[999] grid grid-cols-5 gap-1.5 bg-slate-900 border border-slate-700 p-2 rounded-xl shadow-2xl animate-in zoom-in-95 w-[200px]">
+                    {EMOJIS_DISPONIBLES.map(emoji => (
+                      <button
+                        key={emoji}
+                        disabled={enviando}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleReaccion(emoji);
+                        }}
+                        className="text-lg md:text-xl hover:scale-125 transition-transform disabled:opacity-50 flex items-center justify-center p-1 rounded hover:bg-slate-800"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
 export default function Posiciones() {
-  const { usuario } = useAuth();
+  // Aquí usamos 'usuario' correctamente y sin colisiones
+  const { usuario } = useAuth(); 
 
   const {
     quinielasAbiertas,
@@ -26,9 +341,9 @@ export default function Posiciones() {
   const [animacionesFlotantes, setAnimacionesFlotantes] = useState<{id: number, emoji: string}[]>([]);
   const [quinielaExpandidaId, setQuinielaExpandidaId] = useState<string | null>(null)
   const [jugadorExpandidoId, setJugadorExpandidoId] = useState<string | null>(null)
-  
-  // 🔍 Nuevo estado para la búsqueda
   const [busqueda, setBusqueda] = useState('');
+  
+  const [perfilPublicoAbierto, setPerfilPublicoAbierto] = useState<string | null>(null);
 
   const toggleExpandirHistorial = (id: string) => setQuinielaExpandidaId(prevId => prevId === id ? null : id)
   const toggleExpandirJugador = (id: string) => setJugadorExpandidoId(prevId => prevId === id ? null : id)
@@ -36,9 +351,7 @@ export default function Posiciones() {
   useEffect(() => {
     const handleClickFuera = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (target.closest('.reaccion-interact')) {
-        return;
-      }
+      if (target.closest('.reaccion-interact')) return;
       setMenuReaccionAbierto(null);
       setTooltipListaUsuariosId(null);
     };
@@ -57,7 +370,7 @@ export default function Posiciones() {
     return null;
   };
 
-  const handleEnviarReaccion = async (receptorId: string, emoji: string, ticketId: string) => {
+  const dispararAnimacion = (emoji: string) => {
     const nuevaAnimacion = { id: Date.now(), emoji };
     setAnimacionesFlotantes(prev => {
       const next = [...prev, nuevaAnimacion];
@@ -68,47 +381,48 @@ export default function Posiciones() {
     setTimeout(() => {
       setAnimacionesFlotantes(prev => prev.filter(a => a.id !== nuevaAnimacion.id));
     }, 2000);
+  };
 
+  // 🔥 LÓGICA DE REACCIONES PARA LAS POSICIONES (A PRUEBA DE BALAS)
+  const handleEnviarReaccion = async (receptorId: string, emoji: string, ticketId: string) => {
+    dispararAnimacion(emoji);
     setMenuReaccionAbierto(null);
     setTooltipListaUsuariosId(null);
 
-    let tipoAccion = 'nueva'; // Detectaremos si es 'nueva', 'cambiar' o 'quitar'
+    let tipoAccion = 'nueva';
 
-    // Actualización optimista local
     if (quinielaActiva) {
       const nuevaQuiniela = { ...quinielaActiva };
       nuevaQuiniela.ranking = nuevaQuiniela.ranking.map((jugador: any) => {
         if (jugador.id === ticketId) {
-          const nuevoConteo = { ...(jugador.conteoReacciones || {}) };
+          // Copia profunda para no mutar el estado global accidentalmente
+          const nuevoConteo = JSON.parse(JSON.stringify(jugador.conteoReacciones || {}));
           
           if (nuevoConteo[emoji]?.me) {
-            tipoAccion = 'quitar'; // 🛑 Quitó la misma que ya tenía
+            // ❌ SI ES EL MISMO EMOJI: Toggle off, lo quita
+            tipoAccion = 'quitar';
             nuevoConteo[emoji].count -= 1;
             nuevoConteo[emoji].me = false;
-            nuevoConteo[emoji].usuarios = (nuevoConteo[emoji].usuarios || []).filter((u:any) => u.nombre !== 'Tú');
+            nuevoConteo[emoji].usuarios = nuevoConteo[emoji].usuarios.filter((u:any) => u.nombre !== 'Tú');
             if (nuevoConteo[emoji].count <= 0) delete nuevoConteo[emoji];
           } else {
-            // Verificamos si tenía otra reacción diferente antes
-            const teniaOtra = Object.keys(nuevoConteo).some(key => nuevoConteo[key].me);
-            if (teniaOtra) tipoAccion = 'cambiar'; // 🔄 Cambió su reacción
-
+            // 🔄 SI ES DISTINTO EMOJI: Primero buscamos y borramos si ya tenía otra reacción
             Object.keys(nuevoConteo).forEach(key => {
-              if (nuevoConteo[key].me) {
+              if (nuevoConteo[key]?.me) {
+                tipoAccion = 'cambiar';
                 nuevoConteo[key].count -= 1;
                 nuevoConteo[key].me = false;
-                nuevoConteo[key].usuarios = (nuevoConteo[key].usuarios || []).filter((u:any) => u.nombre !== 'Tú');
+                nuevoConteo[key].usuarios = nuevoConteo[key].usuarios.filter((u:any) => u.nombre !== 'Tú');
                 if (nuevoConteo[key].count <= 0) delete nuevoConteo[key];
               }
             });
             
-            nuevoConteo[emoji] = {
-              count: (nuevoConteo[emoji]?.count || 0) + 1,
-              me: true,
-              usuarios: [
-                ...(Array.isArray(nuevoConteo[emoji]?.usuarios) ? nuevoConteo[emoji].usuarios : []),
-                { nombre: 'Tú', avatar_url: null }
-              ]
-            };
+            // ✨ Y agregamos la nueva reacción seleccionada
+            if (!nuevoConteo[emoji]) nuevoConteo[emoji] = { count: 0, me: false, usuarios: [] };
+            nuevoConteo[emoji].count += 1;
+            nuevoConteo[emoji].me = true;
+            // Usamos la variable 'usuario' correctamente definida arriba
+            nuevoConteo[emoji].usuarios.push({ nombre: 'Tú', avatar_url: usuario?.user_metadata?.avatar_url || null });
           }
           return { ...jugador, conteoReacciones: nuevoConteo };
         }
@@ -119,7 +433,6 @@ export default function Posiciones() {
 
     await enviarReaccion(receptorId, emoji, 'jugada', ticketId);
 
-    // 🧠 Notificación Condicional: Solo notifica si no fue "quitar"
     if (usuario && usuario.id !== receptorId && tipoAccion !== 'quitar') {
       const textoNotificacion = tipoAccion === 'cambiar' 
         ? `cambió su reacción por un ${emoji}` 
@@ -132,6 +445,35 @@ export default function Posiciones() {
         contenido: textoNotificacion
       });
     }
+  };
+
+  const renderTooltipUsuarios = (data: any) => {
+    let listaUsuarios: any[] = [];
+    if (Array.isArray(data.usuarios) && data.usuarios.length > 0) {
+      listaUsuarios = data.usuarios;
+    }
+
+    return (
+      <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-[999] bg-slate-900 border border-slate-700 rounded-xl p-2.5 shadow-2xl min-w-[160px] animate-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
+        <span className="text-[10px] uppercase font-black text-slate-400 mb-2 block tracking-widest border-b border-slate-800 pb-1.5 text-center">Reacciones</span>
+        <div className="max-h-36 overflow-y-auto flex flex-col gap-2 custom-scrollbar">
+          {listaUsuarios.length > 0 ? (
+            listaUsuarios.map((u: any, idx: number) => {
+              const nombre = typeof u === 'string' ? u : (u.nombre || 'Anónimo');
+              const avatar = typeof u === 'string' ? null : u.avatar_url;
+              return (
+                <div key={idx} className="flex items-center gap-2">
+                  <img src={getAvatarUrl(nombre, avatar)} className="w-5 h-5 rounded-full border border-slate-600 shrink-0 object-cover bg-slate-900" />
+                  <span className="text-[10px] text-slate-200 truncate font-medium">{nombre}</span>
+                </div>
+              );
+            })
+          ) : (
+            <span className="text-[9px] text-slate-500 text-center italic w-full block">Detalles no disponibles</span>
+          )}
+        </div>
+      </div>
+    );
   };
 
   if (cargando) {
@@ -171,7 +513,6 @@ export default function Posiciones() {
   const esSorteo = quinielaActiva.modalidad === 'sorteo'
   const esPromo = quinielaActiva.tipo_premiacion?.toLowerCase().includes('promo')
 
-  // 🔍 Filtrar jugadores según la búsqueda
   const rankingFiltrado = quinielaActiva.ranking.filter((jugador: any) => 
     jugador.nombre.toLowerCase().includes(busqueda.toLowerCase())
   );
@@ -179,51 +520,22 @@ export default function Posiciones() {
   const opcionesFecha: Intl.DateTimeFormatOptions = { day: '2-digit', month: 'short', hour: '2-digit', minute:'2-digit' };
   const fechaTextoVisible = fechaCierre.toLocaleDateString('es-MX', opcionesFecha).replace(',', ' a las');
 
-  const getAvatarUrl = (nombre: string, url: string | null) => {
-    if (url) return url;
-    return `https://ui-avatars.com/api/?name=${encodeURIComponent(nombre)}&background=1e293b&color=3b82f6&size=100&bold=true`;
-  }
-
-  const renderTooltipUsuarios = (data: any, jugador: any, emoji: string) => {
-    let listaUsuarios: any[] = [];
-    if (Array.isArray(data.usuarios) && data.usuarios.length > 0) {
-      listaUsuarios = data.usuarios;
-    } else if (Array.isArray(jugador.reacciones)) {
-      listaUsuarios = jugador.reacciones
-        .filter((r: any) => r.emoji === emoji)
-        .map((r: any) => r.usuarios || r.usuario || r.perfil || { nombre: 'Anónimo' });
-    }
-
-    return (
-      <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-[999] bg-slate-900 border border-slate-700 rounded-xl p-2.5 shadow-2xl min-w-[160px] animate-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
-        <span className="text-[10px] uppercase font-black text-slate-400 mb-2 block tracking-widest border-b border-slate-800 pb-1.5 text-center">Reacciones</span>
-        <div className="max-h-36 overflow-y-auto flex flex-col gap-2 custom-scrollbar">
-          {listaUsuarios.length > 0 ? (
-            listaUsuarios.map((u: any, idx: number) => {
-              const nombre = typeof u === 'string' ? u : (u.nombre || 'Anónimo');
-              const avatar = typeof u === 'string' ? null : u.avatar_url;
-              return (
-                <div key={idx} className="flex items-center gap-2">
-                  <img src={getAvatarUrl(nombre, avatar)} className="w-5 h-5 rounded-full border border-slate-600 shrink-0 object-cover bg-slate-900" />
-                  <span className="text-[10px] text-slate-200 truncate font-medium">{nombre}</span>
-                </div>
-              );
-            })
-          ) : (
-            <span className="text-[9px] text-slate-500 text-center italic w-full block">Detalles no disponibles</span>
-          )}
-        </div>
-      </div>
-    );
-  };
-
   return (
     <div className="w-full max-w-4xl mt-2 animate-in fade-in duration-500 mb-20 space-y-6 relative">
+      
+      {perfilPublicoAbierto && (
+        <ModalPerfilPublico 
+          usuarioId={perfilPublicoAbierto} 
+          onClose={() => setPerfilPublicoAbierto(null)}
+          onReaccionar={dispararAnimacion}
+        />
+      )}
+
       <div className="pointer-events-none fixed inset-0 z-[100] overflow-hidden flex items-end justify-center pb-20">
         {animacionesFlotantes.map((anim) => (
           <div
             key={anim.id}
-            className="absolute animate-bounce text-6xl drop-shadow-[0_0_15px_rgba(255,255,255,0.4)] transition-all duration-1000 ease-out"
+            className="absolute animate-bounce text-6xl drop-shadow-[0_0_15px_rgba(255,255,255,0.4)] transition-all duration-1000 ease-out z-[9999]"
             style={{
               transform: `translateY(-${Math.random() * 200 + 100}px) translateX(${Math.random() * 100 - 50}px)`,
               opacity: 0
@@ -300,7 +612,6 @@ export default function Posiciones() {
             )}
           </div>
 
-          {/* 🌍 BOTÓN DE RANKING PÚBLICO */}
           <div className="flex justify-center mt-3 relative z-10">
             <a
               href="/ranking"
@@ -314,7 +625,6 @@ export default function Posiciones() {
 
         </div>
 
-        {/* 🔍 BARRA DE BÚSQUEDA DE JUGADORES */}
         {totalJugadores > 0 && (
           <div className="relative mb-4 max-w-md mx-auto z-10 group">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -358,12 +668,19 @@ export default function Posiciones() {
                           
                           <div className="flex items-center gap-3">
                              <div className="relative">
-                               <img src={getAvatarUrl(jugador.nombre, jugador.avatar_url)} className="w-10 h-10 md:w-12 md:h-12 rounded-full object-cover border-2 border-slate-700 bg-slate-900" />
-                               {eliminado && <div className="absolute inset-0 bg-red-950/60 rounded-full flex items-center justify-center text-xl">❌</div>}
+                               <img 
+                                 src={getAvatarUrl(jugador.nombre, jugador.avatar_url)} 
+                                 onClick={(e) => { e.stopPropagation(); if (idReceptorSeguro) setPerfilPublicoAbierto(idReceptorSeguro); }}
+                                 className="w-10 h-10 md:w-12 md:h-12 rounded-full object-cover border-2 border-slate-700 bg-slate-900 cursor-pointer hover:border-amber-400 transition-colors" 
+                               />
+                               {eliminado && <div className="absolute inset-0 bg-red-950/60 rounded-full flex items-center justify-center text-xl pointer-events-none">❌</div>}
                              </div>
                              <div>
                                 <div className="flex items-center gap-1.5">
-                                  <span className={`font-black uppercase text-[10px] md:text-xs block max-w-[100px] md:max-w-[120px] truncate ${eliminado ? 'text-slate-500 line-through' : 'text-white'}`}>
+                                  <span 
+                                    onClick={(e) => { e.stopPropagation(); if (idReceptorSeguro) setPerfilPublicoAbierto(idReceptorSeguro); }}
+                                    className={`font-black uppercase text-[10px] md:text-xs block max-w-[100px] md:max-w-[120px] truncate cursor-pointer transition-colors ${eliminado ? 'text-slate-500 line-through' : 'text-white hover:text-amber-400'}`}
+                                  >
                                     {jugador.nombre}
                                   </span>
                                   
@@ -383,8 +700,8 @@ export default function Posiciones() {
                                     )}
                                     
                                     {menuReaccionAbierto === jugador.id && idReceptorSeguro && (
-                                      <div className="absolute left-full ml-2 flex gap-1.5 bg-slate-900 border border-slate-700 p-1.5 rounded-xl shadow-2xl z-[999] animate-in zoom-in-95">
-                                        {['🔥', '🥶', '🤡', '🍀'].map(emoji => (
+                                      <div className="absolute z-[999] right-0 top-full mt-2 sm:right-auto sm:left-full sm:top-auto sm:ml-2 grid grid-cols-5 gap-1.5 bg-slate-900 border border-slate-700 p-2 rounded-xl shadow-2xl animate-in zoom-in-95 w-[200px]">
+                                        {EMOJIS_DISPONIBLES.map(emoji => (
                                           <button
                                             key={emoji}
                                             disabled={enviando}
@@ -392,7 +709,7 @@ export default function Posiciones() {
                                               e.stopPropagation();
                                               handleEnviarReaccion(idReceptorSeguro, emoji, jugador.id);
                                             }}
-                                            className="text-base md:text-lg hover:scale-125 transition-transform disabled:opacity-50 disabled:grayscale"
+                                            className="text-lg md:text-xl hover:scale-125 transition-transform disabled:opacity-50 flex items-center justify-center p-1 rounded hover:bg-slate-800"
                                           >
                                             {emoji}
                                           </button>
@@ -416,13 +733,13 @@ export default function Posiciones() {
                                               setTooltipListaUsuariosId(isTooltipOpen ? null : tooltipKey);
                                               setMenuReaccionAbierto(null);
                                             }}
-                                            className={`flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full border transition-all hover:scale-105 ${
-                                              data.me ? 'bg-blue-500/20 border-blue-500/50 text-blue-300' : 'bg-slate-800 border-slate-700 text-slate-400'
+                                            className={`flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full border transition-all hover:scale-105 shadow-sm ${
+                                              data.me ? 'bg-amber-500/20 border-amber-500/50 text-amber-300' : 'bg-slate-950 border-slate-700 text-slate-400'
                                             }`}
                                           >
                                             <span>{emoji}</span><span className="font-bold">{data.count}</span>
                                           </button>
-                                          {isTooltipOpen && renderTooltipUsuarios(data, jugador, emoji)}
+                                          {isTooltipOpen && renderTooltipUsuarios(data)}
                                         </div>
                                       );
                                     })}
@@ -503,13 +820,19 @@ export default function Posiciones() {
                            
                            <td className="p-2">
                              <div className="flex items-center gap-2">
-                               <div className={`relative shrink-0 rounded-full border-2 ${esLider ? 'border-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.3)]' : 'border-slate-700'}`}>
+                               <div 
+                                 className={`relative shrink-0 rounded-full border-2 cursor-pointer hover:border-amber-400 transition-colors ${esLider ? 'border-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.3)]' : 'border-slate-700'}`}
+                                 onClick={(e) => { e.stopPropagation(); if (idReceptorSeguro) setPerfilPublicoAbierto(idReceptorSeguro); }}
+                               >
                                  <img src={getAvatarUrl(jugador.nombre, jugador.avatar_url)} alt={jugador.nombre} className="w-6 h-6 md:w-7 md:h-7 rounded-full object-cover bg-slate-900" />
                                </div>
                                <div>
                                  <div className="flex items-center gap-1.5 relative">
-                                   <span className={`font-black uppercase text-[10px] md:text-xs block tracking-tight truncate max-w-[100px] md:max-w-[150px] ${esLider ? 'text-amber-400' : 'text-slate-200'}`}>
-                                     {jugador.nombre} {esLider && <span className="ml-0.5 text-[9px]">👑</span>}
+                                   <span 
+                                     onClick={(e) => { e.stopPropagation(); if (idReceptorSeguro) setPerfilPublicoAbierto(idReceptorSeguro); }}
+                                     className={`font-black uppercase text-[10px] md:text-xs block tracking-tight truncate max-w-[100px] md:max-w-[150px] cursor-pointer hover:text-amber-400 transition-colors ${esLider ? 'text-amber-400' : 'text-slate-200'}`}
+                                   >
+                                     {jugador.nombre} {esLider && <span className="ml-0.5 text-[9px] pointer-events-none">👑</span>}
                                    </span>
                                    
                                    <div className="relative flex items-center z-50 reaccion-interact">
@@ -528,8 +851,8 @@ export default function Posiciones() {
                                      )}
                                      
                                      {menuReaccionAbierto === jugador.id && idReceptorSeguro && (
-                                       <div className="absolute left-full ml-2 flex gap-1.5 bg-slate-900 border border-slate-700 p-1.5 rounded-xl shadow-2xl z-[999] animate-in zoom-in-95">
-                                         {['🔥', '🥶', '🤡', '🍀'].map(emoji => (
+                                       <div className="absolute z-[999] right-0 top-full mt-2 sm:right-auto sm:left-full sm:top-auto sm:ml-2 grid grid-cols-5 gap-1.5 bg-slate-900 border border-slate-700 p-2 rounded-xl shadow-2xl animate-in zoom-in-95 w-[200px]">
+                                         {EMOJIS_DISPONIBLES.map(emoji => (
                                            <button
                                              key={emoji}
                                              disabled={enviando}
@@ -537,8 +860,8 @@ export default function Posiciones() {
                                                e.stopPropagation();
                                                handleEnviarReaccion(idReceptorSeguro, emoji, jugador.id);
                                              }}
-                                             className="text-base md:text-lg hover:scale-125 transition-transform disabled:opacity-50 disabled:grayscale"
-                                           >
+                                             className="text-lg md:text-xl hover:scale-125 transition-transform disabled:opacity-50 flex items-center justify-center p-1 rounded hover:bg-slate-800"
+                                            >
                                              {emoji}
                                            </button>
                                          ))}
@@ -561,13 +884,13 @@ export default function Posiciones() {
                                               setTooltipListaUsuariosId(isTooltipOpen ? null : tooltipKey);
                                               setMenuReaccionAbierto(null);
                                             }}
-                                            className={`flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full border transition-all hover:scale-105 ${
-                                              data.me ? 'bg-amber-500/20 border-amber-500/50 text-amber-300' : 'bg-slate-800 border-slate-700 text-slate-400'
+                                            className={`flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full border transition-all hover:scale-105 shadow-sm ${
+                                              data.me ? 'bg-amber-500/20 border-amber-500/50 text-amber-300' : 'bg-slate-950 border-slate-700 text-slate-400'
                                             }`}
                                           >
                                             <span>{emoji}</span><span className="font-bold">{data.count}</span>
                                           </button>
-                                          {isTooltipOpen && renderTooltipUsuarios(data, jugador, emoji)}
+                                          {isTooltipOpen && renderTooltipUsuarios(data)}
                                         </div>
                                       );
                                     })}
@@ -762,8 +1085,16 @@ export default function Posiciones() {
                                <span className="text-[9px] font-black text-slate-500 bg-slate-900 border border-slate-700 px-1.5 rounded">{jugador.posicion}</span>}
                             </span>
                             <div className="flex items-center gap-1.5">
-                              <img src={getAvatarUrl(jugador.nombre, jugador.avatar_url)} alt={jugador.nombre} className="w-4 h-4 md:w-5 md:h-5 rounded-full object-cover border border-slate-700 bg-slate-900" />
-                              <span className={`font-black uppercase text-[9px] md:text-[10px] truncate ${estaExpandida ? 'w-[120px] sm:w-auto' : 'w-[80px] sm:w-[100px]'} ${jugador.posicion === 1 && !jugador.estaEliminado ? 'text-amber-400' : jugador.estaEliminado ? 'text-slate-500 line-through' : 'text-slate-300'}`}>
+                              <img 
+                                src={getAvatarUrl(jugador.nombre, jugador.avatar_url)} 
+                                alt={jugador.nombre} 
+                                onClick={(e) => { e.stopPropagation(); const idR = obtenerIdReceptorReal(jugador); if(idR) setPerfilPublicoAbierto(idR); }}
+                                className="w-4 h-4 md:w-5 md:h-5 rounded-full object-cover border border-slate-700 bg-slate-900 cursor-pointer hover:border-amber-400 transition-colors" 
+                              />
+                              <span 
+                                onClick={(e) => { e.stopPropagation(); const idR = obtenerIdReceptorReal(jugador); if(idR) setPerfilPublicoAbierto(idR); }}
+                                className={`font-black uppercase text-[9px] md:text-[10px] truncate cursor-pointer transition-colors hover:text-amber-400 ${estaExpandida ? 'w-[120px] sm:w-auto' : 'w-[80px] sm:w-[100px]'} ${jugador.posicion === 1 && !jugador.estaEliminado ? 'text-amber-400' : jugador.estaEliminado ? 'text-slate-500 line-through' : 'text-slate-300'}`}
+                              >
                                 {jugador.nombre}
                               </span>
                             </div>
