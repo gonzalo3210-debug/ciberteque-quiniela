@@ -133,27 +133,69 @@ export default function RankingPublico() {
       }
 
       if (tickets) {
-        const rankingCalculado = tickets.map((t: any) => ({
-          id: t.id,
-          nombre: t.usuarios?.nombre || 'Jugador Misterioso',
-          avatar: t.usuarios?.avatar_url || `https://api.dicebear.com/7.x/initials/svg?seed=${t.usuarios?.nombre || 'J'}&backgroundColor=1e3a8a&textColor=ffffff`,
-          puntos: t.puntos_totales || 0,
-          golesTotales: t.prediccion_goles_total || 0,
-          estaEliminado: t.puntos_totales < 0,
-          fechaCreacion: new Date(t.fecha_creacion || 0).getTime()
-        })).sort((a, b) => {
+        const golesReales = quiniela.goles_totales_real;
+        
+        // 1️⃣ PRIMERO: Mapeamos y calculamos la diferencia de goles para todos
+        const rankingCalculado = tickets.map((t: any) => {
+          const pt = t.puntos_totales || 0;
+          const gt = t.prediccion_goles_total || 0;
+          const diff = golesReales !== null && golesReales !== undefined 
+                       ? Math.abs(gt - golesReales) 
+                       : 9999; // 9999 si el torneo no tiene goles reales aún
+
+          return {
+            id: t.id,
+            nombre: t.usuarios?.nombre || 'Jugador Misterioso',
+            avatar: t.usuarios?.avatar_url || `https://api.dicebear.com/7.x/initials/svg?seed=${t.usuarios?.nombre || 'J'}&backgroundColor=1e3a8a&textColor=ffffff`,
+            puntos: pt,
+            golesTotales: gt,
+            golesDiff: diff,
+            estaEliminado: pt < 0,
+            fechaCreacion: new Date(t.fecha_creacion || 0).getTime()
+          };
+        }).sort((a, b) => {
+          // 2️⃣ SEGUNDO: Reglas de Ordenamiento
           if (quiniela.modalidad === 'sorteo') {
             if (a.estaEliminado === b.estaEliminado) return 0;
             return a.estaEliminado ? 1 : -1;
           }
-          if (esFaseRegistro) return a.fechaCreacion - b.fechaCreacion;
-          if (b.puntos !== a.puntos) return b.puntos - a.puntos;
-          return a.fechaCreacion - b.fechaCreacion;
+          
+          // Fase de Registro -> Puro orden de llegada (El que compró primero, va arriba)
+          if (esFaseRegistro) {
+             return a.fechaCreacion - b.fechaCreacion;
+          }
+          
+          // Fase de Juego/Cerrada -> Competitivo
+          if (b.puntos !== a.puntos) return b.puntos - a.puntos; // Más puntos primero
+          if (a.golesDiff !== b.golesDiff) return a.golesDiff - b.golesDiff; // Menos diferencia de goles después
+          
+          return a.fechaCreacion - b.fechaCreacion; // Desempate final por si alguien lo hizo antes
         });
 
-        rankingCalculado.forEach((jugador, index) => {
-          jugador.posicion = index + 1;
-        });
+        // 3️⃣ TERCERO: Asignación de Posiciones (Respetando Empates Exactos)
+        let posicionActual = 1;
+        for (let i = 0; i < rankingCalculado.length; i++) {
+          if (i === 0) {
+            rankingCalculado[i].posicion = 1;
+          } else {
+            const anterior = rankingCalculado[i - 1];
+            const actual = rankingCalculado[i];
+
+            if (esFaseRegistro || quiniela.modalidad === 'sorteo') {
+              // En fase de registro todos llevan posición normal 1, 2, 3...
+              posicionActual = i + 1;
+            } else {
+              // Verifica si el jugador actual tiene EXACTAMENTE los mismos puntos y misma dif. de goles
+              if (actual.puntos === anterior.puntos && actual.golesDiff === anterior.golesDiff) {
+                // Mantiene la misma posición que el anterior (Empate)
+              } else {
+                // Si ya no es empate, salta a la posición real según su índice
+                posicionActual = i + 1;
+              }
+            }
+            rankingCalculado[i].posicion = posicionActual;
+          }
+        }
 
         setRanking(rankingCalculado);
       }
@@ -187,7 +229,6 @@ export default function RankingPublico() {
         console.log("Error al compartir (o cancelado por el usuario):", error);
       }
     } else {
-      // Fallback para compus viejas que no soporten Native Share
       try {
         await navigator.clipboard.writeText(url);
         alert("¡Enlace copiado! Ya puedes pegarlo y mandarlo a tus amigos.");
@@ -197,12 +238,10 @@ export default function RankingPublico() {
     }
   };
 
-  // Filtrado de búsqueda en memoria
   const rankingFiltrado = ranking.filter(jugador => 
     jugador.nombre.toLowerCase().includes(busqueda.toLowerCase())
   );
   
-  // Limitar resultados para no saturar la pantalla
   const rankingMostrado = rankingFiltrado.slice(0, limiteVisible);
 
   const quinielaActiva = quinielasDisponibles.find(q => q.id === tabActivaId);
@@ -393,7 +432,11 @@ export default function RankingPublico() {
                      </p>
                   ) : quinielaActiva.modalidad !== 'sorteo' ? (
                     <p className="text-[8px] md:text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">
-                      Goles predichos: {jugador.golesTotales}
+                      Goles predichos: {jugador.golesTotales} 
+                      {/* Mostrar diferencia de goles si ya la estamos calculando y no es 9999 */}
+                      {jugador.golesDiff !== 9999 && (
+                        <span className="text-amber-500/80 ml-1">(Dif: {jugador.golesDiff})</span>
+                      )}
                     </p>
                   ) : null}
 

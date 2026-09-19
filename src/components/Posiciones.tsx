@@ -15,12 +15,80 @@ const getAvatarUrl = (nombre: string, url: string | null) => {
   return `https://ui-avatars.com/api/?name=${encodeURIComponent(nombre)}&background=1e293b&color=3b82f6&size=100&bold=true`;
 }
 
+// 🧮 FUNCIÓN MAESTRA DE ORDENAMIENTO (Registros -> Competitivo -> Empates exactos)
+const aplicarReglasRanking = (rankingOriginal: any[], esFaseRegistro: boolean, esSorteo: boolean) => {
+  const rankingProcesado = [...rankingOriginal].sort((a: any, b: any) => {
+    // Si es sorteo, los eliminados van al fondo
+    if (esSorteo) {
+      if (a.estaEliminado === b.estaEliminado) return 0;
+      return a.estaEliminado ? 1 : -1;
+    }
+    
+    // Obtener las fechas de creación para el orden de llegada
+    const fechaA = new Date(a.fecha_creacion || a.created_at || 0).getTime();
+    const fechaB = new Date(b.fecha_creacion || b.created_at || 0).getTime();
+
+    // 1️⃣ FASE DE REGISTRO: Puro orden de llegada (Evita spoilers de goles)
+    if (esFaseRegistro) {
+       return fechaA - fechaB; 
+    }
+    
+    // 2️⃣ FASE DE JUEGO / CERRADA: Orden competitivo
+    if (b.puntos !== a.puntos) return (b.puntos || 0) - (a.puntos || 0);
+    
+    const diffA = a.golesDiff !== undefined ? a.golesDiff : 9999;
+    const diffB = b.golesDiff !== undefined ? b.golesDiff : 9999;
+    if (diffA !== diffB) return diffA - diffB;
+    
+    // 3️⃣ DESEMPATE FINAL: Quien compró el boleto primero
+    return fechaA - fechaB;
+  });
+
+  // ASIGNACIÓN MATEMÁTICA DE POSICIONES (Respetando empates exactos)
+  let posicionActual = 1;
+  rankingProcesado.forEach((jugador: any, i: number) => {
+    if (i === 0) {
+      jugador.posicion_real = 1;
+    } else {
+      const anterior = rankingProcesado[i - 1];
+      if (esFaseRegistro || esSorteo) {
+        posicionActual = i + 1; // En registro todos llevan su propio número
+      } else {
+        const diffActual = jugador.golesDiff !== undefined ? jugador.golesDiff : 9999;
+        const diffAnterior = anterior.golesDiff !== undefined ? anterior.golesDiff : 9999;
+        
+        // Si tienen los mismos puntos Y la misma diferencia, comparten el número de posición
+        if (jugador.puntos === anterior.puntos && diffActual === diffAnterior) {
+          // Empate exacto: No sumamos la posición
+        } else {
+          posicionActual = i + 1; // Salto matemático
+        }
+      }
+      jugador.posicion_real = posicionActual;
+    }
+    // Sobrescribimos para que toda la UI use la posición correcta
+    jugador.posicion = jugador.posicion_real;
+  });
+
+  return rankingProcesado;
+};
+
+
 // 🚀 MODAL DE PERFIL PÚBLICO
-const ModalPerfilPublico = ({ usuarioId, onClose, onReaccionar }: { usuarioId: string, onClose: () => void, onReaccionar: (emoji: string) => void }) => {
+const ModalPerfilPublico = ({ 
+  usuarioId, 
+  onClose, 
+  onReaccionar, 
+  onAbrirPerfil 
+}: { 
+  usuarioId: string, 
+  onClose: () => void, 
+  onReaccionar: (emoji: string) => void,
+  onAbrirPerfil: (id: string) => void
+}) => {
   const { perfil, estadisticas, equiposInfo, niveles = [], cargando } = usePerfilUsuario({ id: usuarioId });
   const { enviarReaccion, enviando } = useReacciones();
   
-  // AQUÍ se llama miUsuario para diferenciarla del prop
   const { usuario: miUsuario } = useAuth();
   
   const [conteoReacciones, setConteoReacciones] = useState<Record<string, {count: number, me: boolean, usuarios: any[]}>>({});
@@ -46,7 +114,7 @@ const ModalPerfilPublico = ({ usuarioId, onClose, onReaccionar }: { usuarioId: s
         .select(`
           emoji,
           emisor_id,
-          usuarios:emisor_id(nombre, avatar_url)
+          usuarios:emisor_id(id, nombre, avatar_url)
         `)
         .eq('entidad_id', usuarioId)
         .eq('entidad_tipo', 'perfil');
@@ -64,6 +132,7 @@ const ModalPerfilPublico = ({ usuarioId, onClose, onReaccionar }: { usuarioId: s
           if(!uData) uData = { nombre: 'Anónimo' };
           
           agrupadas[r.emoji].usuarios.push({
+             id: esMio ? miUsuario?.id : uData.id,
              nombre: esMio ? 'Tú' : (uData.nombre || 'Anónimo'),
              avatar_url: uData.avatar_url
           });
@@ -81,17 +150,15 @@ const ModalPerfilPublico = ({ usuarioId, onClose, onReaccionar }: { usuarioId: s
     let tipoAccion = 'nueva';
     
     setConteoReacciones(prev => {
-      const nuevo = JSON.parse(JSON.stringify(prev)); // Copia profunda para evitar mutaciones raras
+      const nuevo = JSON.parse(JSON.stringify(prev)); 
       
       if (nuevo[emoji]?.me) {
-        // ❌ SI ES EL MISMO EMOJI: Se quita la reacción por completo (Toggle off)
         tipoAccion = 'quitar';
         nuevo[emoji].count -= 1;
         nuevo[emoji].me = false;
         nuevo[emoji].usuarios = nuevo[emoji].usuarios.filter((u:any) => u.nombre !== 'Tú');
         if (nuevo[emoji].count <= 0) delete nuevo[emoji];
       } else {
-        // 🔄 SI ES UN EMOJI DISTINTO: Primero buscamos si ya tenía otro emoji y lo quitamos
         Object.keys(nuevo).forEach(k => {
           if (nuevo[k].me) {
             tipoAccion = 'cambiar';
@@ -102,18 +169,20 @@ const ModalPerfilPublico = ({ usuarioId, onClose, onReaccionar }: { usuarioId: s
           }
         });
         
-        // ✨ Y luego agregamos el nuevo emoji
         if (!nuevo[emoji]) nuevo[emoji] = { count: 0, me: false, usuarios: [] };
         nuevo[emoji].count += 1;
         nuevo[emoji].me = true;
-        nuevo[emoji].usuarios.push({ nombre: 'Tú', avatar_url: miUsuario?.user_metadata?.avatar_url || null });
+        nuevo[emoji].usuarios.push({ 
+          id: miUsuario?.id, 
+          nombre: 'Tú', 
+          avatar_url: miUsuario?.user_metadata?.avatar_url || null 
+        });
       }
       return nuevo;
     });
 
     await enviarReaccion(usuarioId, emoji, 'perfil', usuarioId);
     
-    // Solo enviamos notificación si la acción fue agregar o cambiar (no al quitar) y si no se la hace a sí mismo
     if (miUsuario && miUsuario.id !== usuarioId && tipoAccion !== 'quitar') {
       const textoNotificacion = tipoAccion === 'cambiar' 
         ? `cambió su reacción en tu perfil por un ${emoji}` 
@@ -133,20 +202,33 @@ const ModalPerfilPublico = ({ usuarioId, onClose, onReaccionar }: { usuarioId: s
     return (
       <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-[999] bg-slate-900 border border-slate-700 rounded-xl p-2.5 shadow-2xl min-w-[160px] animate-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
         <span className="text-[10px] uppercase font-black text-slate-400 mb-2 block tracking-widest border-b border-slate-800 pb-1.5 text-center">Reacciones</span>
-        <div className="max-h-36 overflow-y-auto flex flex-col gap-2 custom-scrollbar">
+        <div className="max-h-36 overflow-y-auto flex flex-col gap-1 custom-scrollbar">
           {listaUsuarios.length > 0 ? (
             listaUsuarios.map((u: any, idx: number) => {
               const nombre = typeof u === 'string' ? u : (u.nombre || 'Anónimo');
               const avatar = typeof u === 'string' ? null : u.avatar_url;
+              const userId = typeof u === 'string' ? null : u.id;
+
               return (
-                <div key={idx} className="flex items-center gap-2">
+                <div 
+                  key={idx} 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (userId) {
+                      setTooltipListaUsuariosId(null);
+                      setMenuReaccionAbierto(false);
+                      onAbrirPerfil(userId);
+                    }
+                  }}
+                  className={`flex items-center gap-2 p-1.5 rounded-lg transition-colors ${userId ? 'cursor-pointer hover:bg-slate-800' : ''}`}
+                >
                   <img src={getAvatarUrl(nombre, avatar)} className="w-5 h-5 rounded-full border border-slate-600 shrink-0 object-cover bg-slate-900" />
-                  <span className="text-[10px] text-slate-200 truncate font-medium">{nombre}</span>
+                  <span className={`text-[10px] truncate font-medium ${nombre === 'Tú' ? 'text-amber-400' : 'text-slate-200'}`}>{nombre}</span>
                 </div>
               );
             })
           ) : (
-            <span className="text-[9px] text-slate-500 text-center italic w-full block">Detalles no disponibles</span>
+            <span className="text-[9px] text-slate-500 text-center italic w-full block py-1">Detalles no disponibles</span>
           )}
         </div>
       </div>
@@ -216,7 +298,7 @@ const ModalPerfilPublico = ({ usuarioId, onClose, onReaccionar }: { usuarioId: s
           )}
         </div>
 
-        {/* CONTENEDOR PRINCIPAL DE ESTADÍSTICAS Y REACCIONES */}
+        {/* CONTENEDOR PRINCIPAL DE ESTADÍSTICAS Y REACCIONES COMPACTAS */}
         <div className="w-full bg-slate-900/90 border border-amber-500/40 rounded-2xl p-4 relative z-10 mt-5 shadow-inner flex flex-col">
           <div className="flex justify-around items-center mb-4">
             <div className="text-center">
@@ -250,10 +332,8 @@ const ModalPerfilPublico = ({ usuarioId, onClose, onReaccionar }: { usuarioId: s
             </div>
           )}
 
-          {/* 🚀 NUEVA SECCIÓN COMPACTA DE REACCIONES TIPO NUBECITA (PEGADA A LA RACHA) */}
-          <div className="w-full mt-4 pt-3 border-t border-slate-800/80 flex flex-col items-center">
-            <span className="block text-[8px] text-slate-500 font-bold uppercase tracking-widest mb-2">Reacciones al perfil</span>
-            
+          {/* 🚀 SECCIÓN DE REACCIONES ULTRACÓMPACTA (SIN TÍTULO) */}
+          <div className="w-full mt-3 pt-3 border-t border-slate-800/80 flex flex-col items-center">
             <div className="flex flex-wrap justify-center items-center gap-1.5 w-full reaccion-perfil-interact relative">
               {Object.entries(conteoReacciones).map(([emoji, data]) => {
                 const isTooltipOpen = tooltipListaUsuariosId === emoji;
@@ -276,7 +356,6 @@ const ModalPerfilPublico = ({ usuarioId, onClose, onReaccionar }: { usuarioId: s
                 );
               })}
 
-              {/* BOTÓN NUBECITA CIRCULAR COMPACTO 💬 */}
               <div className="relative">
                 <button
                   disabled={enviando}
@@ -291,7 +370,6 @@ const ModalPerfilPublico = ({ usuarioId, onClose, onReaccionar }: { usuarioId: s
                   <span className="text-[11px]">💬</span>
                 </button>
                 
-                {/* Grid de 25 Emojis Flotante */}
                 {menuReaccionAbierto && (
                   <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-[999] grid grid-cols-5 gap-1.5 bg-slate-900 border border-slate-700 p-2 rounded-xl shadow-2xl animate-in zoom-in-95 w-[200px]">
                     {EMOJIS_DISPONIBLES.map(emoji => (
@@ -320,7 +398,6 @@ const ModalPerfilPublico = ({ usuarioId, onClose, onReaccionar }: { usuarioId: s
 }
 
 export default function Posiciones() {
-  // Aquí usamos 'usuario' correctamente y sin colisiones
   const { usuario } = useAuth(); 
 
   const {
@@ -383,7 +460,6 @@ export default function Posiciones() {
     }, 2000);
   };
 
-  // 🔥 LÓGICA DE REACCIONES PARA LAS POSICIONES (A PRUEBA DE BALAS)
   const handleEnviarReaccion = async (receptorId: string, emoji: string, ticketId: string) => {
     dispararAnimacion(emoji);
     setMenuReaccionAbierto(null);
@@ -395,18 +471,15 @@ export default function Posiciones() {
       const nuevaQuiniela = { ...quinielaActiva };
       nuevaQuiniela.ranking = nuevaQuiniela.ranking.map((jugador: any) => {
         if (jugador.id === ticketId) {
-          // Copia profunda para no mutar el estado global accidentalmente
           const nuevoConteo = JSON.parse(JSON.stringify(jugador.conteoReacciones || {}));
           
           if (nuevoConteo[emoji]?.me) {
-            // ❌ SI ES EL MISMO EMOJI: Toggle off, lo quita
             tipoAccion = 'quitar';
             nuevoConteo[emoji].count -= 1;
             nuevoConteo[emoji].me = false;
             nuevoConteo[emoji].usuarios = nuevoConteo[emoji].usuarios.filter((u:any) => u.nombre !== 'Tú');
             if (nuevoConteo[emoji].count <= 0) delete nuevoConteo[emoji];
           } else {
-            // 🔄 SI ES DISTINTO EMOJI: Primero buscamos y borramos si ya tenía otra reacción
             Object.keys(nuevoConteo).forEach(key => {
               if (nuevoConteo[key]?.me) {
                 tipoAccion = 'cambiar';
@@ -417,12 +490,14 @@ export default function Posiciones() {
               }
             });
             
-            // ✨ Y agregamos la nueva reacción seleccionada
             if (!nuevoConteo[emoji]) nuevoConteo[emoji] = { count: 0, me: false, usuarios: [] };
             nuevoConteo[emoji].count += 1;
             nuevoConteo[emoji].me = true;
-            // Usamos la variable 'usuario' correctamente definida arriba
-            nuevoConteo[emoji].usuarios.push({ nombre: 'Tú', avatar_url: usuario?.user_metadata?.avatar_url || null });
+            nuevoConteo[emoji].usuarios.push({ 
+              id: usuario?.id, 
+              nombre: 'Tú', 
+              avatar_url: usuario?.user_metadata?.avatar_url || null 
+            });
           }
           return { ...jugador, conteoReacciones: nuevoConteo };
         }
@@ -456,20 +531,33 @@ export default function Posiciones() {
     return (
       <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-[999] bg-slate-900 border border-slate-700 rounded-xl p-2.5 shadow-2xl min-w-[160px] animate-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
         <span className="text-[10px] uppercase font-black text-slate-400 mb-2 block tracking-widest border-b border-slate-800 pb-1.5 text-center">Reacciones</span>
-        <div className="max-h-36 overflow-y-auto flex flex-col gap-2 custom-scrollbar">
+        <div className="max-h-36 overflow-y-auto flex flex-col gap-1 custom-scrollbar">
           {listaUsuarios.length > 0 ? (
             listaUsuarios.map((u: any, idx: number) => {
               const nombre = typeof u === 'string' ? u : (u.nombre || 'Anónimo');
               const avatar = typeof u === 'string' ? null : u.avatar_url;
+              const userId = typeof u === 'string' ? null : (u.id || u.usuario_id);
+
               return (
-                <div key={idx} className="flex items-center gap-2">
+                <div 
+                  key={idx}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (userId) {
+                      setTooltipListaUsuariosId(null);
+                      setMenuReaccionAbierto(null);
+                      setPerfilPublicoAbierto(userId);
+                    }
+                  }} 
+                  className={`flex items-center gap-2 p-1.5 rounded-lg transition-colors ${userId ? 'cursor-pointer hover:bg-slate-800' : ''}`}
+                >
                   <img src={getAvatarUrl(nombre, avatar)} className="w-5 h-5 rounded-full border border-slate-600 shrink-0 object-cover bg-slate-900" />
-                  <span className="text-[10px] text-slate-200 truncate font-medium">{nombre}</span>
+                  <span className={`text-[10px] truncate font-medium ${nombre === 'Tú' ? 'text-amber-400' : 'text-slate-200'}`}>{nombre}</span>
                 </div>
               );
             })
           ) : (
-            <span className="text-[9px] text-slate-500 text-center italic w-full block">Detalles no disponibles</span>
+            <span className="text-[9px] text-slate-500 text-center italic w-full block py-1">Detalles no disponibles</span>
           )}
         </div>
       </div>
@@ -510,10 +598,14 @@ export default function Posiciones() {
   const fechaCierre = new Date(quinielaActiva.fecha_cierre)
   const yaPasoCierre = new Date().getTime() >= fechaCierre.getTime()
   const mostrarPicks = quinielaActiva.estado?.trim().toLowerCase() === 'cerrada' || yaPasoCierre
+  const esFaseRegistro = quinielaActiva.estado?.trim().toLowerCase() === 'abierta' && !yaPasoCierre
   const esSorteo = quinielaActiva.modalidad === 'sorteo'
   const esPromo = quinielaActiva.tipo_premiacion?.toLowerCase().includes('promo')
 
-  const rankingFiltrado = quinielaActiva.ranking.filter((jugador: any) => 
+  // 🚀 APLICAR ORDENAMIENTO CORRECTO AL RANKING PRINCIPAL
+  const rankingProcesado = aplicarReglasRanking(quinielaActiva.ranking, esFaseRegistro, esSorteo);
+
+  const rankingFiltrado = rankingProcesado.filter((jugador: any) => 
     jugador.nombre.toLowerCase().includes(busqueda.toLowerCase())
   );
 
@@ -528,6 +620,7 @@ export default function Posiciones() {
           usuarioId={perfilPublicoAbierto} 
           onClose={() => setPerfilPublicoAbierto(null)}
           onReaccionar={dispararAnimacion}
+          onAbrirPerfil={setPerfilPublicoAbierto}
         />
       )}
 
@@ -648,7 +741,7 @@ export default function Posiciones() {
           </div>
         )}
 
-        {!mostrarPicks && !esSorteo && (
+        {esFaseRegistro && !esSorteo && (
           <div className="mb-3 text-center border border-amber-900/50 bg-amber-950/20 text-amber-500/80 text-[10px] py-1.5 rounded-lg font-bold uppercase tracking-widest">
             🔒 Radiografía oculta hasta el {fechaTextoVisible}
           </div>
@@ -802,7 +895,7 @@ export default function Posiciones() {
                  <tbody className="divide-y divide-slate-800/40">
                    {rankingFiltrado.map((jugador: any) => {
                      const idReceptorSeguro = obtenerIdReceptorReal(jugador);
-                     const esLider = jugador.posicion === 1 && totalJugadores > 1 && jugador.puntos > 0
+                     const esLider = jugador.posicion === 1 && totalJugadores > 1 && jugador.puntos > 0 && !esFaseRegistro;
                      const estaExpandido = jugadorExpandidoId === jugador.id
 
                      return (
@@ -812,10 +905,17 @@ export default function Posiciones() {
                            className={`transition-colors hover:bg-slate-800/50 ${mostrarPicks ? 'cursor-pointer' : ''} ${esLider ? 'bg-gradient-to-r from-amber-900/15 to-transparent' : ''} ${estaExpandido ? 'bg-slate-800/30' : ''}`}
                          >
                            <td className="p-2 text-center">
-                             {jugador.posicion === 1 && partidosTerminados > 0 ? <span className="text-lg drop-shadow-md block">🥇</span> :
-                              jugador.posicion === 2 && partidosTerminados > 0 ? <span className="text-base block">🥈</span> :
-                              jugador.posicion === 3 && partidosTerminados > 0 ? <span className="text-base block">🥉</span> :
-                              <span className="text-[10px] font-black text-slate-500 bg-slate-950 border border-slate-800 px-1.5 py-0.5 rounded">{jugador.posicion}</span>}
+                             {esFaseRegistro ? (
+                                <span className="text-base drop-shadow-md block" title="Boleto Confirmado">🎟️</span>
+                             ) : jugador.posicion === 1 && partidosTerminados > 0 ? (
+                                <span className="text-lg drop-shadow-md block">🥇</span>
+                             ) : jugador.posicion === 2 && partidosTerminados > 0 ? (
+                                <span className="text-base block">🥈</span>
+                             ) : jugador.posicion === 3 && partidosTerminados > 0 ? (
+                                <span className="text-base block">🥉</span>
+                             ) : (
+                                <span className="text-[10px] font-black text-slate-500 bg-slate-950 border border-slate-800 px-1.5 py-0.5 rounded">{jugador.posicion}</span>
+                             )}
                            </td>
                            
                            <td className="p-2">
@@ -908,7 +1008,7 @@ export default function Posiciones() {
                            
                            <td className="p-2 text-center">
                              <span className={`text-sm md:text-base font-black ${esLider ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(245,158,11,0.3)]' : 'text-green-400 drop-shadow-[0_0_4px_rgba(74,222,128,0.15)]'}`}>
-                               {jugador.puntos}
+                               {esFaseRegistro ? '-' : jugador.puntos}
                              </span>
                            </td>
                            
@@ -1044,8 +1144,11 @@ export default function Posiciones() {
             {historial.map(quiniela => {
               const esHistorialPromo = quiniela.tipo_premiacion?.toLowerCase().includes('promo');
               const estaExpandida = quinielaExpandidaId === quiniela.id;
-              const jugadoresAMostrar = estaExpandida ? quiniela.ranking : quiniela.ranking.slice(0, 5);
               const esSorteo = quiniela.modalidad === 'sorteo';
+              
+              // Aplicamos también las reglas de desempate justas al Salón de la Fama
+              const rankingHistorialProcesado = aplicarReglasRanking(quiniela.ranking, false, esSorteo);
+              const jugadoresAMostrar = estaExpandida ? rankingHistorialProcesado : rankingHistorialProcesado.slice(0, 5);
 
               return (
                 <div
