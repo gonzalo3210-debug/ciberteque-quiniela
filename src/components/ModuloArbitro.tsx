@@ -11,6 +11,12 @@ interface ModuloArbitroProps {
   actualizarSaldoGlobal?: (id: string, nuevo: number) => void;
 }
 
+// 🛠️ Función global para los avatares
+const getAvatarUrl = (nombre: string, url: string | null) => {
+  if (url) return url;
+  return `https://ui-avatars.com/api/?name=${encodeURIComponent(nombre)}&background=1e293b&color=fbbf24&size=150&bold=true`;
+}
+
 export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroProps) {
   const arbitro = useArbitro(actualizarSaldoGlobal);
   const { state: s, setters: set, actions: a, edicionJornada: ej, edicionTicket: et, constantes: c } = arbitro;
@@ -18,6 +24,9 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
   const [cargandoImpresion, setCargandoImpresion] = useState(false);
   const [faseSorteo, setFaseSorteo] = useState<'inactivo' | 'preparando' | 'girando' | 'revelando'>('inactivo');
   const [tickAnimacion, setTickAnimacion] = useState(0);
+
+  // 🏆 ESTADO PARA EL PÓSTER DEL CAMPEÓN
+  const [mostrarPoster, setMostrarPoster] = useState(false);
 
   const esSorteo = s.quiniela?.modalidad === 'sorteo';
   const sorteoRealizado = s.rankingAdmin?.some((r: any) => r.equipo_asignado_id);
@@ -120,6 +129,90 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
 
   return (
     <>
+      {/* 🚀 MODAL: PÓSTER DE CAMPEÓN 🚀 */}
+      {mostrarPoster && s.quiniela && s.rankingAdmin && s.rankingAdmin.length > 0 && (
+        <div className="fixed inset-0 bg-black z-[9999] flex flex-col items-center justify-center p-4">
+          <div className="absolute top-4 right-4 flex gap-3 print:hidden z-50">
+             <button onClick={() => window.print()} className="bg-slate-800 hover:bg-slate-700 text-white font-bold px-4 py-2 rounded-full border border-slate-600 transition-colors shadow-lg">
+               🖨️ Imprimir
+             </button>
+             <button onClick={() => setMostrarPoster(false)} className="bg-red-900/80 hover:bg-red-800 text-white font-bold px-4 py-2 rounded-full border border-red-700 transition-colors shadow-lg">
+               ❌ Cerrar
+             </button>
+          </div>
+          
+          <div className="text-center text-slate-400 mb-4 print:hidden text-xs uppercase tracking-widest bg-slate-900/80 px-4 py-2 rounded-full border border-slate-800 shadow-md">
+             📸 Toma captura de pantalla para subir a tus estados
+          </div>
+
+          <div id="poster-campeon" className="w-[360px] h-[640px] bg-slate-950 relative overflow-hidden shadow-[0_0_50px_rgba(245,158,11,0.2)] border-[4px] border-amber-500 rounded-[2rem] flex flex-col items-center pt-8 pb-6 px-4 shrink-0">
+             <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-amber-900/30 via-slate-950 to-slate-950"></div>
+             <div className="absolute -top-24 -left-24 w-64 h-64 bg-amber-500/20 blur-[100px] rounded-full"></div>
+             <div className="absolute -bottom-24 -right-24 w-64 h-64 bg-amber-600/20 blur-[100px] rounded-full"></div>
+             <div className="absolute inset-0 opacity-[0.03] bg-[linear-gradient(45deg,transparent_25%,rgba(255,255,255,1)_25%,rgba(255,255,255,1)_50%,transparent_50%,transparent_75%,rgba(255,255,255,1)_75%,rgba(255,255,255,1)_100%)] bg-[length:20px_20px]"></div>
+
+             <div className="relative z-10 w-full flex flex-col items-center h-full">
+                <span className="text-amber-500 font-black tracking-widest uppercase text-[10px] mb-1">CLUB Pronósticos</span>
+                <h2 className="text-white font-black text-2xl uppercase tracking-tighter text-center leading-none drop-shadow-md px-2 max-w-[95%]">
+                   {s.quiniela.nombre_jornada}
+                </h2>
+                
+                <div className="bg-gradient-to-r from-amber-600 to-amber-400 text-slate-950 px-4 py-1.5 rounded-full font-black text-[10px] uppercase tracking-widest mt-3 shadow-[0_0_20px_rgba(245,158,11,0.5)] border border-amber-200">
+                   🏆 Resultados Oficiales 🏆
+                </div>
+
+                {s.rankingAdmin[0] && (
+                   <div className="flex flex-col items-center mt-8 relative w-full">
+                      <div className="absolute -top-8 text-5xl drop-shadow-[0_0_15px_rgba(251,191,36,0.8)] z-20 animate-bounce">🏆</div>
+                      <div className="relative">
+                        <div className="absolute inset-0 bg-amber-500 blur-md rounded-full opacity-50"></div>
+                        <img src={getAvatarUrl(s.rankingAdmin[0].nombre, s.rankingAdmin[0].avatar_url)} alt="Avatar" className="w-32 h-32 rounded-full border-[5px] border-amber-400 object-cover shadow-[0_0_30px_rgba(251,191,36,0.7)] relative z-10 bg-slate-900" />
+                      </div>
+                      <div className="bg-slate-950 text-amber-400 border border-amber-500/50 px-4 py-1 rounded-full font-black text-xs -mt-4 z-20 shadow-xl tracking-widest">
+                        🥇 1ER LUGAR
+                      </div>
+                      <span className="text-white font-black text-3xl uppercase tracking-tight mt-3 drop-shadow-lg text-center leading-none px-2 w-full truncate">
+                        {s.rankingAdmin[0].nombre}
+                      </span>
+                      <div className="flex gap-2 mt-2 bg-slate-900/80 px-3 py-1 rounded-lg border border-slate-700/50">
+                        <span className="text-green-400 font-black text-sm">{s.rankingAdmin[0].puntos} Pts</span>
+                        <span className="text-slate-500">|</span>
+                        <span className="text-amber-400 font-bold text-xs self-center">Dif: {s.rankingAdmin[0].golesDiff === 999 ? '-' : s.rankingAdmin[0].golesDiff}</span>
+                      </div>
+                   </div>
+                )}
+
+                <div className="flex justify-center gap-6 mt-auto mb-6 w-full px-2">
+                   {s.rankingAdmin[1] && (
+                      <div className="flex flex-col items-center w-[45%]">
+                         <img src={getAvatarUrl(s.rankingAdmin[1].nombre, s.rankingAdmin[1].avatar_url)} alt="Avatar" className="w-16 h-16 rounded-full border-[3px] border-slate-300 object-cover shadow-[0_0_15px_rgba(203,213,225,0.3)] bg-slate-900" />
+                         <div className="bg-slate-300 text-slate-900 px-2.5 py-0.5 rounded-full font-black text-[8px] -mt-2 z-10 shadow-md tracking-widest">🥈 2DO LUGAR</div>
+                         <span className="text-white font-bold text-[11px] uppercase mt-2 truncate w-full text-center">{s.rankingAdmin[1].nombre}</span>
+                         <span className="text-slate-400 font-bold text-[10px]">{s.rankingAdmin[1].puntos} Pts</span>
+                      </div>
+                   )}
+                   {s.rankingAdmin[2] && (
+                      <div className="flex flex-col items-center w-[45%]">
+                         <img src={getAvatarUrl(s.rankingAdmin[2].nombre, s.rankingAdmin[2].avatar_url)} alt="Avatar" className="w-16 h-16 rounded-full border-[3px] border-amber-700 object-cover shadow-[0_0_15px_rgba(180,83,9,0.3)] bg-slate-900" />
+                         <div className="bg-amber-700 text-white px-2.5 py-0.5 rounded-full font-black text-[8px] -mt-2 z-10 shadow-md tracking-widest">🥉 3ER LUGAR</div>
+                         <span className="text-white font-bold text-[11px] uppercase mt-2 truncate w-full text-center">{s.rankingAdmin[2].nombre}</span>
+                         <span className="text-slate-400 font-bold text-[10px]">{s.rankingAdmin[2].puntos} Pts</span>
+                      </div>
+                   )}
+                </div>
+
+                <div className="w-full bg-slate-900/90 border border-amber-500/40 rounded-2xl p-3.5 flex flex-col items-center justify-center mt-auto shadow-[inset_0_0_20px_rgba(245,158,11,0.1)] backdrop-blur-md relative overflow-hidden">
+                   <div className="absolute -right-4 -bottom-4 text-6xl opacity-10 blur-sm">💰</div>
+                   <span className="text-amber-500 text-[9px] font-black uppercase tracking-widest mb-0.5">Bolsa Ganada (Efectivo)</span>
+                   <span className="text-transparent bg-clip-text bg-gradient-to-b from-amber-200 to-amber-500 font-black text-4xl leading-none drop-shadow-[0_2px_10px_rgba(245,158,11,0.5)]">
+                     ${cajaPremioPesos.toFixed(0)} <span className="text-[10px] text-amber-500 uppercase tracking-widest">MXN</span>
+                   </span>
+                </div>
+             </div>
+          </div>
+        </div>
+      )}
+
       {faseSorteo !== 'inactivo' && (
         <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md z-[100] flex flex-col items-center justify-center p-4 animate-in fade-in duration-300">
           <h2 className="text-3xl md:text-5xl font-black text-white uppercase tracking-[0.2em] mb-2 drop-shadow-[0_0_15px_rgba(59,130,246,0.8)]">
@@ -410,7 +503,10 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                   {!esHistoricoLiquidado ? (
                     <button onClick={() => ejecutarImpresionUX('tickets')} className="bg-slate-800 border border-slate-600 text-white font-bold px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-slate-700 transition-colors">🖨️ Formatos Blanco</button>
                   ) : (
-                    <button onClick={() => ejecutarImpresionUX('tabla')} className="bg-slate-800 border border-slate-600 text-white font-bold px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-slate-700 transition-colors">🖨️ Tabla Final</button>
+                    <>
+                      <button onClick={() => ejecutarImpresionUX('tabla')} className="bg-slate-800 border border-slate-600 text-white font-bold px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-slate-700 transition-colors">🖨️ Tabla Final</button>
+                      <button onClick={() => setMostrarPoster(true)} className="bg-amber-600 border border-amber-500 text-slate-950 font-black px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-amber-500 hover:text-white transition-colors shadow-[0_0_15px_rgba(245,158,11,0.4)]">🏆 Póster Campeón</button>
+                    </>
                   )}
                   <button onClick={() => ejecutarImpresionUX('sabana')} className="bg-blue-900 border border-blue-700 text-white font-bold px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-blue-800 transition-colors">📊 Sábana (PDF)</button>
                   <button onClick={a.compartirAvanceGrupo} className="bg-green-700 border border-green-600 text-white font-bold px-3 py-2 rounded-lg text-[9px] uppercase tracking-widest hover:bg-green-600 transition-colors">📢 Copiar Avance</button>

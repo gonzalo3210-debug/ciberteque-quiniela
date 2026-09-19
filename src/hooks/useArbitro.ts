@@ -1,4 +1,3 @@
-// src/hooks/useArbitro.ts
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { calcularPremios } from '@/utils/calculadoraPremios';
@@ -129,9 +128,21 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     setGolesReales(hayGoles ? sumaGolesCalculada.toString() : (qData.goles_totales_real !== null ? qData.goles_totales_real.toString() : ''));
 
     const { data: tData } = await supabase.from('tickets').select('id, usuario_id, prediccion_goles_total, equipo_asignado_id, puntos_totales, pronosticos(partido_id, eleccion_usuario)').eq('quiniela_id', qData.id);
-    const { data: uDataReal } = await supabase.from('usuarios').select('id, nombre, telefono, creditos_disponibles');
+    
+    // 👇 CAMBIO CLAVE: Traemos TODO (*) para no adivinar el nombre de la columna y buscamos las posibles variantes
+    const { data: uDataReal } = await supabase.from('usuarios').select('*');
     const mapaU: Record<string, any> = {};
-    if (uDataReal) uDataReal.forEach(u => mapaU[u.id] = { nombre: u.nombre, telefono: u.telefono, creditos: u.creditos_disponibles });
+    
+    if (uDataReal) {
+      uDataReal.forEach(u => {
+        mapaU[u.id] = { 
+          nombre: u.nombre, 
+          telefono: u.telefono, 
+          creditos: u.creditos_disponibles, 
+          avatar_url: u.avatar_url || u.foto_perfil || u.foto_url || u.imagen || u.avatar || null 
+        };
+      });
+    }
     
     if (tData) {
       const rCalc = tData.map(ticket => {
@@ -163,9 +174,16 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
         const golesDiff = golesRealesAct !== -1 ? Math.abs((ticket.prediccion_goles_total || 0) - golesRealesAct) : 999;
 
         return { 
-          id: ticket.id, usuario_id: ticket.usuario_id, nombre: mapaU[ticket.usuario_id]?.nombre || 'Mostrador', 
-          telefono: mapaU[ticket.usuario_id]?.telefono || '', creditos_disponibles: mapaU[ticket.usuario_id]?.creditos || 0,
-          puntos: pts, prediccionGoles: ticket.prediccion_goles_total, golesDiff, pronosticosDiccionario: prons,
+          id: ticket.id, 
+          usuario_id: ticket.usuario_id, 
+          nombre: mapaU[ticket.usuario_id]?.nombre || 'Mostrador', 
+          telefono: mapaU[ticket.usuario_id]?.telefono || '', 
+          creditos_disponibles: mapaU[ticket.usuario_id]?.creditos || 0,
+          avatar_url: mapaU[ticket.usuario_id]?.avatar_url || null, // 👈 Aquí se inyecta correctamente la foto encontrada
+          puntos: pts, 
+          prediccionGoles: ticket.prediccion_goles_total, 
+          golesDiff, 
+          pronosticosDiccionario: prons,
           equipo_asignado_id: ticket.equipo_asignado_id,
           puntos_totales: ticket.puntos_totales, 
           estaEliminado: ticket.puntos_totales < 0
@@ -506,7 +524,7 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
   const ejecutarSorteoMundial = async (equiposIds: string[]) => {
     if (!quiniela || operacionEnCurso.current) return;
     if (rankingAdmin.length !== 8) return toast.error(`La sala debe tener exactamente 8 participantes. Actuales: ${rankingAdmin.length}`);
-    if (equiposIds.length !== 8) return toast.error('Se requieren los IDs de los 8 equipos a sortear.');
+    if (equiposIds.length !== 8) return toast.error('Se requieren los IDs de 8 equipos a sortear.');
 
     const confirmar = window.confirm('🎲 ¿Estás seguro de realizar el sorteo? Esto asignará un equipo aleatorio a cada jugador y NO se puede deshacer.');
     if (!confirmar) return Promise.reject();
