@@ -11,10 +11,15 @@ interface ModuloArbitroProps {
   actualizarSaldoGlobal?: (id: string, nuevo: number) => void;
 }
 
-// 🛠️ Función global para los avatares
+// 🛠️ Función global para los avatares (Corregida para iniciales correctas)
 const getAvatarUrl = (nombre: string, url: string | null) => {
   if (url) return url;
-  return `https://ui-avatars.com/api/?name=${encodeURIComponent(nombre)}&background=1e293b&color=fbbf24&size=150&bold=true`;
+  
+  // Extraemos solo las primeras dos palabras para evitar que tome el último apellido en nombres muy largos
+  const partes = nombre.trim().split(/\s+/);
+  const nombreCorto = partes.length > 1 ? `${partes[0]} ${partes[1]}` : partes[0];
+  
+  return `https://ui-avatars.com/api/?name=${encodeURIComponent(nombreCorto)}&background=1e293b&color=fbbf24&size=150&bold=true`;
 }
 
 export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroProps) {
@@ -171,9 +176,12 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                       <div className="bg-slate-950 text-amber-400 border border-amber-500/50 px-4 py-1 rounded-full font-black text-xs -mt-4 z-20 shadow-xl tracking-widest">
                         🥇 1ER LUGAR
                       </div>
-                      <span className="text-white font-black text-3xl uppercase tracking-tight mt-3 drop-shadow-lg text-center leading-none px-2 w-full truncate">
+                      
+                      {/* 👇 Ajuste de tamaño y envoltura de línea para el primer lugar */}
+                      <span className="text-white font-black text-2xl uppercase tracking-tight mt-3 drop-shadow-lg text-center leading-[1.1] px-2 w-full max-w-[95%] line-clamp-2">
                         {s.rankingAdmin[0].nombre}
                       </span>
+                      
                       <div className="flex gap-2 mt-2 bg-slate-900/80 px-3 py-1 rounded-lg border border-slate-700/50">
                         <span className="text-green-400 font-black text-sm">{s.rankingAdmin[0].puntos} Pts</span>
                         <span className="text-slate-500">|</span>
@@ -182,13 +190,19 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                    </div>
                 )}
 
-                <div className="flex justify-center gap-6 mt-auto mb-6 w-full px-2">
+                <div className="flex justify-center gap-6 mt-auto mb-12 w-full px-2">
                    {s.rankingAdmin[1] && (
                       <div className="flex flex-col items-center w-[45%]">
                          <img src={getAvatarUrl(s.rankingAdmin[1].nombre, s.rankingAdmin[1].avatar_url)} alt="Avatar" className="w-16 h-16 rounded-full border-[3px] border-slate-300 object-cover shadow-[0_0_15px_rgba(203,213,225,0.3)] bg-slate-900" />
                          <div className="bg-slate-300 text-slate-900 px-2.5 py-0.5 rounded-full font-black text-[8px] -mt-2 z-10 shadow-md tracking-widest">🥈 2DO LUGAR</div>
                          <span className="text-white font-bold text-[11px] uppercase mt-2 truncate w-full text-center">{s.rankingAdmin[1].nombre}</span>
-                         <span className="text-slate-400 font-bold text-[10px]">{s.rankingAdmin[1].puntos} Pts</span>
+                         
+                         {/* 👇 Agregado cuadro de puntos y diferencia para el 2do Lugar */}
+                         <div className="flex gap-1.5 mt-0.5 bg-slate-900/80 px-2 py-0.5 rounded border border-slate-700/50">
+                            <span className="text-green-400 font-bold text-[9px]">{s.rankingAdmin[1].puntos} Pts</span>
+                            <span className="text-slate-500 text-[9px]">|</span>
+                            <span className="text-amber-400 font-bold text-[9px]">Dif: {s.rankingAdmin[1].golesDiff === 999 ? '-' : s.rankingAdmin[1].golesDiff}</span>
+                         </div>
                       </div>
                    )}
                    {s.rankingAdmin[2] && (
@@ -196,18 +210,27 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                          <img src={getAvatarUrl(s.rankingAdmin[2].nombre, s.rankingAdmin[2].avatar_url)} alt="Avatar" className="w-16 h-16 rounded-full border-[3px] border-amber-700 object-cover shadow-[0_0_15px_rgba(180,83,9,0.3)] bg-slate-900" />
                          <div className="bg-amber-700 text-white px-2.5 py-0.5 rounded-full font-black text-[8px] -mt-2 z-10 shadow-md tracking-widest">🥉 3ER LUGAR</div>
                          <span className="text-white font-bold text-[11px] uppercase mt-2 truncate w-full text-center">{s.rankingAdmin[2].nombre}</span>
-                         <span className="text-slate-400 font-bold text-[10px]">{s.rankingAdmin[2].puntos} Pts</span>
+                         
+                         {/* 👇 Agregado cuadro de puntos y diferencia para el 3er Lugar */}
+                         <div className="flex gap-1.5 mt-0.5 bg-slate-900/80 px-2 py-0.5 rounded border border-slate-700/50">
+                            <span className="text-green-400 font-bold text-[9px]">{s.rankingAdmin[2].puntos} Pts</span>
+                            <span className="text-slate-500 text-[9px]">|</span>
+                            <span className="text-amber-400 font-bold text-[9px]">Dif: {s.rankingAdmin[2].golesDiff === 999 ? '-' : s.rankingAdmin[2].golesDiff}</span>
+                         </div>
                       </div>
                    )}
                 </div>
 
+                {/* --- SECCIÓN DE PREMIO OCULTA POR SOLICITUD --- */}
+                {/* 
                 <div className="w-full bg-slate-900/90 border border-amber-500/40 rounded-2xl p-3.5 flex flex-col items-center justify-center mt-auto shadow-[inset_0_0_20px_rgba(245,158,11,0.1)] backdrop-blur-md relative overflow-hidden">
                    <div className="absolute -right-4 -bottom-4 text-6xl opacity-10 blur-sm">💰</div>
                    <span className="text-amber-500 text-[9px] font-black uppercase tracking-widest mb-0.5">Bolsa Ganada (Efectivo)</span>
                    <span className="text-transparent bg-clip-text bg-gradient-to-b from-amber-200 to-amber-500 font-black text-4xl leading-none drop-shadow-[0_2px_10px_rgba(245,158,11,0.5)]">
-                     ${cajaPremioPesos.toFixed(0)} <span className="text-[10px] text-amber-500 uppercase tracking-widest">MXN</span>
+                      ${cajaPremioPesos.toFixed(0)} <span className="text-[10px] text-amber-500 uppercase tracking-widest">MXN</span>
                    </span>
                 </div>
+                */}
              </div>
           </div>
         </div>
@@ -437,7 +460,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                         <div className="border-t border-blue-900/50 pt-4 mt-2">
                            <p className="text-center text-[10px] text-blue-400 font-bold uppercase mb-3">¿El torneo ya terminó en la vida real?</p>
                            <button onClick={a.cerrarJornadaDefinitivo} className="w-full py-3.5 rounded-xl font-black text-[10px] uppercase text-white transition-all bg-amber-600 hover:bg-amber-500 shadow-[0_0_15px_rgba(217,119,6,0.3)] active:scale-95">
-                             🏆 Declarar Campeón y Pagar Premio
+                              🏆 Declarar Campeón y Pagar Premio
                            </button>
                         </div>
                       </>
@@ -559,7 +582,7 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                     
                     {s.partidosPendientes > 0 && !esSorteo && (
                         <div className="w-full col-span-full mb-2 p-2 bg-amber-950/40 border border-amber-900/50 rounded-lg text-center text-[10px] md:text-xs font-bold text-amber-500 animate-pulse">
-                            ⚠️ Faltan {s.partidosPendientes} partido(s) por capturar resultado. La liquidación está bloqueada.
+                           ⚠️ Faltan {s.partidosPendientes} partido(s) por capturar resultado. La liquidación está bloqueada.
                         </div>
                     )}
 
@@ -704,7 +727,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                     </div>
                   )}
 
-                  {/* ⚡ BOTÓN GIGANTE PARA AÑADIR PARTIDO */}
                   <button 
                     onClick={ej.agregarPartidoEditado} 
                     className="w-full mt-4 py-4 rounded-xl border-2 border-dashed border-blue-900/50 bg-blue-950/20 hover:bg-blue-900/40 hover:border-blue-500 text-blue-400 hover:text-white font-black uppercase tracking-widest text-xs transition-all shadow-inner"

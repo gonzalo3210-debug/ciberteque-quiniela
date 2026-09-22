@@ -272,16 +272,17 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
     }
   };
 
-  const actualizarPreferencias = async (datos: { fecha_nacimiento: string, equipo_favorito: string, pais_favorito: string, biografia: string }) => {
+  // 🛠️ Firma actualizada para recibir nombre y teléfono (marcados como opcionales por si hay actualizaciones parciales)
+  const actualizarPreferencias = async (datos: { nombre?: string, telefono?: string, fecha_nacimiento?: string, equipo_favorito?: string, pais_favorito?: string, biografia?: string }) => {
     try {
       setGuardandoPreferencias(true);
       const { error } = await supabase.from('usuarios').update(datos).eq('id', usuarioActivo.id);
       if (error) throw error;
       setPerfil((prev: any) => ({ ...prev, ...datos }));
-      alert('¡Preferencias actualizadas con éxito!');
+      alert('¡Perfil actualizado con éxito!');
       return true;
     } catch (err) {
-      alert('Hubo un error al guardar tus preferencias.');
+      alert('Hubo un error al guardar tus datos.');
       return false;
     } finally {
       setGuardandoPreferencias(false);

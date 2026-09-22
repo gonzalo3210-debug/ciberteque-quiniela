@@ -74,7 +74,9 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
   const [bioTemp, setBioTemp] = useState('')
   const [avatarAmpliado, setAvatarAmpliado] = useState(false)
   const [ticketModal, setTicketModal] = useState<any>(null)
-  const [formPrefs, setFormPrefs] = useState({ fecha_nacimiento: '', equipo_favorito: '', pais_favorito: '', biografia: '' })
+  
+  // Agregamos nombre y telefono al estado inicial
+  const [formPrefs, setFormPrefs] = useState({ nombre: '', telefono: '', fecha_nacimiento: '', equipo_favorito: '', pais_favorito: '', biografia: '' })
   
   const tarjetaRef = useRef<HTMLDivElement>(null)
   const [generandoTarjeta, setGenerandoTarjeta] = useState(false)
@@ -92,7 +94,14 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
   const opcionesClubes = useMemo(() => equiposInfo.filter(e => !(e.liga?.toUpperCase() || '').includes('PAISES') && !(e.liga?.toUpperCase() || '').includes('MUNDIAL')).sort((a, b) => a.nombre.localeCompare(b.nombre)), [equiposInfo])
 
   const abrirModalEdicion = () => {
-    setFormPrefs({ fecha_nacimiento: perfil.fecha_nacimiento || '', equipo_favorito: perfil.equipo_favorito || '', pais_favorito: perfil.pais_favorito || '', biografia: perfil.biografia || '' })
+    setFormPrefs({ 
+      nombre: perfil.nombre || '', 
+      telefono: perfil.telefono || '', 
+      fecha_nacimiento: perfil.fecha_nacimiento || '', 
+      equipo_favorito: perfil.equipo_favorito || '', 
+      pais_favorito: perfil.pais_favorito || '', 
+      biografia: perfil.biografia || '' 
+    })
     setEditando(true)
   }
 
@@ -100,6 +109,8 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
 
   const handleGuardarBioInline = async () => {
     const exito = await actualizarPreferencias({
+      nombre: perfil.nombre,
+      telefono: perfil.telefono,
       fecha_nacimiento: perfil.fecha_nacimiento || '',
       equipo_favorito: perfil.equipo_favorito || '',
       pais_favorito: perfil.pais_favorito || '',
@@ -674,6 +685,14 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
               <button onClick={() => setEditando(false)} className="text-slate-500 hover:text-slate-300 font-mono text-xl">✕</button>
             </div>
             <div className="space-y-4 mb-6">
+              <div>
+                <label className="text-[9px] text-slate-400 font-bold uppercase mb-1 block tracking-widest">Nombre / Apodo</label>
+                <input type="text" value={formPrefs.nombre} onChange={(e) => setFormPrefs({...formPrefs, nombre: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white text-xs outline-none focus:border-blue-500 font-bold uppercase" />
+              </div>
+              <div>
+                <label className="text-[9px] text-slate-400 font-bold uppercase mb-1 block tracking-widest">Teléfono (WhatsApp)</label>
+                <input type="tel" value={formPrefs.telefono} onChange={(e) => setFormPrefs({...formPrefs, telefono: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white text-xs outline-none focus:border-blue-500 font-bold" />
+              </div>
               <div>
                 <label className="text-[9px] text-slate-400 font-bold uppercase mb-1 block tracking-widest">Fecha de Nacimiento</label>
                 <input type="date" value={formPrefs.fecha_nacimiento} onChange={(e) => setFormPrefs({...formPrefs, fecha_nacimiento: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white text-xs outline-none focus:border-blue-500 font-bold" />
