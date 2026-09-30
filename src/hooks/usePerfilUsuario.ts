@@ -16,13 +16,139 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
   })
   const [equiposInfo, setEquiposInfo] = useState<any[]>([]) 
   const [niveles, setNiveles] = useState<any[]>([])
-  const [cargando, setCargando] = useState(true)
   
+  // 🚀 NUEVOS ESTADOS PARA REACCIONES
+  const [reaccionesRecibidas, setReaccionesRecibidas] = useState<any[]>([])
+  const [cargandoReacciones, setCargandoReacciones] = useState(true)
+  
+  const [cargando, setCargando] = useState(true)
   const [subiendoAvatar, setSubiendoAvatar] = useState(false)
   const [subiendoPortada, setSubiendoPortada] = useState(false) 
   const [guardandoPreferencias, setGuardandoPreferencias] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // 🚀 LÓGICA DE REACCIONES (Deduplicadas y Agrupadas)
+  const formatearReacciones = (data: any[]) => {
+    const reaccionesUnicas = new Map();
+    
+    // Al iterar (vienen ordenadas por fecha descendente), nos quedamos solo con UNA reacción por usuario
+    data.forEach(r => {
+      if (!reaccionesUnicas.has(r.emisor_id)) {
+        reaccionesUnicas.set(r.emisor_id, {
+          id: r.id,
+          emisorId: r.emisor_id,
+          emoji: r.emoji,
+          fecha: r.fecha_envio,
+          emisorNombre: r.usuarios?.nombre || 'Anónimo',
+          emisorAvatar: r.usuarios?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(r.usuarios?.nombre || '?')}&background=1e293b&color=3b82f6`
+        });
+      }
+    });
+
+    // Agrupamos por emoji para la UI
+    const agrupadas: Record<string, { emoji: string, total: number, usuarios: any[] }> = {};
+    Array.from(reaccionesUnicas.values()).forEach((r: any) => {
+      if (!agrupadas[r.emoji]) agrupadas[r.emoji] = { emoji: r.emoji, total: 0, usuarios: [] };
+      agrupadas[r.emoji].total += 1;
+      agrupadas[r.emoji].usuarios.push(r);
+    });
+
+    // Retorna ordenadas de mayor a menor cantidad
+    return Object.values(agrupadas).sort((a, b) => b.total - a.total);
+  }
+
+  const cargarReacciones = async (id: string) => {
+    setCargandoReacciones(true)
+    try {
+      // ⚠️ AHORA FILTRAMOS EXCLUSIVAMENTE POR entidad_tipo = 'perfil'
+      const { data, error } = await supabase
+        .from('reacciones')
+        .select(`
+          id,
+          emisor_id,
+          emoji,
+          fecha_envio,
+          leida,
+          entidad_tipo,
+          usuarios!reacciones_emisor_id_fkey (nombre, avatar_url)
+        `)
+        .eq('receptor_id', id)
+        .eq('entidad_tipo', 'perfil') 
+        .order('fecha_envio', { ascending: false })
+
+      if (error && error.code !== 'PGRST116') {
+        const fallback = await supabase.from('reacciones')
+          .select(`id, emisor_id, emoji, fecha_envio, leida, entidad_tipo, usuarios!emisor_id(nombre, avatar_url)`)
+          .eq('receptor_id', id)
+          .eq('entidad_tipo', 'perfil')
+          .order('fecha_envio', { ascending: false });
+        if(!fallback.error && fallback.data) setReaccionesRecibidas(formatearReacciones(fallback.data));
+      } else if (data) {
+        setReaccionesRecibidas(formatearReacciones(data))
+      }
+    } catch (error) {
+      console.error('Error al cargar reacciones:', error)
+    } finally {
+      setCargandoReacciones(false)
+    }
+  }
+
+  const alternarReaccion = async (emojiSeleccionado: string, receptorId: string) => {
+    if (!usuarioActivo?.id) return;
+
+    try {
+      // Verificamos si el usuario ya reaccionó al PERFIL
+      const { data: existente } = await supabase
+        .from('reacciones')
+        .select('*')
+        .eq('emisor_id', usuarioActivo.id)
+        .eq('receptor_id', receptorId)
+        .eq('entidad_tipo', 'perfil')
+        .order('fecha_envio', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (existente) {
+        if (existente.emoji === emojiSeleccionado) {
+          // Si tocó el mismo emoji consecutivo, lo borramos (Quitar reacción)
+          await supabase.from('reacciones').delete().eq('id', existente.id);
+        } else {
+          // Si tocó un emoji distinto, lo actualizamos
+          await supabase.from('reacciones')
+            .update({ emoji: emojiSeleccionado, fecha_envio: new Date().toISOString() })
+            .eq('id', existente.id);
+            
+          // Lógica de limpieza preventiva de duplicados viejos
+          await supabase.from('reacciones')
+            .delete()
+            .eq('emisor_id', usuarioActivo.id)
+            .eq('receptor_id', receptorId)
+            .eq('entidad_tipo', 'perfil')
+            .neq('id', existente.id);
+        }
+      } else {
+        // Insertamos nueva reacción
+        await supabase.from('reacciones').insert({
+          emisor_id: usuarioActivo.id,
+          receptor_id: receptorId,
+          emoji: emojiSeleccionado,
+          entidad_tipo: 'perfil'
+        });
+      }
+      
+      cargarReacciones(receptorId);
+    } catch (error) {
+      console.error('Error alternando reacción:', error);
+    }
+  }
+
+  useEffect(() => {
+    if (usuarioActivo?.id) {
+      cargarReacciones(usuarioActivo.id)
+    }
+  }, [usuarioActivo?.id])
+
+  // TU CARGA PRINCIPAL INTACTA
   useEffect(() => {
     let isMounted = true;
     
@@ -180,7 +306,6 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
               }
             });
 
-            // Sobrescribimos los puntos si estamos en juego o si el frontend detecta más puntos que el backend
             if (q.estado !== 'cerrada' || ptosEnVivo > (t.puntos_totales || 0)) {
                t.puntos_totales = ptosEnVivo;
             }
@@ -272,7 +397,6 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
     }
   };
 
-  // 🛠️ Firma actualizada para recibir nombre y teléfono (marcados como opcionales por si hay actualizaciones parciales)
   const actualizarPreferencias = async (datos: { nombre?: string, telefono?: string, fecha_nacimiento?: string, equipo_favorito?: string, pais_favorito?: string, biografia?: string }) => {
     try {
       setGuardandoPreferencias(true);
@@ -299,5 +423,5 @@ export function usePerfilUsuario(usuarioActivo: any, onUpdate?: (datos: any) => 
     return edad;
   };
 
-  return { perfil, estadisticas, equiposInfo, niveles, cargando, subiendoAvatar, subiendoPortada, guardandoPreferencias, error, subirAvatar, subirPortada, actualizarPreferencias, calcularEdad };
+  return { perfil, estadisticas, equiposInfo, niveles, reaccionesRecibidas, alternarReaccion, cargandoReacciones, cargando, subiendoAvatar, subiendoPortada, guardandoPreferencias, error, subirAvatar, subirPortada, actualizarPreferencias, calcularEdad };
 }

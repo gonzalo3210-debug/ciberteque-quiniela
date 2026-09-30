@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
 
-// Ya no necesitamos pedir el adminId aquí
 export function useCajero(actualizarSaldoGlobal?: (id: string, nuevo: number) => void) {
   const LIMIT_USUARIOS = 5;
   const LIMIT_HISTORIAL = 10;
@@ -129,21 +128,33 @@ export function useCajero(actualizarSaldoGlobal?: (id: string, nuevo: number) =>
       const transacciones = [];
 
       if (metodo === 'fiado') {
+        // Al fiar, la deuda sube y el saldo disponible también sube (para que puedan jugar)
         nuevaDeuda = deudaActual + pesosIngresados;
         nuevoTotal = totalActual + pesosIngresados;
         transacciones.push({ usuario_id: usuario.id, cantidad: pesosIngresados, tipo_movimiento: 'recarga_fiada', descripcion: 'Préstamo/Fiado (Mostrador)' });
       } else {
         if (deudaActual > 0) {
-          if (pesosIngresados <= deudaActual) {
-            nuevaDeuda = deudaActual - pesosIngresados;
-            transacciones.push({ usuario_id: usuario.id, cantidad: 0, tipo_movimiento: metodo === 'transferencia' ? 'pago_deuda_transferencia' : 'pago_deuda_efectivo', descripcion: `Abono a deuda: $${pesosIngresados} (${metodo})` });
-          } else {
-            const sobrante = pesosIngresados - deudaActual;
-            nuevaDeuda = 0; nuevoTotal = totalActual + sobrante;
-            transacciones.push({ usuario_id: usuario.id, cantidad: 0, tipo_movimiento: metodo === 'transferencia' ? 'pago_deuda_transferencia' : 'pago_deuda_efectivo', descripcion: `Liquidación de deuda: $${deudaActual} (${metodo})` });
-            transacciones.push({ usuario_id: usuario.id, cantidad: sobrante, tipo_movimiento: metodo === 'transferencia' ? 'recarga_transferencia' : 'recarga_manual', descripcion: `Ingreso Sobrante a favor (${metodo})` });
-          }
+          // 1. Registramos el ingreso TOTAL primero
+          transacciones.push({ 
+            usuario_id: usuario.id, 
+            cantidad: pesosIngresados, 
+            tipo_movimiento: metodo === 'transferencia' ? 'recarga_transferencia' : 'recarga_manual', 
+            descripcion: metodo === 'transferencia' ? 'Ingreso por Transferencia' : 'Ingreso Mostrador (Efectivo)' 
+          });
+
+          // 2. Calculamos cuánto vamos a cobrar de la deuda y generamos un registro NEGATIVO (deducción)
+          const montoCobrado = Math.min(pesosIngresados, deudaActual);
+          nuevaDeuda = deudaActual - montoCobrado;
+          nuevoTotal = totalActual + pesosIngresados - montoCobrado; // Efecto neto en el saldo
+
+          transacciones.push({ 
+            usuario_id: usuario.id, 
+            cantidad: -montoCobrado, // Se resta del saldo para cobrar la deuda
+            tipo_movimiento: metodo === 'transferencia' ? 'pago_deuda_transferencia' : 'pago_deuda_efectivo', 
+            descripcion: montoCobrado === deudaActual ? `Liquidación de deuda (${metodo})` : `Abono a deuda (${metodo})` 
+          });
         } else {
+          // Ingreso normal sin deudas
           nuevoTotal = totalActual + pesosIngresados;
           transacciones.push({ usuario_id: usuario.id, cantidad: pesosIngresados, tipo_movimiento: metodo === 'transferencia' ? 'recarga_transferencia' : 'recarga_manual', descripcion: metodo === 'transferencia' ? 'Ingreso por Transferencia' : 'Ingreso Mostrador (Efectivo)' });
         }
@@ -152,13 +163,18 @@ export function useCajero(actualizarSaldoGlobal?: (id: string, nuevo: number) =>
       await supabase.from('usuarios').update({ creditos_disponibles: 0, saldo_pesos: nuevoTotal, deuda_pesos: nuevaDeuda }).eq('id', usuario.id);
       await supabase.from('transacciones_creditos').insert(transacciones);
 
-      // 👇 DISPARADOR ULTRA RÁPIDO (Dejamos el emisor nulo a propósito) 👇
+      // 👇 DISPARADOR ULTRA RÁPIDO DE NOTIFICACIONES 👇
       try {
         let textoNotificacion = `ha registrado un ingreso de $${pesosIngresados} MXN a tu cuenta.`;
-        if (metodo === 'fiado') textoNotificacion = `te ha otorgado un préstamo/fiado de $${pesosIngresados} MXN.`;
+        if (metodo === 'fiado') {
+          textoNotificacion = `te ha otorgado un préstamo/fiado de $${pesosIngresados} MXN.`;
+        } else if (deudaActual > 0) {
+          const cobrado = Math.min(pesosIngresados, deudaActual);
+          textoNotificacion = `ha registrado un ingreso de $${pesosIngresados} MXN (Se descontaron automáticamente $${cobrado} de deuda).`;
+        }
 
         await supabase.from('notificaciones').insert({
-          usuario_emisor_id: null, // Asumimos que eres tú (El Administrador)
+          usuario_emisor_id: null,
           usuario_receptor_id: usuario.id, 
           tipo: 'recarga',
           contenido: textoNotificacion,
@@ -195,7 +211,6 @@ export function useCajero(actualizarSaldoGlobal?: (id: string, nuevo: number) =>
       await supabase.from('usuarios').update({ creditos_disponibles: 0, saldo_pesos: nuevoTotal }).eq('id', usuario.id);
       await supabase.from('transacciones_creditos').insert([{ usuario_id: usuario.id, cantidad: -cantidadRetiro, tipo_movimiento: 'retiro_efectivo', descripcion: `Retiro Mostrador` }]);
       
-      // 👇 DISPARADOR ULTRA RÁPIDO 👇
       try {
         await supabase.from('notificaciones').insert({
           usuario_emisor_id: null,
@@ -206,7 +221,6 @@ export function useCajero(actualizarSaldoGlobal?: (id: string, nuevo: number) =>
       } catch (err) {
         console.error("Fallo general en notificaciones:", err);
       }
-      // 👆 FIN DEL DISPARADOR 👆
 
       if (actualizarSaldoGlobal) actualizarSaldoGlobal(usuario.id, nuevoTotal);
       await buscarUsuariosDB(busqueda, 0, true);

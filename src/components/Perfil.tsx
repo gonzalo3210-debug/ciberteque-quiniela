@@ -67,7 +67,7 @@ const SelectorConLogo = ({ label, opciones, valorActual, onChange, placeholder }
 }
 
 export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any, onUpdate?: (datos: any) => void }) {
-  const { perfil, estadisticas, equiposInfo, niveles = [], cargando, subiendoAvatar, subiendoPortada, guardandoPreferencias, error, subirAvatar, subirPortada, actualizarPreferencias, calcularEdad } = usePerfilUsuario(usuarioActivo, onUpdate)
+  const { perfil, estadisticas, equiposInfo, niveles = [], reaccionesRecibidas, alternarReaccion, cargando, subiendoAvatar, subiendoPortada, guardandoPreferencias, error, subirAvatar, subirPortada, actualizarPreferencias, calcularEdad } = usePerfilUsuario(usuarioActivo, onUpdate)
   
   const [editando, setEditando] = useState(false)
   const [editandoBio, setEditandoBio] = useState(false)
@@ -75,7 +75,9 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
   const [avatarAmpliado, setAvatarAmpliado] = useState(false)
   const [ticketModal, setTicketModal] = useState<any>(null)
   
-  // Agregamos nombre y telefono al estado inicial
+  // 🚀 Estado para controlar qué popover de reacciones está abierto
+  const [reaccionAbierta, setReaccionAbierta] = useState<string | null>(null)
+  
   const [formPrefs, setFormPrefs] = useState({ nombre: '', telefono: '', fecha_nacimiento: '', equipo_favorito: '', pais_favorito: '', biografia: '' })
   
   const tarjetaRef = useRef<HTMLDivElement>(null)
@@ -350,6 +352,46 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
               <button onClick={() => { setBioTemp(''); setEditandoBio(true); }} className="text-slate-500 text-[10px] font-bold uppercase tracking-widest hover:text-slate-300 mt-3 inline-block transition-colors cursor-pointer bg-slate-900/50 px-3 py-1 rounded-lg border border-slate-800 border-dashed">+ Añadir estado o frase</button>
             )}
 
+            {/* 🔥 MAPEO DE REACCIONES TIPO "POSICIONES.TSX" 🔥 */}
+            {reaccionesRecibidas && reaccionesRecibidas.length > 0 && (
+              <div className="mt-4 flex flex-wrap items-center gap-2 animate-in fade-in relative">
+                <span className="text-[9px] text-slate-500 uppercase font-black tracking-widest mr-1">
+                  Reacciones:
+                </span>
+                {reaccionesRecibidas.map((grupo: any) => (
+                  <div key={grupo.emoji} className="relative">
+                    <button 
+                      onClick={() => setReaccionAbierta(reaccionAbierta === grupo.emoji ? null : grupo.emoji)} 
+                      className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 px-3 py-1.5 rounded-full border border-slate-700 shadow-sm transition-colors cursor-pointer z-10 relative"
+                    >
+                      <span className="text-sm leading-none">{grupo.emoji}</span>
+                      <span className="text-[10px] text-slate-300 font-bold leading-none">{grupo.total}</span>
+                    </button>
+
+                    {/* Popover de Usuarios que Reaccionaron */}
+                    {reaccionAbierta === grupo.emoji && (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={() => setReaccionAbierta(null)}></div>
+                        <div className="absolute top-full mt-2 left-0 min-w-[140px] bg-[#1e2330] border border-slate-700 rounded-xl shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95">
+                          <div className="text-[8px] text-slate-500 font-bold uppercase tracking-widest mb-2 px-1">Reacciones</div>
+                          <div className="flex flex-col gap-1.5 max-h-32 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-slate-900 [&::-webkit-scrollbar-thumb]:bg-slate-700">
+                            {grupo.usuarios.map((u: any) => (
+                              <div key={u.emisorId} className="flex items-center gap-2 bg-slate-800/50 p-1.5 rounded-lg">
+                                <img src={u.emisorAvatar} className="w-5 h-5 rounded-full object-cover bg-slate-900" alt={u.emisorNombre} />
+                                <span className="text-[10px] font-bold text-white truncate">
+                                  {u.emisorNombre === perfil.nombre ? 'Tú' : u.emisorNombre}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
           </div>
         </div>
       </div>
@@ -583,7 +625,7 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
                         {ticketModal.puntos_totales || 0}
                       </span>
                       {/* Tooltip de aviso para en juego */}
-                      {estadisticas.actividad.enJuego.some(t => t.id === ticketModal.id) && (
+                      {estadisticas.actividad.enJuego.some((t: any) => t.id === ticketModal.id) && (
                         <div className="absolute -bottom-6 right-0 w-32 bg-slate-800 text-white text-[8px] px-2 py-1 rounded opacity-0 group-hover/ptos:opacity-100 transition-opacity pointer-events-none text-center z-50">
                           Suma en vivo según marcadores actuales
                         </div>
