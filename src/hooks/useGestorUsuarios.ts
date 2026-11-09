@@ -42,13 +42,17 @@ export function useGestorUsuarios() {
 
         // 🔥 BILLETERA ACTUAL: Suma de saldo_pesos y creditos_disponibles
         const billeteraActual = Number(user.saldo_pesos || 0) + Number(user.creditos_disponibles || 0)
+        
+        // 🔥 DEUDA ACTUAL
+        const deudaActual = Number(user.deuda_pesos || 0)
 
         return {
           ...user,
           ticketsJugados,
           dineroIngresadoAprox,
           premiosGanadosCreditos,
-          billeteraActual
+          billeteraActual,
+          deudaActual
         }
       })
 
@@ -82,6 +86,39 @@ export function useGestorUsuarios() {
     return false
   }
 
+  // MÓDULO DE ABONO A DEUDAS
+  const abonarDeuda = async (id: string, monto: number) => {
+    try {
+      const { data: user } = await supabase.from('usuarios').select('deuda_pesos').eq('id', id).single()
+      if (!user) return false;
+
+      const deudaActual = Number(user.deuda_pesos || 0);
+      if (deudaActual <= 0) return false;
+
+      // Protegemos para que no pague más de lo que debe
+      const abonoReal = Math.min(monto, deudaActual);
+      const nuevaDeuda = deudaActual - abonoReal;
+
+      // 1. Actualizamos la deuda en el usuario
+      const { error: errUpdate } = await supabase.from('usuarios').update({ deuda_pesos: nuevaDeuda }).eq('id', id);
+      if (errUpdate) throw errUpdate;
+
+      // 2. Registramos el movimiento contable en negativo (como cobro de deuda)
+      await supabase.from('transacciones_creditos').insert([{
+        usuario_id: id,
+        cantidad: -abonoReal, 
+        tipo_movimiento: 'abono_deuda',
+        descripcion: 'Abono manual a deuda desde Gestor de Usuarios'
+      }]);
+
+      await cargarUsuariosYEstadisticas();
+      return true;
+    } catch (e) {
+      console.error("Error al abonar:", e);
+      return false;
+    }
+  }
+
   // MÓDULO DE SEGURIDAD INDEPENDIENTE
   const encriptarNIP = async (pin: string, tel: string) => {
     const textoAEncriptar = `${pin}-${tel}-CiberTequeSeguro2024`
@@ -112,7 +149,8 @@ export function useGestorUsuarios() {
   return { 
     usuarios, 
     cargando, 
-    actualizarUsuario, 
+    actualizarUsuario,
+    abonarDeuda,
     resetearNIP,
     recargarDatos: cargarUsuariosYEstadisticas 
   }

@@ -18,44 +18,41 @@ export function useFinanzas() {
     setMensajeError(null);
     
     try {
-      // 1. PASIVOS Y SALDO RETENIDO (Desde Usuarios)
-      const { data: usuarios, error: errUsuarios } = await supabase.from('usuarios').select('creditos_disponibles, saldo_pesos');
-      if (errUsuarios) throw new Error(`Error al cargar usuarios: ${errUsuarios.message}`);
+      // 1. PETICIONES CONCURRENTES (Usuarios y Transacciones para Ingreso Bruto exacto)
+      const [
+        { data: usuarios, error: errUsuarios },
+        { data: txData, error: errTx },
+        { data: quinielasDB, error: errQuinielas }
+      ] = await Promise.all([
+        supabase.from('usuarios').select('creditos_disponibles, saldo_pesos'),
+        supabase.from('transacciones_creditos').select('usuario_id, tipo_movimiento, cantidad'),
+        supabase.from('quinielas').select('id, nombre_jornada, precio_ticket, estado, tipo_premiacion').order('fecha_cierre', { ascending: false })
+      ]);
 
-      let totalCreditos = 0;
-      let totalPesos = 0;
+      if (errUsuarios) throw new Error(`Error al cargar usuarios: ${errUsuarios.message}`);
+      if (errTx) throw new Error(`Error al cargar transacciones: ${errTx.message}`);
+      if (errQuinielas) throw new Error(`Error al cargar quinielas: ${errQuinielas.message}`);
+
+      // 2. CÁLCULO DE SALDOS DE USUARIOS (Unificando creditos_disponibles y saldo_pesos)
+      let totalCreditosDisponibles = 0;
+      let totalSaldoPesos = 0;
+
       if (usuarios) {
         usuarios.forEach(u => {
-          totalCreditos += (Number(u.creditos_disponibles) || 0);
-          totalPesos += (Number(u.saldo_pesos) || 0);
+          totalCreditosDisponibles += (Number(u.creditos_disponibles) || 0);
+          totalSaldoPesos += (Number(u.saldo_pesos) || 0);
         });
       }
 
-      // 2. INGRESO BRUTO (Desde Transacciones de Recarga)
-      const { data: recargas, error: errRecargas } = await supabase
-        .from('transacciones_creditos')
-        .select('cantidad')
-        .in('tipo_movimiento', ['recarga_manual', 'recarga_billetera'])
-        .gt('cantidad', 0);
-      
-      if (errRecargas) throw new Error(`Error al cargar recargas: ${errRecargas.message}`);
-
-      let totalRecargasCreditos = 0;
-      if (recargas) {
-        recargas.forEach(r => totalRecargasCreditos += (Number(r.cantidad) || 0));
+      // 3. INGRESO BRUTO (Usando la misma regla contable de la Base de Jugadores: buscando 'recarga')
+      let ingresoBrutoCalc = 0;
+      if (txData) {
+        ingresoBrutoCalc = txData
+          .filter(tx => String(tx.tipo_movimiento || '').toLowerCase().includes('recarga'))
+          .reduce((acc, curr) => acc + Number(curr.cantidad || 0), 0);
       }
-      
-      // 🔥 Ahora el cálculo es 1 a 1 (Pesos puros)
-      const ingresoBrutoCalc = totalRecargasCreditos + totalPesos;
 
-      // 3. UTILIDAD Y RENDIMIENTO (Desde Quinielas)
-      const { data: quinielasDB, error: errQuinielas } = await supabase
-        .from('quinielas')
-        .select('id, nombre_jornada, precio_ticket, estado, tipo_premiacion') 
-        .order('fecha_cierre', { ascending: false });
-
-      if (errQuinielas) throw new Error(`Error al cargar quinielas: ${errQuinielas.message}`);
-
+      // 4. UTILIDAD Y RENDIMIENTO (Desde Quinielas)
       let utilidadTotal = 0;
       let premiosPagados = 0;
       const historialJornadas: any[] = [];
@@ -70,8 +67,6 @@ export function useFinanzas() {
           if (errTickets) throw new Error(`Error en los boletos de ${q.nombre_jornada}: ${errTickets.message}`);
 
           const boletosVendidos = tData ? tData.length : 0;
-          
-          // 🔥 Eliminamos el * 30. Se usa el precio exacto (ej. 30, 50, 100 pesos)
           const precio = q.precio_ticket ?? 0;
           const recaudacionPesos = boletosVendidos * precio;
           
@@ -102,8 +97,8 @@ export function useFinanzas() {
       setMetricas({
         ingresoBruto: ingresoBrutoCalc,
         utilidadNeta: utilidadTotal,
-        pasivosCreditos: totalCreditos, // 1 a 1 en pesos
-        saldoRetenido: totalPesos,
+        pasivosCreditos: totalCreditosDisponibles, 
+        saldoRetenido: totalSaldoPesos,
         premiosEntregados: premiosPagados
       });
       setJornadas(historialJornadas);

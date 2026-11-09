@@ -2,17 +2,20 @@
 import { useState, useMemo } from 'react'
 import { useGestorUsuarios } from '@/hooks/useGestorUsuarios'
 
-type SortField = 'saldo' | 'juegan' | 'inversion' | 'promos' | null;
+type SortField = 'saldo' | 'deuda' | 'juegan' | 'inversion' | 'promos' | null;
 
 export default function GestorUsuarios() {
-  const { usuarios, cargando, actualizarUsuario, resetearNIP } = useGestorUsuarios()
+  const { usuarios, cargando, actualizarUsuario, abonarDeuda, resetearNIP } = useGestorUsuarios()
   
   const [busqueda, setBusqueda] = useState('')
   const [ordenActivo, setOrdenActivo] = useState<SortField>('saldo')
 
   const [editandoUser, setEditandoUser] = useState<any>(null)
   const [resetNipUser, setResetNipUser] = useState<any>(null)
+  const [abonandoDeudaUser, setAbonandoDeudaUser] = useState<any>(null)
+  
   const [nuevoNip, setNuevoNip] = useState('')
+  const [montoAbono, setMontoAbono] = useState('')
   const [procesando, setProcesando] = useState(false)
 
   // 🧠 Lógica de Filtrado y Búsqueda Dinámica
@@ -24,9 +27,10 @@ export default function GestorUsuarios() {
       filtrados = filtrados.filter(u => u.nombre.toLowerCase().includes(b) || u.telefono.includes(b))
     }
 
-    // 🔥 Ordenamiento actualizado para usar la suma de la billetera
+    // 🔥 Ordenamiento actualizado
     switch (ordenActivo) {
       case 'saldo': filtrados.sort((a, b) => (b.billeteraActual || 0) - (a.billeteraActual || 0)); break;
+      case 'deuda': filtrados.sort((a, b) => (b.deudaActual || 0) - (a.deudaActual || 0)); break;
       case 'juegan': filtrados.sort((a, b) => b.ticketsJugados - a.ticketsJugados); break;
       case 'inversion': filtrados.sort((a, b) => b.dineroIngresadoAprox - a.dineroIngresadoAprox); break;
       case 'promos': filtrados.sort((a, b) => b.premiosGanadosCreditos - a.premiosGanadosCreditos); break;
@@ -35,6 +39,23 @@ export default function GestorUsuarios() {
 
     return filtrados
   }, [usuarios, busqueda, ordenActivo])
+
+  // 📊 CÁLCULO DE MÉTRICAS GLOBALES PARA EL DASHBOARD
+  const metricasGlobales = useMemo(() => {
+    let totalSaldo = 0;
+    let totalDeuda = 0;
+    let totalIngresos = 0;
+    let totalTickets = 0;
+
+    usuarios.forEach(u => {
+      totalSaldo += (u.billeteraActual || 0);
+      totalDeuda += (u.deudaActual || 0);
+      totalIngresos += (u.dineroIngresadoAprox || 0);
+      totalTickets += (u.ticketsJugados || 0);
+    });
+
+    return { totalSaldo, totalDeuda, totalIngresos, totalTickets };
+  }, [usuarios])
 
   const manejarOrden = (columna: SortField) => {
     setOrdenActivo(columna);
@@ -46,6 +67,24 @@ export default function GestorUsuarios() {
     await actualizarUsuario(editandoUser.id, editandoUser.nombre, editandoUser.telefono)
     setProcesando(false)
     setEditandoUser(null)
+  }
+
+  const aplicarAbono = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const monto = parseFloat(montoAbono)
+    if (isNaN(monto) || monto <= 0) return alert("Ingresa un monto válido mayor a 0.")
+    
+    setProcesando(true)
+    const exito = await abonarDeuda(abonandoDeudaUser.id, monto)
+    setProcesando(false)
+    
+    if (exito) {
+      alert(`Abono de $${monto} registrado correctamente.`)
+      setAbonandoDeudaUser(null)
+      setMontoAbono('')
+    } else {
+      alert("Error al procesar el abono.")
+    }
   }
 
   const aplicarResetNip = async (e: React.FormEvent) => {
@@ -66,7 +105,7 @@ export default function GestorUsuarios() {
   if (cargando) return <div className="text-center mt-10 text-amber-500 font-bold animate-pulse uppercase tracking-widest">Calculando Estadísticas VIP...</div>
 
   return (
-    <div className="w-full max-w-6xl mx-auto mt-2 animate-in fade-in duration-500 mb-20 space-y-4">
+    <div className="w-full max-w-7xl mx-auto mt-2 animate-in fade-in duration-500 mb-20 space-y-4">
       
       <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-xl flex justify-between items-center">
         <h2 className="text-xl font-black text-white uppercase tracking-widest flex items-center gap-2">
@@ -75,7 +114,38 @@ export default function GestorUsuarios() {
         <span className="text-xs text-slate-500 font-bold bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800">Total: {usuarios.length}</span>
       </div>
 
-      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
+      {/* 🚀 DASHBOARD DE MÉTRICAS GLOBALES */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col items-center justify-center text-center transition-transform hover:scale-105">
+          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">💰 Saldo Global Cuentas</span>
+          <span className="text-2xl font-black text-green-400 drop-shadow-[0_0_5px_rgba(74,222,128,0.2)]">
+            ${metricasGlobales.totalSaldo.toFixed(2)}
+          </span>
+        </div>
+        
+        <div className="bg-red-950/20 border border-red-900/30 rounded-2xl p-4 shadow-xl flex flex-col items-center justify-center text-center transition-transform hover:scale-105">
+          <span className="text-[10px] text-red-400/80 font-bold uppercase tracking-widest mb-1">⚠️ Deuda Pendiente (Por Cobrar)</span>
+          <span className="text-2xl font-black text-red-400 drop-shadow-[0_0_5px_rgba(248,113,113,0.3)]">
+            -${metricasGlobales.totalDeuda.toFixed(2)}
+          </span>
+        </div>
+
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col items-center justify-center text-center transition-transform hover:scale-105">
+          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">💵 Total Dinero Ingresado</span>
+          <span className="text-2xl font-black text-amber-400 drop-shadow-[0_0_5px_rgba(251,191,36,0.2)]">
+            ${metricasGlobales.totalIngresos.toFixed(2)}
+          </span>
+        </div>
+
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col items-center justify-center text-center transition-transform hover:scale-105">
+          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">🎟️ Total Tickets Históricos</span>
+          <span className="text-2xl font-black text-slate-200">
+            {metricasGlobales.totalTickets}
+          </span>
+        </div>
+      </div>
+
+      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl shadow-xl overflow-hidden mt-4">
         <div className="overflow-x-auto">
           <table className="w-full text-left whitespace-nowrap">
             <thead className="bg-slate-950 border-b border-slate-800 text-[10px] uppercase text-slate-400 tracking-widest">
@@ -100,6 +170,16 @@ export default function GestorUsuarios() {
                   <div className="flex flex-col items-center justify-end h-full gap-1">
                     <span>💰 Billetera (MXN)</span>
                     {ordenActivo === 'saldo' && <span className="text-[8px] text-green-500">▼ MÁS A MENOS</span>}
+                  </div>
+                </th>
+                <th 
+                  onClick={() => manejarOrden('deuda')} 
+                  className={`p-3 text-center cursor-pointer hover:bg-slate-800/50 transition-colors align-bottom pb-4 ${ordenActivo === 'deuda' ? 'text-red-400 bg-slate-900' : ''}`}
+                  title="Ordenar por deuda"
+                >
+                  <div className="flex flex-col items-center justify-end h-full gap-1">
+                    <span>⚠️ Deuda (MXN)</span>
+                    {ordenActivo === 'deuda' && <span className="text-[8px] text-red-500">▼ MÁS A MENOS</span>}
                   </div>
                 </th>
                 <th 
@@ -147,6 +227,17 @@ export default function GestorUsuarios() {
                       ${(u.billeteraActual || 0).toFixed(2)} <span className="text-[10px] text-green-600">MXN</span>
                     </span>
                   </td>
+                  <td className={`p-3 text-center ${ordenActivo === 'deuda' ? 'bg-slate-900/30' : ''}`}>
+                    {u.deudaActual > 0 ? (
+                      <div className="flex items-center justify-center gap-1 bg-red-950/30 border border-red-900/50 rounded py-1 px-2 mx-auto w-max">
+                        <span className="font-black text-base text-red-400 drop-shadow-[0_0_5px_rgba(248,113,113,0.3)]">
+                          -${(u.deudaActual).toFixed(2)}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="font-bold text-slate-700">-</span>
+                    )}
+                  </td>
                   <td className={`p-3 text-center ${ordenActivo === 'juegan' ? 'bg-slate-900/30' : ''}`}>
                     <span className="font-bold text-slate-300 text-base">{u.ticketsJugados}</span>
                     <span className="text-[9px] text-slate-500 block uppercase">Tickets</span>
@@ -163,6 +254,16 @@ export default function GestorUsuarios() {
                   </td>
                   <td className="p-3 text-right">
                     <div className="flex justify-end gap-2">
+                      {/* 🔥 Botón de Abono: Solo aparece si el usuario tiene deuda */}
+                      {u.deudaActual > 0 && (
+                        <button 
+                          onClick={() => { setAbonandoDeudaUser(u); setMontoAbono(u.deudaActual.toString()); }} 
+                          className="p-2 bg-slate-800 hover:bg-green-900/50 rounded border border-slate-700 text-green-400 transition-colors" 
+                          title="Abonar a Deuda"
+                        >
+                          💸
+                        </button>
+                      )}
                       <button onClick={() => setEditandoUser(u)} className="p-2 bg-slate-800 hover:bg-slate-700 rounded border border-slate-700 text-blue-400 transition-colors" title="Editar Nombre/Teléfono">✏️</button>
                       <button onClick={() => setResetNipUser(u)} className="p-2 bg-slate-800 hover:bg-red-900/50 rounded border border-slate-700 text-red-400 transition-colors" title="Resetear NIP de Seguridad">🔑</button>
                     </div>
@@ -176,6 +277,40 @@ export default function GestorUsuarios() {
           )}
         </div>
       </div>
+
+      {/* MODAL: ABONAR DEUDA */}
+      {abonandoDeudaUser && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-green-900/50 rounded-2xl p-5 w-full max-w-sm animate-in zoom-in-95">
+            <h3 className="text-green-400 font-black uppercase tracking-widest border-b border-green-900/30 pb-3 mb-4 flex items-center gap-2">
+              <span>💸</span> Registrar Abono
+            </h3>
+            <p className="text-[10px] text-slate-400 mb-4 font-bold leading-tight">
+              Abonando a la deuda de <span className="text-white uppercase">{abonandoDeudaUser.nombre}</span>. Deuda actual: <span className="text-red-400">-${abonandoDeudaUser.deudaActual}</span>.
+            </p>
+            <form onSubmit={aplicarAbono} className="space-y-4">
+              <div>
+                <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Monto a Abonar (MXN)</label>
+                <input 
+                  type="number" 
+                  step="0.01"
+                  min="1"
+                  max={abonandoDeudaUser.deudaActual}
+                  value={montoAbono} 
+                  onChange={e => setMontoAbono(e.target.value)} 
+                  className="w-full bg-slate-950 border border-green-900/50 rounded-lg p-2 text-white text-center font-black tracking-widest" 
+                  placeholder="Ej. 30"
+                  required 
+                />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button type="button" onClick={() => setAbonandoDeudaUser(null)} className="flex-1 py-2 rounded-lg bg-slate-800 text-slate-400 font-bold text-xs uppercase">Cancelar</button>
+                <button type="submit" disabled={procesando || !montoAbono} className="flex-1 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white font-black text-xs uppercase disabled:opacity-50">Guardar Abono</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* MODAL: EDITAR USUARIO */}
       {editandoUser && (

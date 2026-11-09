@@ -129,7 +129,6 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
 
     const { data: tData } = await supabase.from('tickets').select('id, usuario_id, prediccion_goles_total, equipo_asignado_id, puntos_totales, pronosticos(partido_id, eleccion_usuario)').eq('quiniela_id', qData.id);
     
-    // 👇 CAMBIO CLAVE: Traemos TODO (*) para no adivinar el nombre de la columna y buscamos las posibles variantes
     const { data: uDataReal } = await supabase.from('usuarios').select('*');
     const mapaU: Record<string, any> = {};
     
@@ -179,7 +178,7 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
           nombre: mapaU[ticket.usuario_id]?.nombre || 'Mostrador', 
           telefono: mapaU[ticket.usuario_id]?.telefono || '', 
           creditos_disponibles: mapaU[ticket.usuario_id]?.creditos || 0,
-          avatar_url: mapaU[ticket.usuario_id]?.avatar_url || null, // 👈 Aquí se inyecta correctamente la foto encontrada
+          avatar_url: mapaU[ticket.usuario_id]?.avatar_url || null, 
           puntos: pts, 
           prediccionGoles: ticket.prediccion_goles_total, 
           golesDiff, 
@@ -332,7 +331,7 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     
     const topJugadores = rankingAdmin.slice(0, 10);
     if (topJugadores.length === 0) texto += `Aún no hay participantes.\n`;
-    else topJugadores.forEach(r => texto += `${r.posicion === 1 ? '🥇' : r.posicion === 2 ? '🥈' : r.posicion === 3 ? '🥉' : '🔹'} ${r.posicion}. ${r.nombre.toUpperCase()} - *${r.puntos} pts*\n`);
+    else topJugadores.forEach(r => texto += `${r.posicion === 1 ? '🥇' : r.posicion === 2 ? '🥈' : r.posicion === 3 ? '🥉' : '🔹'} ${r.posicion}. *${r.nombre.toUpperCase()}* - ${r.puntos} pts\n`);
 
     if (!estaCerrada) texto += `\n💻 *Revisa la tabla COMPLETA en vivo aquí:*\n👉 ${ENLACE_PUBLICO_RANKING}\n`;
 
@@ -388,7 +387,7 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     if (quiniela.modalidad === 'sorteo') {
       const vivos = rankingAdmin.filter(r => !r.estaEliminado);
       if (vivos.length > 1) return toast.error('🚨 Aún hay más de 1 jugador vivo. Debes eliminarlos desde el panel hasta que quede solo 1 para declarar campeón.');
-      desgloseTexto = vivos.length === 1 ? `\n- CAMPEÓN ÚNICO: ${vivos[0].nombre.toUpperCase()}\n- Premio a depositar: $${premioSorteo.toFixed(0)} MXN` : `\n- NO HAY GANADORES (Todos eliminados). Caja a favor de la casa.`;
+      desgloseTexto = vivos.length === 1 ? `\nCAMPEÓN ÚNICO: \n- ${vivos[0].nombre.toUpperCase()}\nPremio a depositar: $${premioSorteo.toFixed(0)} MXN` : `\nNO HAY GANADORES (Todos eliminados). Caja a favor de la casa.`;
     } else {
       const res = calcularPremios(rankingAdmin, tPremio, precioTicketMXN, 1, PORCENTAJE_PREMIO);
       ganadores = res.ganadores;
@@ -406,13 +405,14 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
       let idsGanadores: string[] = [];
 
       const procesarPagoPremio = async (usuarioId: string, cantidadPremio: number, descripcionPremio: string) => {
+        // 🔥 ACTUALIZADO: Leemos el saldo completo usando la misma lógica que la caja (saldo_pesos + creditos)
         const { data: userData } = await supabase
           .from('usuarios')
-          .select('creditos_disponibles, deuda_pesos')
+          .select('creditos_disponibles, saldo_pesos, deuda_pesos')
           .eq('id', usuarioId)
           .single();
         
-        let saldoActual = Number(userData?.creditos_disponibles || 0);
+        let saldoActual = Number(userData?.creditos_disponibles || 0) + Number(userData?.saldo_pesos || 0);
         let deudaActual = Math.abs(Number(userData?.deuda_pesos || 0)); 
         let premioSobrante = cantidadPremio;
         let cobroDeuda = 0;
@@ -425,26 +425,32 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
 
         const nuevoSaldo = saldoActual + premioSobrante;
 
+        // 🔥 Unificamos todo el dinero restante en saldo_pesos y limpiamos los creditos viejos
         await supabase.from('usuarios').update({ 
-          creditos_disponibles: nuevoSaldo,
+          creditos_disponibles: 0,
+          saldo_pesos: nuevoSaldo,
           deuda_pesos: deudaActual 
         }).eq('id', usuarioId);
 
-        await supabase.from('transacciones_creditos').insert([{ 
+        // 🔥 OPTIMIZADO: Agrupamos las transacciones para insertarlas de un solo golpe
+        const transacciones = [];
+        transacciones.push({
           usuario_id: usuarioId, 
           cantidad: cantidadPremio, 
           tipo_movimiento: 'premio_quiniela', 
           descripcion: descripcionPremio 
-        }]);
+        });
 
         if (cobroDeuda > 0) {
-          await supabase.from('transacciones_creditos').insert([{ 
+          transacciones.push({
             usuario_id: usuarioId, 
             cantidad: -cobroDeuda, 
             tipo_movimiento: 'abono_deuda', 
-            descripcion: `Cobro automático de saldo pendiente por premio ganado` 
-          }]);
+            descripcion: `Cobro automático de saldo pendiente por premio ganado`
+          });
         }
+
+        await supabase.from('transacciones_creditos').insert(transacciones);
 
         if (actualizarSaldoGlobal) actualizarSaldoGlobal(usuarioId, nuevoSaldo);
       };
@@ -586,11 +592,13 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
          for (const usuarioId of Object.keys(reembolsosUsuario)) {
             const montoRefund = reembolsosUsuario[usuarioId];
             
-            const { data: user } = await supabase.from('usuarios').select('creditos_disponibles').eq('id', usuarioId).single();
+            // 🔥 ACTUALIZADO: También aquí los reembolsos leerán el nuevo modelo consolidado
+            const { data: user } = await supabase.from('usuarios').select('creditos_disponibles, saldo_pesos').eq('id', usuarioId).single();
             if (user) {
-               const nuevoSaldo = Number(user.creditos_disponibles || 0) + montoRefund;
+               const saldoActual = Number(user.creditos_disponibles || 0) + Number(user.saldo_pesos || 0);
+               const nuevoSaldo = saldoActual + montoRefund;
                
-               await supabase.from('usuarios').update({ creditos_disponibles: nuevoSaldo }).eq('id', usuarioId);
+               await supabase.from('usuarios').update({ creditos_disponibles: 0, saldo_pesos: nuevoSaldo }).eq('id', usuarioId);
                await supabase.from('transacciones_creditos').insert([{ 
                  usuario_id: usuarioId, 
                  cantidad: montoRefund, 
