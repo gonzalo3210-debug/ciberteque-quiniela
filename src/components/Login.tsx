@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
+import { extraerNacionalMX, telefonoCanonicoMX, formasGuardadasMX, esMismoNumeroMX } from '@/lib/telefono'
 
 export default function Login({ onLogin, onSwitchToRegister }: { onLogin?: (usuario: any) => void, onSwitchToRegister?: () => void }) {
   const [codigoPais, setCodigoPais] = useState('+52') 
@@ -43,11 +44,12 @@ export default function Login({ onLogin, onSwitchToRegister }: { onLogin?: (usua
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
   }
 
-  // 🆘 NUEVO: Función para pedir ayuda por WhatsApp al administrador
+  // 🆘 Función para pedir ayuda por WhatsApp al administrador
   const solicitarRecuperacionNip = () => {
-    const telLimpio = telefono.replace(/\D/g, '')
-    const mensaje = telLimpio.length === 10
-      ? `Hola, soy el número ${telLimpio}. Olvidé mi NIP de acceso en Club Pronósticos, ¿me ayudas a restablecerlo?`
+    const nacional = extraerNacionalMX(telefono)
+    const telParaMensaje = nacional ?? telefono.replace(/\D/g, '')
+    const mensaje = telParaMensaje.length === 10
+      ? `Hola, soy el número ${telParaMensaje}. Olvidé mi NIP de acceso en Club Pronósticos, ¿me ayudas a restablecerlo?`
       : `Hola, olvidé mi NIP de acceso en Club Pronósticos, ¿me ayudas a restablecerlo?`
     
     // Conecta directo a tu número de administración
@@ -69,43 +71,71 @@ export default function Login({ onLogin, onSwitchToRegister }: { onLogin?: (usua
     setError('')
 
     try {
-      const telLimpio = telefono.replace(/\D/g, '')
       const codigoLimpio = codigoPais.trim() === '+' ? '+52' : codigoPais.trim()
-      const telefonoInternacional = `${codigoLimpio}${telLimpio}` 
-      
-      let { data: usuario } = await supabase
-        .from('usuarios')
-        .select('*')
-        .eq('telefono', telefonoInternacional)
-        .single()
+      const nacional = codigoLimpio === '+52' ? extraerNacionalMX(telefono) : null
+      const telLimpio = telefono.replace(/\D/g, '')
+      const telefonoInternacional = nacional ? telefonoCanonicoMX(nacional) : `${codigoLimpio}${telLimpio}`
 
-      let esUsuarioLegacy = false;
+      // Buscar la cuenta en TODOS los formatos en que pudo quedar guardada:
+      // canónico (+52...), 10 dígitos, 52/521 pegados y formatos viejos con
+      // espacios o paréntesis. Así nadie se queda fuera por un formato viejo.
+      let candidatos: any[] = []
 
-      if (!usuario && codigoLimpio === '+52') {
-        const { data: usuarioAntiguo } = await supabase
+      if (nacional) {
+        const { data: exactos } = await supabase
           .from('usuarios')
           .select('*')
-          .eq('telefono', telLimpio)
-          .single()
-          
-        if (usuarioAntiguo) {
-          usuario = usuarioAntiguo;
-          esUsuarioLegacy = true;
+          .in('telefono', formasGuardadasMX(nacional))
+
+        if (exactos && exactos.length > 0) {
+          candidatos = exactos
+        } else {
+          const { data: todos } = await supabase.from('usuarios').select('id, telefono')
+          const ids = (todos || [])
+            .filter((u: any) => esMismoNumeroMX(u.telefono || '', nacional))
+            .map((u: any) => u.id)
+
+          if (ids.length > 0) {
+            const { data: porId } = await supabase.from('usuarios').select('*').in('id', ids)
+            if (porId) candidatos = porId
+          }
         }
+      } else {
+        const { data: unico } = await supabase
+          .from('usuarios')
+          .select('*')
+          .eq('telefono', telefonoInternacional)
+          .single()
+        if (unico) candidatos = [unico]
       }
 
-      if (!usuario) {
+      if (candidatos.length === 0) {
         setError('No existe una cuenta con este número.')
         setCargando(false)
         return
       }
 
-      const hashFormatoNuevo = await encriptarNIP(nip, telefonoInternacional)
-      const hashFormatoAntiguo = await encriptarNIP(nip, telLimpio)
+      // Verificar el NIP contra cada cuenta encontrada (puede haber duplicadas
+      // viejas): entra la primera cuyo NIP coincida, probando el cifrado con
+      // el formato canónico, con 10 dígitos y con el formato guardado tal cual.
+      const hashCanonico = nacional ? await encriptarNIP(nip, telefonoInternacional) : null
+      const hashNacional = nacional ? await encriptarNIP(nip, nacional) : null
 
-      const nipEsCorrecto = (usuario.nip === hashFormatoNuevo) || (usuario.nip === hashFormatoAntiguo) || (usuario.nip === nip)
+      let usuario: any = null
+      for (const cand of candidatos) {
+        const hashGuardado = await encriptarNIP(nip, cand.telefono)
+        if (
+          cand.nip === nip ||
+          (hashCanonico !== null && cand.nip === hashCanonico) ||
+          (hashNacional !== null && cand.nip === hashNacional) ||
+          cand.nip === hashGuardado
+        ) {
+          usuario = cand
+          break
+        }
+      }
 
-      if (!nipEsCorrecto) {
+      if (!usuario) {
         const nuevosIntentos = intentosFallidos + 1;
         setIntentosFallidos(nuevosIntentos);
         
@@ -126,17 +156,20 @@ export default function Login({ onLogin, onSwitchToRegister }: { onLogin?: (usua
 
       setIntentosFallidos(0)
 
-      if (esUsuarioLegacy || usuario.nip !== hashFormatoNuevo) {
+      // Migración silenciosa: la cuenta queda en el formato canónico y con el
+      // NIP cifrado sobre ese formato, para que la próxima vez entre directo.
+      const nipCanonico = hashCanonico ?? (await encriptarNIP(nip, telefonoInternacional))
+      if (usuario.telefono !== telefonoInternacional || usuario.nip !== nipCanonico) {
         await supabase
           .from('usuarios')
           .update({ 
             telefono: telefonoInternacional, 
-            nip: hashFormatoNuevo 
+            nip: nipCanonico 
           })
           .eq('id', usuario.id)
         
         usuario.telefono = telefonoInternacional;
-        usuario.nip = hashFormatoNuevo;
+        usuario.nip = nipCanonico;
       }
 
       login(usuario) 
@@ -176,13 +209,14 @@ export default function Login({ onLogin, onSwitchToRegister }: { onLogin?: (usua
             <input
               type="tel"
               required
-              maxLength={10}
+              maxLength={13}
               value={telefono}
               onChange={(e) => setTelefono(e.target.value.replace(/\D/g, ''))}
               className="w-full flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-center font-mono tracking-wider"
               placeholder="Ej. 3110000000"
             />
           </div>
+          <p className="text-[8px] text-slate-500 mt-1 text-center font-bold uppercase">Escríbelo como sea: el sistema lo ordena solo.</p>
         </div>
 
         <div>
@@ -190,14 +224,6 @@ export default function Login({ onLogin, onSwitchToRegister }: { onLogin?: (usua
             <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
               NIP (4 dígitos)
             </label>
-            {/* 🆘 BOTÓN DE OLVIDÉ MI NIP */}
-            <button 
-              type="button" 
-              onClick={solicitarRecuperacionNip}
-              className="text-[9px] text-blue-400 hover:text-blue-300 font-bold uppercase tracking-wider transition-colors"
-            >
-              ¿Lo olvidaste?
-            </button>
           </div>
           
           <div className="relative">
@@ -259,6 +285,15 @@ export default function Login({ onLogin, onSwitchToRegister }: { onLogin?: (usua
           }`}
         >
           {cargando ? 'Verificando...' : 'Entrar a jugar'}
+        </button>
+
+        {/* 🆘 RECUPERACIÓN DE NIP — visible siempre */}
+        <button
+          type="button"
+          onClick={solicitarRecuperacionNip}
+          className="w-full bg-green-950/30 hover:bg-green-950/50 border border-green-900/40 hover:border-green-500/50 text-green-400 hover:text-green-300 font-black uppercase text-[10px] tracking-widest py-2.5 px-4 rounded-xl transition-all transform active:scale-95"
+        >
+          💬 ¿Olvidaste tu NIP? Pide ayuda por WhatsApp
         </button>
 
         {onSwitchToRegister && (
