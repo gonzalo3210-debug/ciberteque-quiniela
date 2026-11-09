@@ -3,9 +3,23 @@ import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useSincronizacionRealtime } from '@/hooks/useSincronizacionRealtime'
 
+// ⏱️ Un partido solo se considera "en vivo" durante una ventana razonable
+// tras su inicio (un partido dura ~2 h; 3 h cubre tiempos extra y retrasos).
+// Sin esta ventana, un partido sin resultado capturado quedaba marcado
+// "En Juego" para siempre (eso dejaba quinielas viejas como si siguieran vivas).
+const VENTANA_EN_VIVO_MS = 3 * 60 * 60 * 1000
+
+export function partidoEnVentanaEnVivo(fechaHora: string | null, esFinal: boolean): boolean {
+  if (!fechaHora || esFinal) return false
+  const inicio = new Date(fechaHora).getTime()
+  if (isNaN(inicio)) return false
+  const ahora = new Date().getTime()
+  return ahora >= inicio && (ahora - inicio) <= VENTANA_EN_VIVO_MS
+}
+
 // ⚡ MINI-COMPONENTE ACTUALIZADO: Maneja la cuenta regresiva y la transición automática a 0-0
-const ContadorPartido = ({ fechaHora }: { fechaHora: string | null }) => {
-  const [estado, setEstado] = useState<'espera' | 'vivo'>('espera');
+const ContadorPartido = ({ fechaHora, esFinal }: { fechaHora: string | null, esFinal?: boolean }) => {
+  const [estado, setEstado] = useState<'espera' | 'vivo' | 'sin_resultado'>('espera');
   const [texto, setTexto] = useState('');
 
   useEffect(() => {
@@ -17,7 +31,9 @@ const ContadorPartido = ({ fechaHora }: { fechaHora: string | null }) => {
       const diferencia = objetivo - ahora;
 
       if (diferencia <= 0) {
-        setEstado('vivo');
+        // Ya empezó: "en vivo" solo dentro de la ventana; fuera de ella y sin
+        // resultado capturado se muestra "Sin resultado", nunca un 0-0 eterno.
+        setEstado(partidoEnVentanaEnVivo(fechaHora, !!esFinal) ? 'vivo' : 'sin_resultado');
         return;
       }
 
@@ -40,7 +56,7 @@ const ContadorPartido = ({ fechaHora }: { fechaHora: string | null }) => {
     actualizarReloj();
     const intervalo = setInterval(actualizarReloj, 1000);
     return () => clearInterval(intervalo);
-  }, [fechaHora]);
+  }, [fechaHora, esFinal]);
 
   if (!fechaHora) return <span className="text-slate-600 font-mono text-[10px]">-</span>;
 
@@ -52,6 +68,15 @@ const ContadorPartido = ({ fechaHora }: { fechaHora: string | null }) => {
           <span className="text-[7px] font-black uppercase tracking-widest text-red-400">En Juego</span>
           <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_5px_rgba(239,68,68,0.8)]"></span>
         </div>
+      </div>
+    );
+  }
+
+  if (estado === 'sin_resultado') {
+    return (
+      <div className="flex flex-col items-center gap-0.5 justify-center">
+        <span className="text-[10px] font-black text-slate-500 leading-none">—</span>
+        <span className="text-[7px] font-black uppercase tracking-widest text-slate-500">Sin resultado</span>
       </div>
     );
   }
@@ -73,6 +98,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
   const [cargando, setCargando] = useState(true)
   
   const [vistaActual, setVistaActual] = useState<'activas' | 'historial'>('activas')
+  const [busqueda, setBusqueda] = useState('')
 
   const [ticketEditando, setTicketEditando] = useState<any>(null)
   const [nuevasSelecciones, setNuevasSelecciones] = useState<Record<string, string>>({})
@@ -295,7 +321,9 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
     const yaHayResultados = grupo.partidos.some((p: any) => p.real !== null);
     
     const sePuedeEditar = esActivo && !yaPasoLaHora && !yaHayResultados;
-    const estaEnJuego = esActivo && (yaPasoLaHora || yaHayResultados);
+    // "En Juego" solo si algún partido está realmente en su ventana en vivo
+    // (antes bastaba que pasara la hora de cierre y la etiqueta nunca se iba).
+    const estaEnJuego = esActivo && grupo.partidos.some((p: any) => partidoEnVentanaEnVivo(p.fecha_hora, p.es_final));
     const esSorteo = grupo.modalidad === 'sorteo'; 
 
     return (
@@ -378,7 +406,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
               <tbody className="divide-y divide-slate-800/50">
                 {grupo.partidos.map((p: any, pIdx: number) => {
                   const tieneGoles = p.goles_local !== null && p.goles_visitante !== null;
-                  const enVivo = tieneGoles && !p.es_final;
+                  const enVivo = tieneGoles && partidoEnVentanaEnVivo(p.fecha_hora, p.es_final);
                   
                   return (
                     <tr key={pIdx} className="hover:bg-slate-800/40 transition-colors">
@@ -415,7 +443,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
                           </div>
                         ) : (
                           // ⚡ El componente ahora se encarga de mostrar la fecha o el 0-0 automáticamente
-                          <ContadorPartido fechaHora={p.fecha_hora} />
+                          <ContadorPartido fechaHora={p.fecha_hora} esFinal={p.es_final} />
                         )}
                       </td>
 
@@ -499,9 +527,28 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
     )
   }
 
+  // 🔍 Buscador: filtra las jornadas por nombre, sin importar acentos ni mayúsculas
+  const normalizarTexto = (s: string) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  const coincideBusqueda = (grupo: any) => {
+    const q = normalizarTexto(busqueda.trim())
+    return q === '' || normalizarTexto(grupo.nombre_jornada).includes(q)
+  }
+  const gruposActivosFiltrados = gruposActivos.filter(coincideBusqueda)
+  const gruposCompletadosFiltrados = gruposCompletados.filter(coincideBusqueda)
+
   return (
     <div className="w-full max-w-4xl mt-4 animate-in fade-in duration-500 mb-20 flex flex-col items-center">
-      
+
+      <div className="w-full max-w-sm mb-3">
+        <input
+          type="text"
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+          placeholder="🔍 Buscar jornada… (ej. LMX, Nations)"
+          className="w-full bg-slate-900/80 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-amber-500 transition-all text-center"
+        />
+      </div>
+
       <div className="flex bg-slate-900/80 p-1.5 rounded-xl border border-slate-800 shadow-inner mb-6 w-full max-w-sm">
         <button 
           onClick={() => setVistaActual('activas')} 
@@ -528,21 +575,21 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
       <div className="w-full">
         {vistaActual === 'activas' ? (
           <div>
-            {gruposActivos.length === 0 ? (
-              <p className="text-slate-500 italic text-center py-6 bg-slate-900/30 rounded-xl border border-slate-800 text-xs">No tienes jugadas activas en este momento.</p>
+            {gruposActivosFiltrados.length === 0 ? (
+              <p className="text-slate-500 italic text-center py-6 bg-slate-900/30 rounded-xl border border-slate-800 text-xs">{busqueda.trim() ? `No se encontraron jornadas activas para "${busqueda.trim()}".` : 'No tienes jugadas activas en este momento.'}</p>
             ) : (
               <div className="grid grid-cols-1 gap-2">
-                {gruposActivos.map((grupo, idx) => <TarjetaGrupoAgrupado key={`act-${idx}`} grupo={grupo} esActivo={true} />)}
+                {gruposActivosFiltrados.map((grupo, idx) => <TarjetaGrupoAgrupado key={`act-${idx}`} grupo={grupo} esActivo={true} />)}
               </div>
             )}
           </div>
         ) : (
           <div className="animate-in slide-in-from-right-4 duration-300">
-            {gruposCompletados.length === 0 ? (
-              <p className="text-slate-500 italic text-center py-6 bg-slate-900/30 rounded-xl border border-slate-800 text-xs">Aún no tienes tickets terminados.</p>
+            {gruposCompletadosFiltrados.length === 0 ? (
+              <p className="text-slate-500 italic text-center py-6 bg-slate-900/30 rounded-xl border border-slate-800 text-xs">{busqueda.trim() ? `No se encontraron jornadas terminadas para "${busqueda.trim()}".` : 'Aún no tienes tickets terminados.'}</p>
             ) : (
               <div className="grid grid-cols-1 gap-2">
-                {gruposCompletados.map((grupo, idx) => <TarjetaGrupoAgrupado key={`comp-${idx}`} grupo={grupo} esActivo={false} />)}
+                {gruposCompletadosFiltrados.map((grupo, idx) => <TarjetaGrupoAgrupado key={`comp-${idx}`} grupo={grupo} esActivo={false} />)}
               </div>
             )}
           </div>
