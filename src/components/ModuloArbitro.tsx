@@ -543,17 +543,27 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                     // no-final decía EN VIVO, aunque faltaran días para jugarse).
                     const inicioPartido = partido.fecha_hora_partido ? new Date(partido.fecha_hora_partido).getTime() : null;
                     const aunNoInicia = !esFinalActivo && inicioPartido !== null && !isNaN(inicioPartido) && inicioPartido > Date.now();
-                    const fechaProgramado = (aunNoInicia && inicioPartido !== null)
-                      ? new Date(inicioPartido).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }) + ' · ' + new Date(inicioPartido).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+                    // La fecha/hora ahora vive a la izquierda, junto a los equipos y
+                    // con letra legible (antes quedaba apretada bajo el botón).
+                    const fechaTexto = (inicioPartido !== null && !isNaN(inicioPartido))
+                      ? new Date(inicioPartido).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' }) + ' · ' + new Date(inicioPartido).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
                       : null;
                     
                     return (
                       <div key={partido.id} className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 flex flex-col md:flex-row justify-between items-center gap-3">
-                        <div className="flex w-full md:w-auto flex-1 justify-between items-center text-[10px] font-bold uppercase gap-2">
-                          <span className="text-[8px] text-slate-600 font-black w-4 text-center">{idx + 1}</span>
-                          <span className="flex-1 text-right text-slate-300 truncate">{partido.equipo_local}</span>
-                          <span className="w-4 text-center text-slate-600 text-[8px] font-black">VS</span>
-                          <span className="flex-1 text-left text-slate-300 truncate">{partido.equipo_visitante}</span>
+                        <div className="flex flex-col w-full md:w-auto flex-1 gap-1">
+                          <div className="flex w-full justify-between items-center text-[10px] font-bold uppercase gap-2">
+                            {partido.canal && (
+                              <span className="shrink-0 text-[9px] font-black uppercase tracking-wider text-sky-400 bg-sky-950/40 border border-sky-900/50 px-1.5 py-0.5 rounded">📺 {partido.canal}</span>
+                            )}
+                            <span className="text-[8px] text-slate-600 font-black w-4 text-center">{idx + 1}</span>
+                            <span className="flex-1 text-right text-slate-300 truncate">{partido.equipo_local}</span>
+                            <span className="w-4 text-center text-slate-600 text-[8px] font-black">VS</span>
+                            <span className="flex-1 text-left text-slate-300 truncate">{partido.equipo_visitante}</span>
+                          </div>
+                          {fechaTexto && (
+                            <span className="text-[10px] font-bold text-slate-400 pl-1">🗓 {fechaTexto}</span>
+                          )}
                         </div>
                         
                         <div className="flex w-full md:w-auto items-center justify-between gap-3">
@@ -572,9 +582,6 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                                 >
                                   {esFinalActivo ? '✅ FINAL' : aunNoInicia ? '🕒 PROGRAMADO' : '🔴 EN VIVO'}
                                 </button>
-                                {aunNoInicia && fechaProgramado && (
-                                  <span className="text-[7px] font-bold uppercase tracking-widest text-slate-500">{fechaProgramado}</span>
-                                )}
                               </>
                             )}
                           </div>
@@ -731,6 +738,8 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                       </div>
                       
                       <input type="datetime-local" value={p.fecha_hora_partido || ''} onChange={e => ej.actualizarPartidoEditado(index, 'fecha_hora_partido', e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-slate-300 focus:outline-none focus:border-blue-500" />
+
+                      <input type="text" placeholder="📺 Canal o streaming (ej. Canal 5, ESPN, Laytime…)" value={p.canal || ''} onChange={e => ej.actualizarPartidoEditado(index, 'canal', e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-slate-300 placeholder:text-slate-600 focus:outline-none focus:border-blue-500" />
                     </div>
                   ))}
                   
