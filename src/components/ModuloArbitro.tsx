@@ -538,7 +538,14 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                 <div className="space-y-2 mt-4">
                   {(s.partidos || []).map((partido: any, idx: number) => {
                     const seleccionado = s.resultadosReales[partido.id];
-                    const esFinalActivo = s.esFinalReal[partido.id]; 
+                    const esFinalActivo = s.esFinalReal[partido.id];
+                    // 🕒 Un partido que aún no empieza NO está en vivo (antes todo lo
+                    // no-final decía EN VIVO, aunque faltaran días para jugarse).
+                    const inicioPartido = partido.fecha_hora_partido ? new Date(partido.fecha_hora_partido).getTime() : null;
+                    const aunNoInicia = !esFinalActivo && inicioPartido !== null && !isNaN(inicioPartido) && inicioPartido > Date.now();
+                    const fechaProgramado = (aunNoInicia && inicioPartido !== null)
+                      ? new Date(inicioPartido).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }) + ' · ' + new Date(inicioPartido).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+                      : null;
                     
                     return (
                       <div key={partido.id} className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 flex flex-col md:flex-row justify-between items-center gap-3">
@@ -557,12 +564,18 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                               <input type="number" min="0" placeholder="-" value={s.marcadoresReales[partido.id]?.v || ''} onChange={(e) => a.handleMarcadorExacto(partido.id, 'v', e.target.value)} disabled={esHistoricoLiquidado} className="w-8 h-8 bg-slate-900 rounded text-center font-black text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
                             </div>
                             {!esHistoricoLiquidado && (
-                              <button 
-                                onClick={() => a.handleToggleEsFinal(partido.id, !esFinalActivo)}
-                                className={`w-full py-1 text-[8px] font-black uppercase rounded transition-colors ${esFinalActivo ? 'bg-green-600 text-white shadow-inner' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white border border-slate-700'}`}
-                              >
-                                {esFinalActivo ? '✅ FINAL' : '🔴 EN VIVO'}
-                              </button>
+                              <>
+                                <button
+                                  onClick={() => a.handleToggleEsFinal(partido.id, !esFinalActivo)}
+                                  title="Marcar / desmarcar como final"
+                                  className={`w-full py-1 text-[8px] font-black uppercase rounded transition-colors ${esFinalActivo ? 'bg-green-600 text-white shadow-inner' : aunNoInicia ? 'bg-slate-800 text-sky-400 hover:bg-slate-700 hover:text-white border border-slate-700' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white border border-slate-700'}`}
+                                >
+                                  {esFinalActivo ? '✅ FINAL' : aunNoInicia ? '🕒 PROGRAMADO' : '🔴 EN VIVO'}
+                                </button>
+                                {aunNoInicia && fechaProgramado && (
+                                  <span className="text-[7px] font-bold uppercase tracking-widest text-slate-500">{fechaProgramado}</span>
+                                )}
+                              </>
                             )}
                           </div>
 
