@@ -13,7 +13,10 @@ export default function MiBilletera({ usuarioId }: { usuarioId: string }) {
   const BANCO = "Mercado Pago W" 
 
   const [mostrarModalDeposito, setMostrarModalDeposito] = useState(false)
-  
+  const [clabeCopiada, setClabeCopiada] = useState(false)
+  const [mostrarModalRetiro, setMostrarModalRetiro] = useState(false)
+  const [montoRetiro, setMontoRetiro] = useState('')
+
   // 🔍 ESTADOS PARA LOS FILTROS
   const [filtroTipo, setFiltroTipo] = useState('todos')
   const [filtroFecha, setFiltroFecha] = useState('todas')
@@ -55,9 +58,23 @@ export default function MiBilletera({ usuarioId }: { usuarioId: string }) {
     return fecha.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
   }
 
+  const copiarClabe = async () => {
+    try {
+      await navigator.clipboard.writeText(CLABE_INTERBANCARIA)
+      setClabeCopiada(true)
+      setTimeout(() => setClabeCopiada(false), 2000)
+    } catch {
+      // Si el portapapeles no está disponible, la CLABE sigue visible y seleccionable para copiarla a mano
+    }
+  }
+
   const solicitarRetiro = () => {
-    const mensaje = encodeURIComponent(`Hola, me gustaría solicitar un retiro de mi billetera.\n\nMi usuario es: ${nombreUsuario}\n\nPor la cantidad de $`);
+    const monto = parseFloat(montoRetiro)
+    if (isNaN(monto) || monto <= 0 || monto > saldoTotalPesos) return
+    const montoTexto = `$${monto.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN`
+    const mensaje = encodeURIComponent(`Hola, me gustaría solicitar un retiro de mi billetera.\n\nMi usuario es: ${nombreUsuario}\n\nPor la cantidad de ${montoTexto}`);
     window.open(`https://wa.me/${NUMERO_WHATSAPP}?text=${mensaje}`, '_blank');
+    setMostrarModalRetiro(false)
   }
 
   const notificarDeposito = () => {
@@ -127,6 +144,9 @@ export default function MiBilletera({ usuarioId }: { usuarioId: string }) {
     )
   }
 
+  const montoRetiroNumerico = parseFloat(montoRetiro)
+  const montoRetiroValido = !isNaN(montoRetiroNumerico) && montoRetiroNumerico > 0 && montoRetiroNumerico <= saldoTotalPesos
+
   return (
     <div className="w-full max-w-2xl mx-auto mt-2 animate-in fade-in duration-500 mb-20 space-y-4 relative">
       
@@ -159,7 +179,7 @@ export default function MiBilletera({ usuarioId }: { usuarioId: string }) {
           
           {saldoTotalPesos > 0 && (
             <button 
-              onClick={solicitarRetiro}
+              onClick={() => { setMontoRetiro(''); setMostrarModalRetiro(true) }}
               className="flex-1 max-w-[200px] bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-blue-500/50 text-white py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 shadow-lg"
             >
               <span>💸</span> Retirar
@@ -186,7 +206,15 @@ export default function MiBilletera({ usuarioId }: { usuarioId: string }) {
               </div>
               <div>
                 <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-1">CLABE Interbancaria</p>
-                <p className="text-amber-400 font-mono font-black text-lg select-all">{CLABE_INTERBANCARIA}</p>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-amber-400 font-mono font-black text-lg select-all">{CLABE_INTERBANCARIA}</p>
+                  <button
+                    onClick={copiarClabe}
+                    className={`shrink-0 px-3 py-1.5 rounded-lg border text-[10px] font-black uppercase tracking-widest transition-all ${clabeCopiada ? 'bg-green-950/50 border-green-700 text-green-400' : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-amber-500/50 hover:text-white'}`}
+                  >
+                    {clabeCopiada ? '✅ ¡Copiada!' : '📋 Copiar'}
+                  </button>
+                </div>
               </div>
               <div>
                 <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-1">Beneficiario</p>
@@ -205,6 +233,50 @@ export default function MiBilletera({ usuarioId }: { usuarioId: string }) {
               className="w-full bg-[#25D366] hover:bg-[#20bd5a] text-white py-3.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-[0_0_15px_rgba(37,211,102,0.3)] flex items-center justify-center gap-2"
             >
               Ya transferí, Notificar por WhatsApp
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE RETIRO */}
+      {mostrarModalRetiro && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-blue-500/30 rounded-3xl p-6 w-full max-w-md shadow-2xl animate-in zoom-in-95">
+            <div className="flex justify-between items-center mb-5">
+              <h3 className="text-blue-400 font-black uppercase tracking-widest text-sm flex items-center gap-2">
+                <span>💸</span> Solicitar Retiro
+              </h3>
+              <button onClick={() => setMostrarModalRetiro(false)} className="text-slate-400 hover:text-white text-xl">✕</button>
+            </div>
+
+            <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-4">
+              Saldo disponible: <span className="text-amber-400">${saldoTotalPesos.toLocaleString('es-MX', {minimumFractionDigits: 2})} MXN</span>
+            </p>
+
+            <label className="block text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-1">Cantidad a retirar</label>
+            <div className="relative mb-2">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 font-mono font-bold text-lg">$</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="any"
+                value={montoRetiro}
+                onChange={(e) => setMontoRetiro(e.target.value)}
+                placeholder="0.00"
+                className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl pl-8 pr-4 py-3 text-white font-mono font-bold text-lg focus:outline-none transition-colors"
+              />
+            </div>
+            {montoRetiroNumerico > saldoTotalPesos && (
+              <p className="text-red-400 text-[10px] font-bold uppercase tracking-widest mb-2">⚠️ La cantidad supera tu saldo disponible</p>
+            )}
+
+            <button
+              onClick={solicitarRetiro}
+              disabled={!montoRetiroValido}
+              className={`w-full mt-3 py-3.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${montoRetiroValido ? 'bg-[#25D366] hover:bg-[#20bd5a] text-white shadow-[0_0_15px_rgba(37,211,102,0.3)]' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
+            >
+              Solicitar por WhatsApp
             </button>
           </div>
         </div>
