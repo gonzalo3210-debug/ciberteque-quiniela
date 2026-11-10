@@ -70,6 +70,19 @@ const aplicarReglasRanking = (rankingOriginal: any[], esFaseRegistro: boolean, e
     jugador.posicion = jugador.posicion_real;
   });
 
+  // 🤝 MARCAR LUGARES COMPARTIDOS (solo visual: NO altera posiciones ni el orden)
+  // Un lugar es compartido si 2+ boletos tienen los mismos puntos Y la misma
+  // diferencia de goles real. Se ignora el centinela 999/9999 (aún sin goles reales).
+  if (!esSorteo && !esFaseRegistro) {
+    const diffDe = (j: any) => (j.golesDiff !== undefined ? j.golesDiff : 9999);
+    rankingProcesado.forEach((jugador: any) => {
+      const diff = diffDe(jugador);
+      jugador.lugar_compartido = diff < 999 && rankingProcesado.some((otro: any) =>
+        otro !== jugador && otro.puntos === jugador.puntos && diffDe(otro) === diff
+      );
+    });
+  }
+
   return rankingProcesado;
 };
 
@@ -747,6 +760,12 @@ export default function Posiciones() {
           </div>
         )}
 
+        {!esSorteo && (
+          <div className="mb-3 text-center border border-slate-700/60 bg-slate-900/60 text-slate-400 text-[9px] md:text-[10px] px-3 py-2 rounded-lg font-bold uppercase tracking-widest leading-relaxed">
+            ⚖️ Desempate: primero los <span className="text-slate-200">puntos</span>; luego, la predicción de <span className="text-slate-200">Goles Totales</span> (quien se acerque más al total real). Si el empate persiste, el lugar se comparte y el premio se reparte en partes iguales 🤝
+          </div>
+        )}
+
         {esSorteo ? (
            <div className="bg-slate-900/80 rounded-xl border border-blue-900/30 shadow-2xl p-3 md:p-5">
               <h3 className="text-center font-black text-slate-300 uppercase tracking-widest text-xs mb-4">Bombo de Asignaciones</h3>
@@ -969,6 +988,12 @@ export default function Posiciones() {
                                      )}
                                    </div>
                                  </div>
+
+                                 {jugador.lugar_compartido && (
+                                   <span className="block text-[8px] font-black uppercase tracking-widest text-sky-400 mt-0.5">
+                                     🤝 Lugar compartido{jugador.posicion === 1 ? ' · Premio repartido' : ''}
+                                   </span>
+                                 )}
 
                                  {Object.keys(jugador.conteoReacciones || {}).length > 0 && (
                                   <div className="flex flex-wrap gap-1 mt-1">
@@ -1224,6 +1249,12 @@ export default function Posiciones() {
                             )}
                           </div>
                         </div>
+
+                        {jugador.lugar_compartido && (
+                          <span className="text-[8px] font-black uppercase tracking-widest text-sky-400 mt-1">
+                            🤝 Lugar compartido{jugador.posicion === 1 ? ' · Premio repartido' : ''}
+                          </span>
+                        )}
 
                         {!esSorteo && estaExpandida && (
                           <div className="flex justify-between items-center border-t border-slate-800/50 pt-2 mt-2">
