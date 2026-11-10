@@ -16,6 +16,7 @@ export default function MiBilletera({ usuarioId }: { usuarioId: string }) {
   const [clabeCopiada, setClabeCopiada] = useState(false)
   const [mostrarModalRetiro, setMostrarModalRetiro] = useState(false)
   const [montoRetiro, setMontoRetiro] = useState('')
+  const [montoDeposito, setMontoDeposito] = useState('')
 
   // 🔍 ESTADOS PARA LOS FILTROS
   const [filtroTipo, setFiltroTipo] = useState('todos')
@@ -78,8 +79,12 @@ export default function MiBilletera({ usuarioId }: { usuarioId: string }) {
   }
 
   const notificarDeposito = () => {
-    const mensaje = encodeURIComponent(`Hola, acabo de realizar una transferencia para recargar mi billetera.\n\nAdjunto mi comprobante. (Usuario: ${nombreUsuario})\n\nPor la cantidad de $`);
+    const monto = parseFloat(montoDeposito)
+    if (isNaN(monto) || monto <= 0) return
+    const montoTexto = `$${monto.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN`
+    const mensaje = encodeURIComponent(`Hola, acabo de realizar una transferencia para recargar mi billetera.\n\nAdjunto mi comprobante. (Usuario: ${nombreUsuario})\n\nPor la cantidad de ${montoTexto}`);
     window.open(`https://wa.me/${NUMERO_WHATSAPP}?text=${mensaje}`, '_blank');
+    setMostrarModalDeposito(false)
   }
 
   // 🧠 LÓGICA DE FILTRADO (Aplica sobre lo que ya hemos paginado)
@@ -146,6 +151,8 @@ export default function MiBilletera({ usuarioId }: { usuarioId: string }) {
 
   const montoRetiroNumerico = parseFloat(montoRetiro)
   const montoRetiroValido = !isNaN(montoRetiroNumerico) && montoRetiroNumerico > 0 && montoRetiroNumerico <= saldoTotalPesos
+  const montoDepositoNumerico = parseFloat(montoDeposito)
+  const montoDepositoValido = !isNaN(montoDepositoNumerico) && montoDepositoNumerico > 0
 
   return (
     <div className="w-full max-w-2xl mx-auto mt-2 animate-in fade-in duration-500 mb-20 space-y-4 relative">
@@ -171,7 +178,7 @@ export default function MiBilletera({ usuarioId }: { usuarioId: string }) {
         {/* ACCIONES DE BILLETERA */}
         <div className="relative z-10 flex w-full gap-3 justify-center">
           <button 
-            onClick={() => setMostrarModalDeposito(true)}
+            onClick={() => { setMontoDeposito(''); setMostrarModalDeposito(true) }}
             className="flex-1 max-w-[200px] bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-amber-500/50 text-white py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 shadow-lg"
           >
             <span>📥</span> Depositar
@@ -228,9 +235,25 @@ export default function MiBilletera({ usuarioId }: { usuarioId: string }) {
               </div>
             </div>
 
-            <button 
+            <label className="block text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-1">¿Cuánto transferiste?</label>
+            <div className="relative mb-2">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 font-mono font-bold text-lg">$</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="any"
+                value={montoDeposito}
+                onChange={(e) => setMontoDeposito(e.target.value)}
+                placeholder="0.00"
+                className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl pl-8 pr-4 py-3 text-white font-mono font-bold text-lg focus:outline-none transition-colors"
+              />
+            </div>
+
+            <button
               onClick={notificarDeposito}
-              className="w-full bg-[#25D366] hover:bg-[#20bd5a] text-white py-3.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-[0_0_15px_rgba(37,211,102,0.3)] flex items-center justify-center gap-2"
+              disabled={!montoDepositoValido}
+              className={`w-full mt-3 py-3.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${montoDepositoValido ? 'bg-[#25D366] hover:bg-[#20bd5a] text-white shadow-[0_0_15px_rgba(37,211,102,0.3)]' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
             >
               Ya transferí, Notificar por WhatsApp
             </button>
