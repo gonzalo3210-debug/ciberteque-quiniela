@@ -60,16 +60,16 @@ export default function ModuloFinanzas() {
 
           <div className="bg-slate-900 p-5 rounded-2xl border border-red-900/30 relative overflow-hidden shadow-lg">
             <div className="absolute -right-4 -top-4 opacity-10 text-6xl">🎟️</div>
-            <span className="text-[10px] font-black text-red-400 uppercase tracking-widest block mb-1 relative z-10">Pasivos (Créditos)</span>
-            <span className="text-2xl font-black text-slate-200 relative z-10">${metricas.pasivosCreditos.toLocaleString('es-MX', {minimumFractionDigits: 2})}</span>
-            <p className="text-[8px] text-slate-500 uppercase font-bold mt-2 relative z-10">Deuda virtual en cuentas de usuarios</p>
+            <span className="text-[10px] font-black text-red-400 uppercase tracking-widest block mb-1 relative z-10">Saldo en Billeteras</span>
+            <span className="text-2xl font-black text-slate-200 relative z-10">${metricas.saldoEnBilleteras.toLocaleString('es-MX', {minimumFractionDigits: 2})}</span>
+            <p className="text-[8px] text-slate-500 uppercase font-bold mt-2 relative z-10">Dinero de los jugadores en sus cuentas</p>
           </div>
 
           <div className="bg-slate-900 p-5 rounded-2xl border border-amber-900/40 relative overflow-hidden shadow-lg">
             <div className="absolute -right-4 -top-4 opacity-10 text-6xl">🪙</div>
-            <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest block mb-1 relative z-10">Saldo Retenido ($)</span>
-            <span className="text-2xl font-black text-slate-200 relative z-10">${metricas.saldoRetenido.toLocaleString('es-MX', {minimumFractionDigits: 2})}</span>
-            <p className="text-[8px] text-slate-500 uppercase font-bold mt-2 relative z-10">Cambio guardado en monederos</p>
+            <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest block mb-1 relative z-10">Fiado por Cobrar</span>
+            <span className="text-2xl font-black text-slate-200 relative z-10">${metricas.fiadoPorCobrar.toLocaleString('es-MX', {minimumFractionDigits: 2})}</span>
+            <p className="text-[8px] text-slate-500 uppercase font-bold mt-2 relative z-10">Deuda de jugadores (boletos fiados)</p>
           </div>
         </div>
       )}

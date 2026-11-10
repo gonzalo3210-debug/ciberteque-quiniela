@@ -8,8 +8,8 @@ export function useFinanzas() {
   const [metricas, setMetricas] = useState({
     ingresoBruto: 0,
     utilidadNeta: 0,
-    pasivosCreditos: 0,
-    saldoRetenido: 0,
+    saldoEnBilleteras: 0,
+    fiadoPorCobrar: 0,
     premiosEntregados: 0
   });
 
@@ -23,21 +23,28 @@ export function useFinanzas() {
         { data: usuarios, error: errUsuarios },
         { data: quinielasDB, error: errQuinielas }
       ] = await Promise.all([
-        supabase.from('usuarios').select('creditos_disponibles, saldo_pesos'),
+        supabase.from('usuarios').select('creditos_disponibles, saldo_pesos, deuda_pesos'),
         supabase.from('quinielas').select('id, nombre_jornada, precio_ticket, estado, tipo_premiacion').order('fecha_cierre', { ascending: false })
       ]);
 
       if (errUsuarios) throw new Error(`Error al cargar usuarios: ${errUsuarios.message}`);
       if (errQuinielas) throw new Error(`Error al cargar quinielas: ${errQuinielas.message}`);
 
-      // 2. CÁLCULO DE SALDOS DE USUARIOS (Unificando creditos_disponibles y saldo_pesos)
-      let totalCreditosDisponibles = 0;
-      let totalSaldoPesos = 0;
+      // 2. SALDO EN BILLETERAS Y FIADO POR COBRAR (Desde Usuarios)
+      // El dinero de cada jugador vive en DOS campos (creditos_disponibles, el
+      // heredado, y saldo_pesos): su billetera real es la SUMA de ambos, así que
+      // se reportan unidos como "Saldo en Billeteras".
+      // El fiado real (lo que los jugadores deben por boletos fiados) vive en
+      // deuda_pesos y se reporta aparte como "Fiado por Cobrar".
+      // (Antes se mostraban los dos campos de saldo por separado con rótulos de
+      // deuda — "Pasivos (Créditos)" y "Saldo Retenido" — y el fiado no aparecía.)
+      let totalSaldoEnBilleteras = 0;
+      let totalFiadoPorCobrar = 0;
 
       if (usuarios) {
         usuarios.forEach(u => {
-          totalCreditosDisponibles += (Number(u.creditos_disponibles) || 0);
-          totalSaldoPesos += (Number(u.saldo_pesos) || 0);
+          totalSaldoEnBilleteras += (Number(u.creditos_disponibles) || 0) + (Number(u.saldo_pesos) || 0);
+          totalFiadoPorCobrar += (Number(u.deuda_pesos) || 0);
         });
       }
 
@@ -100,8 +107,8 @@ export function useFinanzas() {
       setMetricas({
         ingresoBruto: ingresoBrutoCalc,
         utilidadNeta: utilidadTotal,
-        pasivosCreditos: totalCreditosDisponibles, 
-        saldoRetenido: totalSaldoPesos,
+        saldoEnBilleteras: totalSaldoEnBilleteras,
+        fiadoPorCobrar: totalFiadoPorCobrar,
         premiosEntregados: premiosPagados
       });
       setJornadas(historialJornadas);
