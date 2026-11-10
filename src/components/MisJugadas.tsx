@@ -3,9 +3,23 @@ import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useSincronizacionRealtime } from '@/hooks/useSincronizacionRealtime'
 
+// ⏱️ Un partido solo se considera "en vivo" durante una ventana razonable
+// tras su inicio (un partido dura ~2 h; 3 h cubre tiempos extra y retrasos).
+// Sin esta ventana, un partido sin resultado capturado quedaba marcado
+// "En Juego" para siempre (eso dejaba quinielas viejas como si siguieran vivas).
+const VENTANA_EN_VIVO_MS = 3 * 60 * 60 * 1000
+
+export function partidoEnVentanaEnVivo(fechaHora: string | null, esFinal: boolean): boolean {
+  if (!fechaHora || esFinal) return false
+  const inicio = new Date(fechaHora).getTime()
+  if (isNaN(inicio)) return false
+  const ahora = new Date().getTime()
+  return ahora >= inicio && (ahora - inicio) <= VENTANA_EN_VIVO_MS
+}
+
 // ⚡ MINI-COMPONENTE ACTUALIZADO: Maneja la cuenta regresiva y la transición automática a 0-0
-const ContadorPartido = ({ fechaHora }: { fechaHora: string | null }) => {
-  const [estado, setEstado] = useState<'espera' | 'vivo'>('espera');
+const ContadorPartido = ({ fechaHora, esFinal }: { fechaHora: string | null, esFinal?: boolean }) => {
+  const [estado, setEstado] = useState<'espera' | 'vivo' | 'sin_resultado'>('espera');
   const [texto, setTexto] = useState('');
 
   useEffect(() => {
@@ -17,7 +31,9 @@ const ContadorPartido = ({ fechaHora }: { fechaHora: string | null }) => {
       const diferencia = objetivo - ahora;
 
       if (diferencia <= 0) {
-        setEstado('vivo');
+        // Ya empezó: "en vivo" solo dentro de la ventana; fuera de ella y sin
+        // resultado capturado se muestra "Sin resultado", nunca un 0-0 eterno.
+        setEstado(partidoEnVentanaEnVivo(fechaHora, !!esFinal) ? 'vivo' : 'sin_resultado');
         return;
       }
 
@@ -40,7 +56,7 @@ const ContadorPartido = ({ fechaHora }: { fechaHora: string | null }) => {
     actualizarReloj();
     const intervalo = setInterval(actualizarReloj, 1000);
     return () => clearInterval(intervalo);
-  }, [fechaHora]);
+  }, [fechaHora, esFinal]);
 
   if (!fechaHora) return <span className="text-slate-600 font-mono text-[10px]">-</span>;
 
@@ -56,6 +72,15 @@ const ContadorPartido = ({ fechaHora }: { fechaHora: string | null }) => {
     );
   }
 
+  if (estado === 'sin_resultado') {
+    return (
+      <div className="flex flex-col items-center gap-0.5 justify-center">
+        <span className="text-[10px] font-black text-slate-500 leading-none">—</span>
+        <span className="text-[7px] font-black uppercase tracking-widest text-slate-500">Sin resultado</span>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col items-center justify-center text-slate-400">
       <span className="text-[10px] mb-0.5">⏳</span>
@@ -66,6 +91,22 @@ const ContadorPartido = ({ fechaHora }: { fechaHora: string | null }) => {
   );
 };
 
+// Tendencia (L/E/V) de un marcador "2-0" o de una letra — misma regla que usa el Ranking oficial
+function getLEV(marcador: string | null): string | null {
+  if (!marcador) return null
+  const limpio = marcador.replace(/\s+/g, '').toUpperCase()
+  if (['L', 'E', 'V'].includes(limpio)) return limpio
+  if (limpio.includes('-')) {
+    const [l, v] = limpio.split('-').map(Number)
+    if (!isNaN(l) && !isNaN(v)) {
+      if (l > v) return 'L'
+      if (l < v) return 'V'
+      return 'E'
+    }
+  }
+  return null
+}
+
 export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
   const [gruposActivos, setGruposActivos] = useState<any[]>([])
   const [gruposCompletados, setGruposCompletados] = useState<any[]>([])
@@ -73,6 +114,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
   const [cargando, setCargando] = useState(true)
   
   const [vistaActual, setVistaActual] = useState<'activas' | 'historial'>('activas')
+  const [busqueda, setBusqueda] = useState('')
 
   const [ticketEditando, setTicketEditando] = useState<any>(null)
   const [nuevasSelecciones, setNuevasSelecciones] = useState<Record<string, string>>({})
@@ -116,6 +158,78 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
         gruposA.sort((a, b) => new Date(a.fecha_cierre).getTime() - new Date(b.fecha_cierre).getTime())
         gruposC.sort((a, b) => new Date(b.fecha_cierre).getTime() - new Date(a.fecha_cierre).getTime())
 
+        // 🏆 Posición del jugador en cada jornada, calculada con EXACTAMENTE las
+        // mismas reglas del Ranking oficial (puntos en vivo desde pronósticos,
+        // desempate por diferencia de goles y empates que comparten posición).
+        try {
+          const todosGrupos = [...gruposA, ...gruposC].filter(g => g.modalidad !== 'sorteo' && g.quiniela_id)
+          if (todosGrupos.length > 0) {
+            const { data: qData } = await supabase
+              .from('quinielas')
+              .select('id, modalidad, goles_totales_real, partidos (id, resultado_real, goles_local, goles_visitante), tickets (id, usuario_id, prediccion_goles_total, pronosticos (eleccion_usuario, partido_id))')
+              .in('id', todosGrupos.map(g => g.quiniela_id))
+
+            if (qData) {
+              qData.forEach((q: any) => {
+                const partidosQ = q.partidos || []
+                const hayResultados = partidosQ.some((p: any) => p.resultado_real !== null || (p.goles_local !== null && p.goles_visitante !== null))
+                if (!hayResultados) return
+
+                const golesReales = q.goles_totales_real !== null ? q.goles_totales_real : -1
+                const ranking = (q.tickets || []).map((ticket: any) => {
+                  let puntos = 0
+                  ;(ticket.pronosticos || []).forEach((pron: any) => {
+                    const partido = partidosQ.find((p: any) => p.id === pron.partido_id)
+                    if (!partido) return
+                    const tieneResultado = partido.resultado_real !== null || (partido.goles_local !== null && partido.goles_visitante !== null)
+                    if (!tieneResultado) return
+                    const pickStr = pron.eleccion_usuario?.replace(/\s+/g, '') || ''
+                    let realStr = ''
+                    if (partido.goles_local !== null && partido.goles_visitante !== null) {
+                      realStr = `${partido.goles_local}-${partido.goles_visitante}`
+                    } else {
+                      realStr = partido.resultado_real?.replace(/\s+/g, '') || ''
+                    }
+                    if (pickStr === realStr) {
+                      puntos += (q.modalidad === 'marcador_exacto' ? 3 : 1)
+                    } else {
+                      const pickLEV = getLEV(pickStr)
+                      const realLEV = getLEV(realStr) || getLEV(partido.resultado_real)
+                      if (pickLEV && realLEV && pickLEV === realLEV) puntos += 1
+                    }
+                  })
+                  return {
+                    id: ticket.id,
+                    puntos,
+                    golesDiff: golesReales !== -1 ? Math.abs((ticket.prediccion_goles_total || 0) - golesReales) : 999
+                  }
+                })
+
+                ranking.sort((a: any, b: any) => (b.puntos - a.puntos) || (a.golesDiff - b.golesDiff))
+                ranking.forEach((item: any, idx: number) => {
+                  if (idx === 0) {
+                    item.posicion = 1
+                  } else {
+                    const anterior = ranking[idx - 1]
+                    item.posicion = (item.puntos === anterior.puntos && item.golesDiff === anterior.golesDiff) ? anterior.posicion : idx + 1
+                  }
+                })
+
+                const grupo = todosGrupos.find(g => g.quiniela_id === q.id)
+                if (grupo) {
+                  const misEntradas = ranking.filter((r: any) => grupo.tickets.some((t: any) => t.id === r.id))
+                  if (misEntradas.length > 0) {
+                    grupo.miPosicion = Math.min(...misEntradas.map((r: any) => r.posicion))
+                    grupo.totalBoletos = ranking.length
+                  }
+                }
+              })
+            }
+          }
+        } catch (errorPos) {
+          console.error("Error calculando posiciones:", errorPos)
+        }
+
         setGruposActivos(gruposA)
         setGruposCompletados(gruposC)
       }
@@ -153,6 +267,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
         });
 
         grupos[qId] = {
+          quiniela_id: ticket.quinielas?.id,
           nombre_jornada: ticket.quinielas?.nombre_jornada,
           modalidad: ticket.quinielas?.modalidad, 
           estado: ticket.quinielas?.estado,
@@ -295,7 +410,9 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
     const yaHayResultados = grupo.partidos.some((p: any) => p.real !== null);
     
     const sePuedeEditar = esActivo && !yaPasoLaHora && !yaHayResultados;
-    const estaEnJuego = esActivo && (yaPasoLaHora || yaHayResultados);
+    // "En Juego" solo si algún partido está realmente en su ventana en vivo
+    // (antes bastaba que pasara la hora de cierre y la etiqueta nunca se iba).
+    const estaEnJuego = esActivo && grupo.partidos.some((p: any) => partidoEnVentanaEnVivo(p.fecha_hora, p.es_final));
     const esSorteo = grupo.modalidad === 'sorteo'; 
 
     return (
@@ -308,6 +425,11 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
               <div className="flex items-center gap-2">
                 <h3 className={`font-black uppercase tracking-widest text-sm md:text-base ${esActivo ? (esSorteo ? 'text-blue-400' : 'text-amber-500') : 'text-slate-300'}`}>{grupo.nombre_jornada}</h3>
                 {estaEnJuego && !esSorteo && <span className="bg-red-600/20 text-red-400 border border-red-900/50 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest animate-pulse">En Juego</span>}
+                {grupo.miPosicion && !esSorteo && (
+                  <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border ${grupo.miPosicion === 1 ? 'bg-amber-600/20 text-amber-400 border-amber-900/50' : 'bg-slate-800 text-slate-300 border-slate-700'}`}>
+                    {grupo.miPosicion === 1 ? '🏆' : (esActivo ? '📍' : '🏁')} {esActivo ? 'Posición actual' : 'Posición'}: {grupo.miPosicion}° de {grupo.totalBoletos}
+                  </span>
+                )}
               </div>
               <p className="text-[10px] text-slate-500 font-bold uppercase mt-0.5">Tienes {grupo.tickets.length} {grupo.tickets.length === 1 ? (esSorteo ? 'Pase' : 'Boleto') : (esSorteo ? 'Pases' : 'Boletos')} aquí</p>
             </div>
@@ -378,7 +500,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
               <tbody className="divide-y divide-slate-800/50">
                 {grupo.partidos.map((p: any, pIdx: number) => {
                   const tieneGoles = p.goles_local !== null && p.goles_visitante !== null;
-                  const enVivo = tieneGoles && !p.es_final;
+                  const enVivo = tieneGoles && partidoEnVentanaEnVivo(p.fecha_hora, p.es_final);
                   
                   return (
                     <tr key={pIdx} className="hover:bg-slate-800/40 transition-colors">
@@ -415,7 +537,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
                           </div>
                         ) : (
                           // ⚡ El componente ahora se encarga de mostrar la fecha o el 0-0 automáticamente
-                          <ContadorPartido fechaHora={p.fecha_hora} />
+                          <ContadorPartido fechaHora={p.fecha_hora} esFinal={p.es_final} />
                         )}
                       </td>
 
@@ -499,9 +621,28 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
     )
   }
 
+  // 🔍 Buscador: filtra las jornadas por nombre, sin importar acentos ni mayúsculas
+  const normalizarTexto = (s: string) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  const coincideBusqueda = (grupo: any) => {
+    const q = normalizarTexto(busqueda.trim())
+    return q === '' || normalizarTexto(grupo.nombre_jornada).includes(q)
+  }
+  const gruposActivosFiltrados = gruposActivos.filter(coincideBusqueda)
+  const gruposCompletadosFiltrados = gruposCompletados.filter(coincideBusqueda)
+
   return (
     <div className="w-full max-w-4xl mt-4 animate-in fade-in duration-500 mb-20 flex flex-col items-center">
-      
+
+      <div className="w-full max-w-sm mb-3">
+        <input
+          type="text"
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+          placeholder="🔍 Buscar jornada… (ej. LMX, Nations)"
+          className="w-full bg-slate-900/80 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-amber-500 transition-all text-center"
+        />
+      </div>
+
       <div className="flex bg-slate-900/80 p-1.5 rounded-xl border border-slate-800 shadow-inner mb-6 w-full max-w-sm">
         <button 
           onClick={() => setVistaActual('activas')} 
@@ -528,21 +669,21 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
       <div className="w-full">
         {vistaActual === 'activas' ? (
           <div>
-            {gruposActivos.length === 0 ? (
-              <p className="text-slate-500 italic text-center py-6 bg-slate-900/30 rounded-xl border border-slate-800 text-xs">No tienes jugadas activas en este momento.</p>
+            {gruposActivosFiltrados.length === 0 ? (
+              <p className="text-slate-500 italic text-center py-6 bg-slate-900/30 rounded-xl border border-slate-800 text-xs">{busqueda.trim() ? `No se encontraron jornadas activas para "${busqueda.trim()}".` : 'No tienes jugadas activas en este momento.'}</p>
             ) : (
               <div className="grid grid-cols-1 gap-2">
-                {gruposActivos.map((grupo, idx) => <TarjetaGrupoAgrupado key={`act-${idx}`} grupo={grupo} esActivo={true} />)}
+                {gruposActivosFiltrados.map((grupo, idx) => <TarjetaGrupoAgrupado key={`act-${idx}`} grupo={grupo} esActivo={true} />)}
               </div>
             )}
           </div>
         ) : (
           <div className="animate-in slide-in-from-right-4 duration-300">
-            {gruposCompletados.length === 0 ? (
-              <p className="text-slate-500 italic text-center py-6 bg-slate-900/30 rounded-xl border border-slate-800 text-xs">Aún no tienes tickets terminados.</p>
+            {gruposCompletadosFiltrados.length === 0 ? (
+              <p className="text-slate-500 italic text-center py-6 bg-slate-900/30 rounded-xl border border-slate-800 text-xs">{busqueda.trim() ? `No se encontraron jornadas terminadas para "${busqueda.trim()}".` : 'Aún no tienes tickets terminados.'}</p>
             ) : (
               <div className="grid grid-cols-1 gap-2">
-                {gruposCompletados.map((grupo, idx) => <TarjetaGrupoAgrupado key={`comp-${idx}`} grupo={grupo} esActivo={false} />)}
+                {gruposCompletadosFiltrados.map((grupo, idx) => <TarjetaGrupoAgrupado key={`comp-${idx}`} grupo={grupo} esActivo={false} />)}
               </div>
             )}
           </div>
