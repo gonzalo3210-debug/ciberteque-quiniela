@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
+import { extraerNacionalMX, soloDigitos, esMismoNumeroMX } from '@/lib/telefono';
 import toast from 'react-hot-toast';
 
 export function useCajero(actualizarSaldoGlobal?: (id: string, nuevo: number) => void) {
@@ -18,44 +19,97 @@ export function useCajero(actualizarSaldoGlobal?: (id: string, nuevo: number) =>
   const [hayMasHistorial, setHayMasHistorial] = useState(false);
   const [offsetHistorial, setOffsetHistorial] = useState(0);
 
+  // Número de la búsqueda vigente: cada búsqueda nueva lo sube y cualquier
+  // respuesta que llegue con un número viejo se descarta (no pisa la nueva).
+  const seqBusquedaRef = useRef(0);
+
   useEffect(() => {
+    if (busqueda.trim().length === 0) {
+      seqBusquedaRef.current++; // invalida respuestas que aún vengan en vuelo
+      setUsuarios([]);
+      setHayMasUsuarios(false);
+      setCargando(false);
+      return;
+    }
+
+    // La búsqueda nueva arranca desde la primera tecla: el resultado
+    // anterior desaparece de inmediato y se muestra el estado de búsqueda.
+    seqBusquedaRef.current++;
+    setUsuarios([]);
+    setHayMasUsuarios(false);
+    setCargando(true);
+
     const timer = setTimeout(() => {
-      if (busqueda.trim().length > 0) {
-        buscarUsuariosDB(busqueda, 0, true);
-      } else {
-        setUsuarios([]);
-        setHayMasUsuarios(false);
-      }
+      buscarUsuariosDB(busqueda, 0, true);
     }, 300);
     return () => clearTimeout(timer);
   }, [busqueda]);
 
   const buscarUsuariosDB = async (termino: string, offset = 0, esNuevaBusqueda = false) => {
+    const miSeq = esNuevaBusqueda ? ++seqBusquedaRef.current : seqBusquedaRef.current;
+
     if (esNuevaBusqueda) {
       setCargando(true);
       setOffsetUsuarios(0);
+      setUsuarios([]); // fuera el resultado anterior mientras se busca
+      setHayMasUsuarios(false);
     }
-    
+
     try {
+      const terminoLimpio = termino.trim();
+      // El teléfono se busca por sus 10 dígitos nacionales: así encuentra la
+      // cuenta escriban el número como lo escriban (10 dígitos, con 52/521,
+      // con espacios), sin importar el formato limpio en que quedó guardado.
+      const nacional = extraerNacionalMX(terminoLimpio);
+      const digitos = soloDigitos(terminoLimpio);
+      const patronTelefono = nacional ?? (digitos.length >= 3 ? digitos : terminoLimpio);
+
       const { data, error } = await supabase
         .from('usuarios')
-        .select('*')
-        .or(`nombre.ilike.%${termino}%,telefono.ilike.%${termino}%`)
+        .select('id, nombre, telefono, creditos_disponibles, saldo_pesos, deuda_pesos')
+        .or(`nombre.ilike.%${terminoLimpio}%,telefono.ilike.%${patronTelefono}%`)
         .order('nombre', { ascending: true })
         .range(offset, offset + LIMIT_USUARIOS - 1);
-        
+
       if (error) throw error;
-      
-      if (esNuevaBusqueda) {
-        setUsuarios(data || []);
-      } else {
-        setUsuarios(prev => [...prev, ...(data || [])]);
+      if (miSeq !== seqBusquedaRef.current) return; // respuesta vieja: se descarta
+
+      let filas = data || [];
+      const paginaLlena = filas.length === LIMIT_USUARIOS;
+
+      // Los registros viejos guardados con espacios o paréntesis no salen con
+      // ilike; se rescatan comparando el número ya normalizado, igual que en
+      // el Login (solo cuando se tecleó un número completo).
+      if (esNuevaBusqueda && nacional) {
+        const { data: indice } = await supabase.from('usuarios').select('id, telefono');
+        if (miSeq !== seqBusquedaRef.current) return;
+
+        const idsExtra = (indice || [])
+          .filter((u: any) => esMismoNumeroMX(u.telefono || '', nacional) && !filas.some((f: any) => f.id === u.id))
+          .map((u: any) => u.id);
+
+        if (idsExtra.length > 0) {
+          const { data: extra } = await supabase
+            .from('usuarios')
+            .select('id, nombre, telefono, creditos_disponibles, saldo_pesos, deuda_pesos')
+            .in('id', idsExtra)
+            .order('nombre', { ascending: true });
+
+          if (miSeq !== seqBusquedaRef.current) return;
+          if (extra) filas = [...filas, ...extra];
+        }
       }
-      setHayMasUsuarios((data?.length || 0) === LIMIT_USUARIOS);
+
+      if (esNuevaBusqueda) {
+        setUsuarios(filas);
+      } else {
+        setUsuarios(prev => [...prev, ...filas]);
+      }
+      setHayMasUsuarios(paginaLlena);
     } catch (e: any) {
-      toast.error("Error al buscar usuarios");
+      if (miSeq === seqBusquedaRef.current) toast.error("Error al buscar usuarios");
     } finally {
-      if (esNuevaBusqueda) setCargando(false);
+      if (esNuevaBusqueda && miSeq === seqBusquedaRef.current) setCargando(false);
     }
   };
 

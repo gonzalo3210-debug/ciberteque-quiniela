@@ -145,6 +145,10 @@ export default function ModuloRecargasCaptura({ vista, actualizarSaldoGlobal }: 
           </div>
           
           <div className="space-y-3">
+            {cajero.cargando && (
+               <p className="text-center text-slate-500 text-xs py-4 bg-slate-900/50 rounded-lg animate-pulse">Buscando clientes…</p>
+            )}
+
             {cajero.usuarios.length === 0 && cajero.busqueda.length > 2 && !cajero.cargando && (
                <p className="text-center text-slate-500 text-xs py-4 bg-slate-900/50 rounded-lg">No se encontraron clientes.</p>
             )}
