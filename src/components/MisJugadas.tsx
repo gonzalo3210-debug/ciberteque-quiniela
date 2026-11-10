@@ -142,7 +142,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
           pronosticos (
             id,
             eleccion_usuario,
-            partidos (id, equipo_local, equipo_visitante, resultado_real, fecha_hora_partido, goles_local, goles_visitante, es_final)
+            partidos (id, equipo_local, equipo_visitante, resultado_real, fecha_hora_partido, goles_local, goles_visitante, es_final, canal)
           )
         `)
         .eq('usuario_id', usuarioId)
@@ -281,6 +281,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
             goles_local: pr.partidos?.goles_local,
             goles_visitante: pr.partidos?.goles_visitante,
             es_final: pr.partidos?.es_final,
+            canal: pr.partidos?.canal,
             fecha_hora: pr.partidos?.fecha_hora_partido 
           })).sort((a: any, b: any) => {
             if (!a.fecha_hora) return 1;
@@ -516,6 +517,11 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
                             <span className="truncate text-left">{p.visitante}</span>
                           </div>
                         </div>
+                        {p.canal && (
+                          <div className="mt-0.5 text-center">
+                            <span className="inline-block bg-blue-950/70 border border-blue-800/70 text-blue-300 font-black text-[7px] uppercase tracking-wider px-1 py-px rounded">📺 {p.canal}</span>
+                          </div>
+                        )}
                       </td>
                       
                       <td className="px-1 py-1.5 text-center border-r border-slate-800 bg-slate-950/40 sticky left-0 z-10">
@@ -729,6 +735,11 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
                         <span className="truncate text-left">{p.visitante}</span>
                       </div>
                     </div>
+                    {p.canal && (
+                      <div className="text-center">
+                        <span className="inline-block bg-blue-950/70 border border-blue-800/70 text-blue-300 font-black text-[8px] uppercase tracking-wider px-1.5 py-0.5 rounded">📺 {p.canal}</span>
+                      </div>
+                    )}
 
                     <div className="flex gap-1.5 w-full mt-1 justify-center">
                       {esExacto ? (

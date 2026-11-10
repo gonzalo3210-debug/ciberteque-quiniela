@@ -129,6 +129,11 @@ export default function PlantillaTicketsBlanco({ quiniela, partidos, obtenerLogo
                               <div className="w-3 h-3 md:w-4 md:h-4 rounded-full border border-black flex items-center justify-center text-[5px]">?</div>
                             )}
                           </div>
+                          {p.canal && (
+                            <div className="text-right mt-0.5">
+                              <span className="text-[7px] font-black uppercase tracking-wider text-blue-900">📺 {p.canal}</span>
+                            </div>
+                          )}
                         </td>
                         
                         {/* ⚡ MEJORA UX: Dos casillas con un guion en medio para llenado manual */}

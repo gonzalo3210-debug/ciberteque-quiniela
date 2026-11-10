@@ -170,6 +170,11 @@ export default function PlantillaReciboJugada({ quiniela, partidos, ticketAImpri
                             <div className="w-6 h-6 rounded-full border border-slate-300 flex items-center justify-center text-[7px] text-slate-400 bg-slate-100 shrink-0">?</div>
                           )}
                         </div>
+                        {partido.canal && (
+                          <div className="text-right pr-1 mt-0.5">
+                            <span className="text-[8px] font-black uppercase tracking-wider text-blue-700">📺 {partido.canal}</span>
+                          </div>
+                        )}
                       </td>
                       
                       {/* RENDERIZADO CONDICIONAL DE CASILLAS */}

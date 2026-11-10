@@ -194,6 +194,9 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
                       ) : (
                         <span className="block text-slate-500 text-[9px] uppercase tracking-widest">Definir</span>
                       )}
+                      {partido.canal && (
+                        <span className="inline-block mt-1.5 bg-blue-950/70 border border-blue-800/70 text-blue-300 font-black text-[8px] uppercase tracking-wider px-1.5 py-0.5 rounded">📺 {partido.canal}</span>
+                      )}
                     </div>
 
                     <div className="flex-1 w-full flex justify-between md:justify-center items-center text-[11px] md:text-xs font-bold uppercase tracking-wide gap-2 md:gap-4">

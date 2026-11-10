@@ -1101,6 +1101,12 @@ export default function Posiciones() {
                                          <span className="text-[9px] font-bold uppercase text-slate-300 w-[35%] truncate text-right">{p.equipo_visitante}</span>
                                        </div>
 
+                                       {p.canal && (
+                                         <div className="mb-1.5">
+                                           <span className="inline-block bg-blue-950/70 border border-blue-800/70 text-blue-300 font-black text-[7px] uppercase tracking-wider px-1 py-px rounded">📺 {p.canal}</span>
+                                         </div>
+                                       )}
+
                                        <div className="flex justify-between items-center mt-auto pt-1.5 border-t border-slate-800/30">
                                          <span className="text-[8px] font-bold uppercase text-slate-500">Elección: <span className="text-white font-black">{pronostico ? pronostico.eleccion_usuario : 'N/A'}</span></span>
                                          
