@@ -538,15 +538,32 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                 <div className="space-y-2 mt-4">
                   {(s.partidos || []).map((partido: any, idx: number) => {
                     const seleccionado = s.resultadosReales[partido.id];
-                    const esFinalActivo = s.esFinalReal[partido.id]; 
+                    const esFinalActivo = s.esFinalReal[partido.id];
+                    // 🕒 Un partido que aún no empieza NO está en vivo (antes todo lo
+                    // no-final decía EN VIVO, aunque faltaran días para jugarse).
+                    const inicioPartido = partido.fecha_hora_partido ? new Date(partido.fecha_hora_partido).getTime() : null;
+                    const aunNoInicia = !esFinalActivo && inicioPartido !== null && !isNaN(inicioPartido) && inicioPartido > Date.now();
+                    // La fecha/hora ahora vive a la izquierda, junto a los equipos y
+                    // con letra legible (antes quedaba apretada bajo el botón).
+                    const fechaTexto = (inicioPartido !== null && !isNaN(inicioPartido))
+                      ? new Date(inicioPartido).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' }) + ' · ' + new Date(inicioPartido).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+                      : null;
                     
                     return (
                       <div key={partido.id} className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 flex flex-col md:flex-row justify-between items-center gap-3">
-                        <div className="flex w-full md:w-auto flex-1 justify-between items-center text-[10px] font-bold uppercase gap-2">
-                          <span className="text-[8px] text-slate-600 font-black w-4 text-center">{idx + 1}</span>
-                          <span className="flex-1 text-right text-slate-300 truncate">{partido.equipo_local}</span>
-                          <span className="w-4 text-center text-slate-600 text-[8px] font-black">VS</span>
-                          <span className="flex-1 text-left text-slate-300 truncate">{partido.equipo_visitante}</span>
+                        <div className="flex flex-col w-full md:w-auto flex-1 gap-1">
+                          <div className="flex w-full justify-between items-center text-[10px] font-bold uppercase gap-2">
+                            {partido.canal && (
+                              <span className="shrink-0 text-[9px] font-black uppercase tracking-wider text-sky-400 bg-sky-950/40 border border-sky-900/50 px-1.5 py-0.5 rounded">📺 {partido.canal}</span>
+                            )}
+                            <span className="text-[8px] text-slate-600 font-black w-4 text-center">{idx + 1}</span>
+                            <span className="flex-1 text-right text-slate-300 truncate">{partido.equipo_local}</span>
+                            <span className="w-4 text-center text-slate-600 text-[8px] font-black">VS</span>
+                            <span className="flex-1 text-left text-slate-300 truncate">{partido.equipo_visitante}</span>
+                          </div>
+                          {fechaTexto && (
+                            <span className="text-[10px] font-bold text-slate-400 pl-1">🗓 {fechaTexto}</span>
+                          )}
                         </div>
                         
                         <div className="flex w-full md:w-auto items-center justify-between gap-3">
@@ -557,12 +574,15 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                               <input type="number" min="0" placeholder="-" value={s.marcadoresReales[partido.id]?.v || ''} onChange={(e) => a.handleMarcadorExacto(partido.id, 'v', e.target.value)} disabled={esHistoricoLiquidado} className="w-8 h-8 bg-slate-900 rounded text-center font-black text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
                             </div>
                             {!esHistoricoLiquidado && (
-                              <button 
-                                onClick={() => a.handleToggleEsFinal(partido.id, !esFinalActivo)}
-                                className={`w-full py-1 text-[8px] font-black uppercase rounded transition-colors ${esFinalActivo ? 'bg-green-600 text-white shadow-inner' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white border border-slate-700'}`}
-                              >
-                                {esFinalActivo ? '✅ FINAL' : '🔴 EN VIVO'}
-                              </button>
+                              <>
+                                <button
+                                  onClick={() => a.handleToggleEsFinal(partido.id, !esFinalActivo)}
+                                  title="Marcar / desmarcar como final"
+                                  className={`w-full py-1 text-[8px] font-black uppercase rounded transition-colors ${esFinalActivo ? 'bg-green-600 text-white shadow-inner' : aunNoInicia ? 'bg-slate-800 text-sky-400 hover:bg-slate-700 hover:text-white border border-slate-700' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white border border-slate-700'}`}
+                                >
+                                  {esFinalActivo ? '✅ FINAL' : aunNoInicia ? '🕒 PROGRAMADO' : '🔴 EN VIVO'}
+                                </button>
+                              </>
                             )}
                           </div>
 
@@ -718,6 +738,8 @@ export default function ModuloArbitro({ actualizarSaldoGlobal }: ModuloArbitroPr
                       </div>
                       
                       <input type="datetime-local" value={p.fecha_hora_partido || ''} onChange={e => ej.actualizarPartidoEditado(index, 'fecha_hora_partido', e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-slate-300 focus:outline-none focus:border-blue-500" />
+
+                      <input type="text" placeholder="📺 Canal o streaming (ej. Canal 5, ESPN, Laytime…)" value={p.canal || ''} onChange={e => ej.actualizarPartidoEditado(index, 'canal', e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-slate-300 placeholder:text-slate-600 focus:outline-none focus:border-blue-500" />
                     </div>
                   ))}
                   

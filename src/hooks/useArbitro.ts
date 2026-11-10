@@ -102,6 +102,18 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
        if (a.fecha_hora_partido && b.fecha_hora_partido) return new Date(a.fecha_hora_partido).getTime() - new Date(b.fecha_hora_partido).getTime();
        return 0;
     });
+
+    // 📺 Canal de transmisión por partido: lectura defensiva — si la columna
+    // `canal` aún no existe en la base, la pantalla funciona igual, sin canales.
+    try {
+      const { data: canalesData } = await supabase.from('partidos').select('id, canal').eq('quiniela_id', qData.id);
+      if (canalesData) {
+        const mapaCanal: Record<string, string | null> = {};
+        canalesData.forEach((c: any) => { mapaCanal[c.id] = c.canal ?? null; });
+        partidosOrdenados.forEach((p: any) => { p.canal = mapaCanal[p.id] ?? null; });
+      }
+    } catch { /* sin columna canal: se ignora */ }
+
     setPartidos(partidosOrdenados);
     setBusquedaJugador('');
     
@@ -651,7 +663,7 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
     setEditPartidos(partidosCopia); 
   };
 
-  const actualizarPartidoEditado = (index: number, campo: 'equipo_local' | 'equipo_visitante' | 'fecha_hora_partido', valor: string) => {
+  const actualizarPartidoEditado = (index: number, campo: 'equipo_local' | 'equipo_visitante' | 'fecha_hora_partido' | 'canal', valor: string) => {
     const nuevos = [...editPartidos];
     nuevos[index][campo] = valor;
     setEditPartidos(nuevos);
@@ -659,7 +671,7 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
 
   const agregarPartidoEditado = () => {
     const ultimaFecha = editPartidos.length > 0 ? editPartidos[editPartidos.length - 1].fecha_hora_partido : '';
-    setEditPartidos([...editPartidos, { id: `nuevo_${Date.now()}`, equipo_local: '', equipo_visitante: '', fecha_hora_partido: ultimaFecha, es_nuevo: true }]);
+    setEditPartidos([...editPartidos, { id: `nuevo_${Date.now()}`, equipo_local: '', equipo_visitante: '', fecha_hora_partido: ultimaFecha, canal: '', es_nuevo: true }]);
   };
 
   const eliminarPartidoEditado = (index: number) => {
@@ -693,20 +705,28 @@ export function useArbitro(actualizarSaldoGlobal?: (id: string, nuevo: number) =
 
       for (const p of editPartidos) {
         const fechaUTC = p.fecha_hora_partido ? new Date(p.fecha_hora_partido).toISOString() : null;
-        
+        let idReal: any = p.id;
+
         if (p.es_nuevo) {
-          await supabase.from('partidos').insert([{
+          const { data: ins } = await supabase.from('partidos').insert([{
              quiniela_id: editandoQuinielaId,
              equipo_local: p.equipo_local,
              equipo_visitante: p.equipo_visitante,
              fecha_hora_partido: fechaUTC
-          }]);
+          }]).select('id');
+          if (ins && ins[0]) idReal = ins[0].id;
         } else {
-          await supabase.from('partidos').update({ 
-             equipo_local: p.equipo_local, 
+          await supabase.from('partidos').update({
+             equipo_local: p.equipo_local,
              equipo_visitante: p.equipo_visitante,
              fecha_hora_partido: fechaUTC
           }).eq('id', p.id);
+        }
+
+        // 📺 Canal: se guarda aparte y sin bloquear el guardado — si la columna
+        // `canal` aún no existe en la base, este paso se ignora en silencio.
+        if (idReal && !String(idReal).startsWith('nuevo_')) {
+          await supabase.from('partidos').update({ canal: (p.canal || '').trim() || null }).eq('id', idReal);
         }
       }
 
