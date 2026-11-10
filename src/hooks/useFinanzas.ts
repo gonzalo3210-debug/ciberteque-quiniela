@@ -18,19 +18,16 @@ export function useFinanzas() {
     setMensajeError(null);
     
     try {
-      // 1. PETICIONES CONCURRENTES (Usuarios y Transacciones para Ingreso Bruto exacto)
+      // 1. PETICIONES CONCURRENTES (Usuarios y Quinielas)
       const [
         { data: usuarios, error: errUsuarios },
-        { data: txData, error: errTx },
         { data: quinielasDB, error: errQuinielas }
       ] = await Promise.all([
         supabase.from('usuarios').select('creditos_disponibles, saldo_pesos'),
-        supabase.from('transacciones_creditos').select('usuario_id, tipo_movimiento, cantidad'),
         supabase.from('quinielas').select('id, nombre_jornada, precio_ticket, estado, tipo_premiacion').order('fecha_cierre', { ascending: false })
       ]);
 
       if (errUsuarios) throw new Error(`Error al cargar usuarios: ${errUsuarios.message}`);
-      if (errTx) throw new Error(`Error al cargar transacciones: ${errTx.message}`);
       if (errQuinielas) throw new Error(`Error al cargar quinielas: ${errQuinielas.message}`);
 
       // 2. CÁLCULO DE SALDOS DE USUARIOS (Unificando creditos_disponibles y saldo_pesos)
@@ -44,32 +41,38 @@ export function useFinanzas() {
         });
       }
 
-      // 3. INGRESO BRUTO (Usando la misma regla contable de la Base de Jugadores: buscando 'recarga')
+      // 3. UTILIDAD, RENDIMIENTO E INGRESO BRUTO (Desde Quinielas)
+      // El Ingreso Bruto ES la suma de lo recaudado por jornada (boletos × precio):
+      // el encabezado y la tabla salen de esta misma cuenta, una sola fuente de verdad.
+      // (Antes el encabezado sumaba las 'recarga' de transacciones_creditos — dinero
+      // cargado a billeteras — y por eso nunca cuadraba con la tabla de jornadas.)
       let ingresoBrutoCalc = 0;
-      if (txData) {
-        ingresoBrutoCalc = txData
-          .filter(tx => String(tx.tipo_movimiento || '').toLowerCase().includes('recarga'))
-          .reduce((acc, curr) => acc + Number(curr.cantidad || 0), 0);
-      }
-
-      // 4. UTILIDAD Y RENDIMIENTO (Desde Quinielas)
       let utilidadTotal = 0;
       let premiosPagados = 0;
       const historialJornadas: any[] = [];
 
       if (quinielasDB) {
-        for (const q of quinielasDB) {
-          const { data: tData, error: errTickets } = await supabase
-            .from('tickets')
-            .select('id')
-            .eq('quiniela_id', q.id);
-          
-          if (errTickets) throw new Error(`Error en los boletos de ${q.nombre_jornada}: ${errTickets.message}`);
+        // Conteos de boletos en paralelo y sin descargar filas (count exacto).
+        // Antes: una consulta secuencial por jornada que traía todos los ids de
+        // tickets solo para contarlos — eso hacía lento el módulo.
+        const conteos = await Promise.all(
+          quinielasDB.map(async (q) => {
+            const { count, error: errTickets } = await supabase
+              .from('tickets')
+              .select('id', { count: 'exact', head: true })
+              .eq('quiniela_id', q.id);
 
-          const boletosVendidos = tData ? tData.length : 0;
+            if (errTickets) throw new Error(`Error en los boletos de ${q.nombre_jornada}: ${errTickets.message}`);
+            return count ?? 0;
+          })
+        );
+
+        quinielasDB.forEach((q, i) => {
+          const boletosVendidos = conteos[i];
           const precio = q.precio_ticket ?? 0;
           const recaudacionPesos = boletosVendidos * precio;
-          
+          ingresoBrutoCalc += recaudacionPesos;
+
           let utilidad = 0;
           let premio = 0;
 
@@ -91,7 +94,7 @@ export function useFinanzas() {
             utilidad: q.estado === 'cerrada' ? utilidad : 0,
             premio: q.estado === 'cerrada' ? premio : 0
           });
-        }
+        });
       }
 
       setMetricas({

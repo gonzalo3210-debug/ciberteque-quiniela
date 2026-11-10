@@ -55,7 +55,7 @@ export default function ModuloFinanzas() {
             <div className="absolute -right-4 -top-4 opacity-10 text-6xl">💵</div>
             <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest block mb-1 relative z-10">Ingreso Bruto (Caja)</span>
             <span className="text-2xl font-black text-slate-200 relative z-10">${metricas.ingresoBruto.toLocaleString('es-MX', {minimumFractionDigits: 2})}</span>
-            <p className="text-[8px] text-slate-500 uppercase font-bold mt-2 relative z-10">Dinero físico total que ha entrado</p>
+            <p className="text-[8px] text-slate-500 uppercase font-bold mt-2 relative z-10">Suma de lo recaudado en todas las jornadas</p>
           </div>
 
           <div className="bg-slate-900 p-5 rounded-2xl border border-red-900/30 relative overflow-hidden shadow-lg">
