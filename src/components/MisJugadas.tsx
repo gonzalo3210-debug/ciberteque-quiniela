@@ -91,6 +91,22 @@ const ContadorPartido = ({ fechaHora, esFinal }: { fechaHora: string | null, esF
   );
 };
 
+// Tendencia (L/E/V) de un marcador "2-0" o de una letra — misma regla que usa el Ranking oficial
+function getLEV(marcador: string | null): string | null {
+  if (!marcador) return null
+  const limpio = marcador.replace(/\s+/g, '').toUpperCase()
+  if (['L', 'E', 'V'].includes(limpio)) return limpio
+  if (limpio.includes('-')) {
+    const [l, v] = limpio.split('-').map(Number)
+    if (!isNaN(l) && !isNaN(v)) {
+      if (l > v) return 'L'
+      if (l < v) return 'V'
+      return 'E'
+    }
+  }
+  return null
+}
+
 export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
   const [gruposActivos, setGruposActivos] = useState<any[]>([])
   const [gruposCompletados, setGruposCompletados] = useState<any[]>([])
@@ -142,6 +158,78 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
         gruposA.sort((a, b) => new Date(a.fecha_cierre).getTime() - new Date(b.fecha_cierre).getTime())
         gruposC.sort((a, b) => new Date(b.fecha_cierre).getTime() - new Date(a.fecha_cierre).getTime())
 
+        // 🏆 Posición del jugador en cada jornada, calculada con EXACTAMENTE las
+        // mismas reglas del Ranking oficial (puntos en vivo desde pronósticos,
+        // desempate por diferencia de goles y empates que comparten posición).
+        try {
+          const todosGrupos = [...gruposA, ...gruposC].filter(g => g.modalidad !== 'sorteo' && g.quiniela_id)
+          if (todosGrupos.length > 0) {
+            const { data: qData } = await supabase
+              .from('quinielas')
+              .select('id, modalidad, goles_totales_real, partidos (id, resultado_real, goles_local, goles_visitante), tickets (id, usuario_id, prediccion_goles_total, pronosticos (eleccion_usuario, partido_id))')
+              .in('id', todosGrupos.map(g => g.quiniela_id))
+
+            if (qData) {
+              qData.forEach((q: any) => {
+                const partidosQ = q.partidos || []
+                const hayResultados = partidosQ.some((p: any) => p.resultado_real !== null || (p.goles_local !== null && p.goles_visitante !== null))
+                if (!hayResultados) return
+
+                const golesReales = q.goles_totales_real !== null ? q.goles_totales_real : -1
+                const ranking = (q.tickets || []).map((ticket: any) => {
+                  let puntos = 0
+                  ;(ticket.pronosticos || []).forEach((pron: any) => {
+                    const partido = partidosQ.find((p: any) => p.id === pron.partido_id)
+                    if (!partido) return
+                    const tieneResultado = partido.resultado_real !== null || (partido.goles_local !== null && partido.goles_visitante !== null)
+                    if (!tieneResultado) return
+                    const pickStr = pron.eleccion_usuario?.replace(/\s+/g, '') || ''
+                    let realStr = ''
+                    if (partido.goles_local !== null && partido.goles_visitante !== null) {
+                      realStr = `${partido.goles_local}-${partido.goles_visitante}`
+                    } else {
+                      realStr = partido.resultado_real?.replace(/\s+/g, '') || ''
+                    }
+                    if (pickStr === realStr) {
+                      puntos += (q.modalidad === 'marcador_exacto' ? 3 : 1)
+                    } else {
+                      const pickLEV = getLEV(pickStr)
+                      const realLEV = getLEV(realStr) || getLEV(partido.resultado_real)
+                      if (pickLEV && realLEV && pickLEV === realLEV) puntos += 1
+                    }
+                  })
+                  return {
+                    id: ticket.id,
+                    puntos,
+                    golesDiff: golesReales !== -1 ? Math.abs((ticket.prediccion_goles_total || 0) - golesReales) : 999
+                  }
+                })
+
+                ranking.sort((a: any, b: any) => (b.puntos - a.puntos) || (a.golesDiff - b.golesDiff))
+                ranking.forEach((item: any, idx: number) => {
+                  if (idx === 0) {
+                    item.posicion = 1
+                  } else {
+                    const anterior = ranking[idx - 1]
+                    item.posicion = (item.puntos === anterior.puntos && item.golesDiff === anterior.golesDiff) ? anterior.posicion : idx + 1
+                  }
+                })
+
+                const grupo = todosGrupos.find(g => g.quiniela_id === q.id)
+                if (grupo) {
+                  const misEntradas = ranking.filter((r: any) => grupo.tickets.some((t: any) => t.id === r.id))
+                  if (misEntradas.length > 0) {
+                    grupo.miPosicion = Math.min(...misEntradas.map((r: any) => r.posicion))
+                    grupo.totalBoletos = ranking.length
+                  }
+                }
+              })
+            }
+          }
+        } catch (errorPos) {
+          console.error("Error calculando posiciones:", errorPos)
+        }
+
         setGruposActivos(gruposA)
         setGruposCompletados(gruposC)
       }
@@ -179,6 +267,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
         });
 
         grupos[qId] = {
+          quiniela_id: ticket.quinielas?.id,
           nombre_jornada: ticket.quinielas?.nombre_jornada,
           modalidad: ticket.quinielas?.modalidad, 
           estado: ticket.quinielas?.estado,
@@ -336,6 +425,11 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
               <div className="flex items-center gap-2">
                 <h3 className={`font-black uppercase tracking-widest text-sm md:text-base ${esActivo ? (esSorteo ? 'text-blue-400' : 'text-amber-500') : 'text-slate-300'}`}>{grupo.nombre_jornada}</h3>
                 {estaEnJuego && !esSorteo && <span className="bg-red-600/20 text-red-400 border border-red-900/50 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest animate-pulse">En Juego</span>}
+                {grupo.miPosicion && !esSorteo && (
+                  <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border ${grupo.miPosicion === 1 ? 'bg-amber-600/20 text-amber-400 border-amber-900/50' : 'bg-slate-800 text-slate-300 border-slate-700'}`}>
+                    {grupo.miPosicion === 1 ? '🏆' : (esActivo ? '📍' : '🏁')} {esActivo ? 'Posición actual' : 'Posición'}: {grupo.miPosicion}° de {grupo.totalBoletos}
+                  </span>
+                )}
               </div>
               <p className="text-[10px] text-slate-500 font-bold uppercase mt-0.5">Tienes {grupo.tickets.length} {grupo.tickets.length === 1 ? (esSorteo ? 'Pase' : 'Boleto') : (esSorteo ? 'Pases' : 'Boletos')} aquí</p>
             </div>
