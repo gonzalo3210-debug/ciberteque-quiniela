@@ -15,6 +15,10 @@
 //   ?fecha=YYYY-MM-DD  SOLO ese día (selector de día de Resultados); filtra
 //                      el MISMO calendario de temporada cacheado, sin
 //                      consultas extra al proveedor.
+//   ?desde=&hasta=     rango EXACTO de días en Mazatlán (YYYY-MM-DD), para
+//                      la pestaña Quiniela: trae los partidos de las ligas
+//                      soportadas entre esas fechas (la jornada dura
+//                      varios días y no cabe en la ventana normal).
 //   ?liga=&equipo=     temporada completa de UN equipo en su liga (vista
 //                      por equipo: últimos resultados y próximos partidos).
 //
@@ -101,8 +105,20 @@ export async function GET(request: Request) {
       fechaParam && /^\d{4}-\d{2}-\d{2}$/.test(fechaParam)
         ? fechaParam
         : null;
-    const desde = fecha ?? sumarDias(hoy, -1);
-    const hasta = fecha ?? sumarDias(hoy, dias);
+
+    // Modo rango exacto (?desde=&hasta=): manda sobre los demás modos de
+    // ventana; si el rango viene invertido o inválido, se ignora.
+    const esYmd = (s: string | null): s is string =>
+      !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const desdeParam = searchParams.get('desde');
+    const hastaParam = searchParams.get('hasta');
+    const rangoValido =
+      esYmd(desdeParam) && esYmd(hastaParam) && desdeParam <= hastaParam;
+
+    const desde = rangoValido
+      ? desdeParam
+      : (fecha ?? sumarDias(hoy, -1));
+    const hasta = rangoValido ? hastaParam : (fecha ?? sumarDias(hoy, dias));
 
     const provider = getSportsProvider();
 

@@ -107,6 +107,14 @@ const normalizar = (s: string): string =>
     .replace(/\s+/g, ' ')
     .trim();
 
+/**
+ * Normalización ÚNICA de nombres para comparar/buscar (minúsculas, sin
+ * acentos, espacios colapsados). La usan el buscador de la sección
+ * Partidos, el emparejamiento jornada↔API y las noticias externas, para
+ * que "Dinamarca", "DINAMARCA" y "Dinamarca " comparen igual.
+ */
+export const normalizarNombreEquipo = normalizar;
+
 const POR_ID = new Map<string, string>();
 const POR_NOMBRE = new Map<string, string>();
 for (const [id, original, es] of ENTRADAS) {
