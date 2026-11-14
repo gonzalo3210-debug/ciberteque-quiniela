@@ -142,12 +142,12 @@ export default function Home() {
       `https://ui-avatars.com/api/?name=${encodeURIComponent(usuarioActivo.nombre || 'User')}&background=1e293b&color=3b82f6&size=100&bold=true`
     : ''
 
-  // Estilo de las pastillas del submenú de la sección Quiniela
-  const clasePill = (activa: boolean, colorActivo: string) =>
-    `shrink-0 px-4 py-2.5 rounded-xl font-black text-[11px] uppercase tracking-widest whitespace-nowrap transition-all ${
-      activa
-        ? `${colorActivo} text-white shadow-lg`
-        : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white'
+  // Estilo de los ítems del submenú de la sección Quiniela: misma franja
+  // lineal de pestañas del panel de administrador (AdminPanel) — ítem
+  // activo como pastilla rellena, inactivos solo texto
+  const claseTab = (activa: boolean, clasesActivo: string) =>
+    `shrink-0 px-4 py-2 rounded-md font-bold text-xs uppercase tracking-wider transition-all whitespace-nowrap ${
+      activa ? clasesActivo : 'text-slate-500 hover:text-slate-300'
     }`
 
   return (
@@ -231,42 +231,42 @@ export default function Home() {
 
           <div className="w-full max-w-5xl flex flex-col items-center animate-in fade-in duration-700 pt-16">
 
-            {/* ── Submenú de la sección QUINIELA ── */}
+            {/* ── Submenú de la sección QUINIELA: franja lineal de pestañas
+                estilo panel de administrador, deslizable si no cabe ── */}
             {seccion === 'quiniela' && (
-              <div className="w-full flex flex-col gap-1.5 mb-8 print:hidden">
-                <div className="flex gap-1.5 overflow-x-auto pb-1">
-                  <button onClick={() => cambiarPestana('jugar')} className={clasePill(pestana === 'jugar', 'bg-blue-600')}>
+              <div className="w-full mb-8 print:hidden">
+                <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800 shadow-inner overflow-x-auto w-full">
+                  <button onClick={() => cambiarPestana('jugar')} className={claseTab(pestana === 'jugar', 'bg-blue-600 text-white shadow-md')}>
                     Jugar
                   </button>
-                  <button onClick={() => cambiarPestana('historial')} className={clasePill(pestana === 'historial', 'bg-blue-600')}>
+                  <button onClick={() => cambiarPestana('historial')} className={claseTab(pestana === 'historial', 'bg-blue-600 text-white shadow-md')}>
                     Mis Jugadas
                   </button>
-                  <button onClick={() => cambiarPestana('ranking')} className={clasePill(pestana === 'ranking', 'bg-amber-600')}>
+                  <button onClick={() => cambiarPestana('ranking')} className={claseTab(pestana === 'ranking', 'bg-amber-500 text-slate-900 shadow-md shadow-amber-500/20')}>
                     🏆 Ranking
                   </button>
-                  <button onClick={() => cambiarPestana('billetera')} className={clasePill(pestana === 'billetera', 'bg-green-600')}>
+                  <button onClick={() => cambiarPestana('billetera')} className={claseTab(pestana === 'billetera', 'bg-green-600 text-white shadow-md')}>
                     💳 Billetera
                   </button>
-                  <button onClick={() => cambiarPestana('perfil')} className={clasePill(pestana === 'perfil', 'bg-purple-600')}>
+                  <button onClick={() => cambiarPestana('perfil')} className={claseTab(pestana === 'perfil', 'bg-purple-600 text-white shadow-md')}>
                     👤 Mi Perfil
                   </button>
-                </div>
 
-                {/* Accesos de administrador (solo rol admin) */}
-                {usuarioActivo.rol === 'admin' && (
-                  <div className="flex gap-1.5 overflow-x-auto pb-1 items-center">
-                    <span className="shrink-0 text-[9px] font-black uppercase tracking-widest text-red-500/70 pr-1">Admin</span>
-                    <button onClick={() => cambiarPestana('admin')} className={clasePill(pestana === 'admin', 'bg-red-600')}>
-                      ⚙️ Panel
-                    </button>
-                    <button onClick={() => cambiarPestana('finanzas')} className={clasePill(pestana === 'finanzas', 'bg-emerald-600')}>
-                      📊 Finanzas
-                    </button>
-                    <button onClick={() => cambiarPestana('usuarios')} className={clasePill(pestana === 'usuarios', 'bg-teal-600')}>
-                      👥 Usuarios
-                    </button>
-                  </div>
-                )}
+                  {/* Accesos de administrador (solo rol admin), en la misma franja */}
+                  {usuarioActivo.rol === 'admin' && (
+                    <>
+                      <button onClick={() => cambiarPestana('admin')} className={claseTab(pestana === 'admin', 'bg-red-600 text-white shadow-md')}>
+                        ⚙️ Panel
+                      </button>
+                      <button onClick={() => cambiarPestana('finanzas')} className={claseTab(pestana === 'finanzas', 'bg-emerald-600 text-white shadow-md')}>
+                        📊 Finanzas
+                      </button>
+                      <button onClick={() => cambiarPestana('usuarios')} className={claseTab(pestana === 'usuarios', 'bg-teal-600 text-white shadow-md')}>
+                        👥 Usuarios
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             )}
 
