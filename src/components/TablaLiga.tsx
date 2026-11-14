@@ -44,7 +44,36 @@ const claseZona = (liga: SupportedLeague, rank: number, total: number) => {
   return 'border-l-4 border-l-transparent'
 }
 
-export default function TablaLiga({ liga }: { liga: SupportedLeague }) {
+interface EquipoResaltado {
+  teamProviderId: string;
+  teamName: string;
+}
+
+/** ¿Este renglón es el equipo resaltado? Por ID; si no, por nombre sin acentos. */
+function esEquipoResaltado(
+  f: StandingRow,
+  eq: EquipoResaltado | undefined
+): boolean {
+  if (!eq) return false;
+  if (f.teamProviderId && f.teamProviderId === eq.teamProviderId) return true;
+  const norm = (s: string) =>
+    s
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .trim();
+  return norm(f.teamName) === norm(eq.teamName);
+}
+
+export default function TablaLiga({
+  liga,
+  equipoResaltado,
+}: {
+  liga: SupportedLeague;
+  /** Equipo a resaltar (vista por equipo): su renglón se pinta y se
+   *  anuncia su lugar arriba de la tabla. */
+  equipoResaltado?: EquipoResaltado;
+}) {
   const [datos, setDatos] = useState<TablaResponse | null>(null)
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -130,6 +159,9 @@ export default function TablaLiga({ liga }: { liga: SupportedLeague }) {
 
   const enVivo = datos.hasLive && datos.liveRows !== null
   const filas = enVivo ? (datos.liveRows as StandingRow[]) : datos.rows
+  const filaResaltada = equipoResaltado
+    ? filas.find((f) => esEquipoResaltado(f, equipoResaltado))
+    : undefined
 
   return (
     <div className="w-full max-w-3xl animate-in fade-in duration-500">
@@ -137,6 +169,12 @@ export default function TablaLiga({ liga }: { liga: SupportedLeague }) {
         <h3 className="text-2xl font-black tracking-tight text-white">
           {liga.name}
         </h3>
+        {filaResaltada && (
+          <p className="inline-block mt-3 px-3.5 py-1.5 rounded-full bg-cyan-600/20 border border-cyan-500/50 text-cyan-300 text-xs font-black uppercase tracking-widest">
+            🏅 {filaResaltada.teamName} · {filaResaltada.rank}.º lugar ·{' '}
+            {filaResaltada.points} pts
+          </p>
+        )}
         <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mt-1">
           Temporada {datos.league.season} ·{' '}
           {enVivo ? 'Tabla en vivo (provisional)' : 'Posiciones oficiales'}
@@ -171,7 +209,11 @@ export default function TablaLiga({ liga }: { liga: SupportedLeague }) {
               {filas.map((f) => (
                 <tr
                   key={f.teamProviderId || f.teamName}
-                  className={`border-b border-slate-800/60 hover:bg-slate-800/40 transition-colors ${claseZona(liga, f.rank, filas.length)}`}
+                  className={`border-b border-slate-800/60 transition-colors ${claseZona(liga, f.rank, filas.length)} ${
+                    esEquipoResaltado(f, equipoResaltado)
+                      ? 'bg-cyan-600/15 hover:bg-cyan-600/25'
+                      : 'hover:bg-slate-800/40'
+                  }`}
                 >
                   <td className="py-2.5 px-3 font-black text-slate-300">{f.rank}</td>
                   <td className="py-2.5 px-2">
@@ -181,7 +223,7 @@ export default function TablaLiga({ liga }: { liga: SupportedLeague }) {
                       ) : (
                         <span className="w-6 h-6 shrink-0 rounded bg-slate-800 inline-block" />
                       )}
-                      <span className="font-bold text-white whitespace-nowrap">{f.teamName}</span>
+                      <span className={`font-bold whitespace-nowrap ${esEquipoResaltado(f, equipoResaltado) ? 'text-cyan-300' : 'text-white'}`}>{f.teamName}</span>
                     </div>
                   </td>
                   <td className="py-2.5 px-2 text-center text-slate-300">{f.played}</td>

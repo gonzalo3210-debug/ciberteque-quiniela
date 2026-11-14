@@ -10,11 +10,21 @@
 // VIVO (una sola consulta v2, cacheada 60 s) para estado/minuto/marcador al
 // momento. La llave del proveedor nunca sale del servidor.
 //
-// Respuesta: { groups: [{ league, fixtures }], window: { desde, hasta } }
+// Modos (parámetros):
+//   ?dias=N            ventana ayer → hoy+N (defecto N=1).
+//   ?fecha=YYYY-MM-DD  SOLO ese día (selector de día de Resultados); filtra
+//                      el MISMO calendario de temporada cacheado, sin
+//                      consultas extra al proveedor.
+//   ?liga=&equipo=     temporada completa de UN equipo en su liga (vista
+//                      por equipo: últimos resultados y próximos partidos).
+//
+// Respuesta ventana/fecha: { groups: [{ league, fixtures }], window }
+// Respuesta equipo:        { league, teamProviderId, fixtures }
 
 import { NextResponse } from 'next/server';
 import {
   getSportsProvider,
+  getSupportedLeague,
   SUPPORTED_LEAGUES,
   type SportsFixture,
   type SupportedLeague,
@@ -83,8 +93,15 @@ export async function GET(request: Request) {
       : 1;
 
     const hoy = hoyEnMazatlan();
-    const desde = sumarDias(hoy, -1);
-    const hasta = sumarDias(hoy, dias);
+
+    // Modo día concreto (?fecha=YYYY-MM-DD): la ventana es ese solo día.
+    const fechaParam = searchParams.get('fecha');
+    const fecha =
+      fechaParam && /^\d{4}-\d{2}-\d{2}$/.test(fechaParam)
+        ? fechaParam
+        : null;
+    const desde = fecha ?? sumarDias(hoy, -1);
+    const hasta = fecha ?? sumarDias(hoy, dias);
 
     const provider = getSportsProvider();
 
@@ -96,6 +113,80 @@ export async function GET(request: Request) {
       console.error('Partidos: no se pudo traer el en vivo:', e);
     }
     const vivoPorId = new Map(enVivo.map((f) => [f.providerId, f]));
+
+    // ----- Modo equipo (?liga=&equipo=): su temporada completa -----
+    const ligaParam = searchParams.get('liga');
+    const equipoParam = searchParams.get('equipo');
+    if (ligaParam && equipoParam) {
+      const liga = getSupportedLeague(ligaParam);
+      if (!liga) {
+        return NextResponse.json(
+          { error: 'Liga no soportada.' },
+          { status: 400 }
+        );
+      }
+      let delEquipo: SportsFixture[] = [];
+      try {
+        const temporada = await provider.getFixtures(liga.providerId, {
+          season: liga.season,
+        });
+        delEquipo = temporada.filter(
+          (f) =>
+            f.homeTeamProviderId === equipoParam ||
+            f.awayTeamProviderId === equipoParam
+        );
+      } catch (e) {
+        console.error(`Partidos: falló el equipo ${equipoParam}:`, e);
+      }
+
+      // Escudos faltantes desde el mapa de equipos de la liga.
+      if (delEquipo.some((f) => !f.homeBadgeUrl || !f.awayBadgeUrl)) {
+        try {
+          const equipos = await provider.getTeams(liga.providerId);
+          const porId = new Map(equipos.map((t) => [t.providerId, t.badgeUrl]));
+          delEquipo = delEquipo.map((f) => ({
+            ...f,
+            homeBadgeUrl:
+              f.homeBadgeUrl ||
+              (f.homeTeamProviderId
+                ? porId.get(f.homeTeamProviderId) ?? null
+                : null),
+            awayBadgeUrl:
+              f.awayBadgeUrl ||
+              (f.awayTeamProviderId
+                ? porId.get(f.awayTeamProviderId) ?? null
+                : null),
+          }));
+        } catch {
+          // Sin mapa de equipos: se muestran sin escudo.
+        }
+      }
+
+      // Mezcla del en vivo para sus partidos en curso.
+      delEquipo = delEquipo.map((f) => {
+        const v = vivoPorId.get(f.providerId);
+        if (!v) return f;
+        return {
+          ...f,
+          status: v.status,
+          statusRaw: v.statusRaw,
+          progress: v.progress,
+          homeScore: v.homeScore,
+          awayScore: v.awayScore,
+        };
+      });
+
+      delEquipo.sort((a, b) =>
+        (a.kickoffUtc || '').localeCompare(b.kickoffUtc || '')
+      );
+
+      return NextResponse.json({
+        league: ligaPublica(liga),
+        teamProviderId: equipoParam,
+        fixtures: delEquipo,
+        fetchedAt: new Date().toISOString(),
+      });
+    }
 
     const groups = await Promise.all(
       SUPPORTED_LEAGUES.map(async (liga) => {

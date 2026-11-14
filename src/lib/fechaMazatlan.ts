@@ -56,3 +56,24 @@ export function horaEnMazatlan(isoUtc: string): string {
 export function fechaCortaEnMazatlan(isoUtc: string): string {
   return fmtFechaCorta.format(new Date(isoUtc));
 }
+
+const fmtFechaLarga = new Intl.DateTimeFormat('es-MX', {
+  timeZone: 'UTC', // la fecha YMD es un día calendario: se formatea tal cual
+  weekday: 'long',
+  day: 'numeric',
+  month: 'long',
+});
+
+/**
+ * Etiqueta larga de un día calendario "YYYY-MM-DD", p. ej.
+ * "miércoles 12 de noviembre" (para el selector de día de Resultados).
+ * Si es hoy/ayer/mañana en Mazatlán, antepone "Hoy · " / "Ayer · " / "Mañana · ".
+ */
+export function etiquetaFechaLarga(ymd: string): string {
+  const larga = fmtFechaLarga.format(new Date(`${ymd}T12:00:00Z`));
+  const hoy = hoyEnMazatlan();
+  if (ymd === hoy) return `Hoy · ${larga}`;
+  if (ymd === sumarDias(hoy, -1)) return `Ayer · ${larga}`;
+  if (ymd === sumarDias(hoy, 1)) return `Mañana · ${larga}`;
+  return larga;
+}

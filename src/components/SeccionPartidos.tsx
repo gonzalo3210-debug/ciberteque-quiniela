@@ -5,18 +5,27 @@
 // tipo 365Scores en vez de un botón por liga. Vistas:
 //   ⭐ Favoritos  — partidos de las ligas/equipos que sigue el usuario
 //                   (estrellas, guardadas en localStorage), en vivo primero.
-//   📋 Resultados — partidos de ayer/hoy/mañana de TODAS las ligas
-//                   soportadas, agrupados por liga.
+//   📋 Resultados — partidos por DÍA (selector ‹ › y botón Hoy, como
+//                   365Scores) de TODAS las ligas soportadas, agrupados
+//                   por liga; tocar el encabezado de una liga filtra a
+//                   solo esa liga.
 //   📊 Posiciones — tabla por liga con selector (componente TablaLiga) y
 //                   tabla EN VIVO al caer gol.
 //   ⭐ Siguiendo  — administrar ligas y equipos seguidos.
+//   👕 Vista por equipo — tocar un equipo en cualquier partido abre SU
+//                   vista con pestañas Partidos (pasados y siguientes) y
+//                   Posiciones (su liga, con su renglón resaltado).
 // Interruptor "En vivo" para ver solo los partidos en curso.
 // Los datos vienen de NUESTRAS rutas de servidor (/api/partidos,
 // /api/equipos-liga); la vista se refresca sola cada 2 minutos y la llave
 // del proveedor nunca llega al navegador.
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import type { SportsFixture, SportsTeam } from '@/lib/sports'
-import { SUPPORTED_LEAGUES, type SupportedLeague } from '@/lib/sports/leagues'
+import {
+  SUPPORTED_LEAGUES,
+  getSupportedLeague,
+  type SupportedLeague,
+} from '@/lib/sports/leagues'
 import TablaLiga from '@/components/TablaLiga'
 import {
   leerFavoritos,
@@ -31,6 +40,7 @@ import {
   sumarDias,
   horaEnMazatlan,
   fechaCortaEnMazatlan,
+  etiquetaFechaLarga,
 } from '@/lib/fechaMazatlan'
 
 type Vista = 'favoritos' | 'resultados' | 'posiciones' | 'siguiendo'
@@ -85,13 +95,62 @@ function Escudo({ url, nombre }: { url: string | null; nombre: string }) {
   )
 }
 
-function FilaPartido({ f }: { f: SportsFixture }) {
+/** Lo que necesita la vista por equipo al tocar un nombre/escudo. */
+type EquipoTocable = (
+  equipo: EquipoSeguido
+) => void
+
+function FilaPartido({
+  f,
+  onVerEquipo,
+}: {
+  f: SportsFixture
+  onVerEquipo?: EquipoTocable
+}) {
   const dia = etiquetaDia(f)
+
+  const ladoEquipo = (
+    nombre: string,
+    escudo: string | null,
+    teamProviderId: string | null,
+    esLocal: boolean
+  ) => {
+    const contenido = (
+      <>
+        {esLocal && (
+          <span className="font-bold text-white text-sm truncate">{nombre}</span>
+        )}
+        <Escudo url={escudo} nombre={nombre} />
+        {!esLocal && (
+          <span className="font-bold text-white text-sm truncate">{nombre}</span>
+        )}
+      </>
+    )
+    if (onVerEquipo && teamProviderId) {
+      return (
+        <button
+          onClick={() =>
+            onVerEquipo({
+              leagueProviderId: f.leagueProviderId,
+              teamProviderId,
+              teamName: nombre,
+              badgeUrl: escudo,
+            })
+          }
+          title={`Ver partidos de ${nombre}`}
+          className="flex items-center gap-2 min-w-0 hover:opacity-75 transition-opacity"
+        >
+          {contenido}
+        </button>
+      )
+    }
+    return <div className="flex items-center gap-2 min-w-0">{contenido}</div>
+  }
+
   return (
     <div className="flex items-center gap-2 px-3 py-2.5 border-b border-slate-800/60 last:border-b-0">
-      <div className="flex-1 flex items-center justify-end gap-2 min-w-0">
-        <span className="font-bold text-white text-sm truncate">{f.homeTeam}</span>
-        <Escudo url={f.homeBadgeUrl} nombre={f.homeTeam} />
+      <div className="flex-1 flex items-center justify-end min-w-0">
+        {ladoEquipo(f.homeTeam, f.homeBadgeUrl, f.homeTeamProviderId, true)}
       </div>
 
       <div className="w-[104px] shrink-0 text-center">
@@ -134,10 +193,32 @@ function FilaPartido({ f }: { f: SportsFixture }) {
         )}
       </div>
 
-      <div className="flex-1 flex items-center gap-2 min-w-0">
-        <Escudo url={f.awayBadgeUrl} nombre={f.awayTeam} />
-        <span className="font-bold text-white text-sm truncate">{f.awayTeam}</span>
+      <div className="flex-1 flex items-center min-w-0">
+        {ladoEquipo(f.awayTeam, f.awayBadgeUrl, f.awayTeamProviderId, false)}
       </div>
+    </div>
+  )
+}
+
+/** Aviso de filtro por liga activo, con botón para ver todas. */
+function FiltroLigaChip({
+  nombre,
+  onQuitar,
+}: {
+  nombre: string
+  onQuitar: () => void
+}) {
+  return (
+    <div className="w-full flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl bg-cyan-600/15 border border-cyan-500/40">
+      <span className="text-cyan-300 font-black text-xs uppercase tracking-widest truncate">
+        Solo: {nombre}
+      </span>
+      <button
+        onClick={onQuitar}
+        className="shrink-0 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-black text-[11px] uppercase tracking-widest transition-all"
+      >
+        Ver todas
+      </button>
     </div>
   )
 }
@@ -146,25 +227,37 @@ function FilaPartido({ f }: { f: SportsFixture }) {
 
 interface ListaProps {
   dias: number
+  /** Día concreto (YYYY-MM-DD) en vez de ventana; null = ventana por `dias`. */
+  fecha?: string | null
   soloFavoritos: boolean
   soloEnVivo: boolean
   favoritos: Favoritos
   onToggleLiga: (leagueProviderId: string) => void
+  onVerEquipo: EquipoTocable
 }
 
 function ListaPartidos({
   dias,
+  fecha = null,
   soloFavoritos,
   soloEnVivo,
   favoritos,
   onToggleLiga,
+  onVerEquipo,
 }: ListaProps) {
   const [grupos, setGrupos] = useState<GrupoPartidos[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [ligaFiltro, setLigaFiltro] = useState<string | null>(null)
 
   const cargar = useCallback(async () => {
     try {
-      const res = await fetch(`/api/partidos?dias=${dias}`)
+      // En vivo manda: ventana corta de hoy sin importar el día elegido.
+      const url = soloEnVivo
+        ? '/api/partidos?dias=1'
+        : fecha
+          ? `/api/partidos?fecha=${fecha}`
+          : `/api/partidos?dias=${dias}`
+      const res = await fetch(url)
       const data = await res.json()
       if (!res.ok) throw new Error(data?.error || 'Error al cargar los partidos')
       setGrupos(data.groups || [])
@@ -179,7 +272,7 @@ function ListaPartidos({
         return prev
       })
     }
-  }, [dias])
+  }, [dias, fecha, soloEnVivo])
 
   useEffect(() => {
     cargar()
@@ -268,6 +361,14 @@ function ListaPartidos({
       }))
   }, [grupos, soloFavoritos, soloEnVivo, favoritos])
 
+  // Filtro por liga (tocar el encabezado de una liga): se queda solo esa.
+  const visiblesFiltrados = ligaFiltro
+    ? visibles.filter((g) => g.ligaId === ligaFiltro)
+    : visibles
+  const nombreLigaFiltro = ligaFiltro
+    ? getSupportedLeague(ligaFiltro)?.name || 'la liga'
+    : null
+
   if (!grupos && !error) {
     return (
       <div className="text-cyan-400 font-bold animate-pulse py-20">
@@ -290,32 +391,75 @@ function ListaPartidos({
     )
   }
 
-  if (visibles.length === 0) {
+  if (visiblesFiltrados.length === 0) {
     return (
-      <div className="w-full max-w-3xl bg-slate-900/80 border border-slate-800 rounded-2xl p-8 text-center">
-        <p className="text-4xl mb-3">{soloEnVivo ? '🔴' : '⚽'}</p>
-        <p className="text-slate-300 font-bold">
-          {soloEnVivo
-            ? 'No hay partidos en vivo ahorita.'
-            : soloFavoritos
-              ? 'No hay partidos próximos de tus ligas y equipos seguidos. Revisa la vista Siguiendo para agregar más.'
-              : 'No hay partidos ayer, hoy ni mañana en las ligas de la sección.'}
-        </p>
+      <div className="w-full max-w-3xl flex flex-col items-center gap-4 animate-in fade-in duration-500">
+        {ligaFiltro && (
+          <FiltroLigaChip
+            nombre={nombreLigaFiltro as string}
+            onQuitar={() => setLigaFiltro(null)}
+          />
+        )}
+        <div className="w-full bg-slate-900/80 border border-slate-800 rounded-2xl p-8 text-center">
+          <p className="text-4xl mb-3">{soloEnVivo ? '🔴' : '⚽'}</p>
+          <p className="text-slate-300 font-bold">
+            {soloEnVivo
+              ? 'No hay partidos en vivo ahorita.'
+              : ligaFiltro
+                ? `No hay partidos de ${nombreLigaFiltro} en este periodo.`
+                : soloFavoritos
+                  ? 'No hay partidos próximos de tus ligas y equipos seguidos. Revisa la vista Siguiendo para agregar más.'
+                  : fecha
+                    ? 'Este día no hay partidos en las ligas de la sección.'
+                    : 'No hay partidos ayer, hoy ni mañana en las ligas de la sección.'}
+          </p>
+        </div>
       </div>
     )
   }
 
   return (
     <div className="w-full max-w-3xl flex flex-col gap-5 animate-in fade-in duration-500">
-      {visibles.map((g) => (
+      {ligaFiltro && (
+        <FiltroLigaChip
+          nombre={nombreLigaFiltro as string}
+          onQuitar={() => setLigaFiltro(null)}
+        />
+      )}
+      {visiblesFiltrados.map((g) => (
         <div
           key={g.clave}
           className="bg-slate-900/80 border border-slate-800/50 rounded-2xl shadow-2xl overflow-hidden"
         >
           <div className="flex items-center justify-between px-4 py-2.5 bg-slate-800/60 border-b border-slate-800">
-            <span className="font-black text-xs uppercase tracking-widest text-white">
-              {g.nombre}
-            </span>
+            {g.ligaId ? (
+              <button
+                onClick={() =>
+                  setLigaFiltro((prev) =>
+                    prev === g.ligaId ? null : (g.ligaId as string)
+                  )
+                }
+                title={
+                  ligaFiltro === g.ligaId
+                    ? 'Quitar el filtro de liga'
+                    : `Ver solo ${g.nombre}`
+                }
+                className={`font-black text-xs uppercase tracking-widest transition-colors ${
+                  ligaFiltro === g.ligaId
+                    ? 'text-cyan-300'
+                    : 'text-white hover:text-cyan-300'
+                }`}
+              >
+                {g.nombre}
+                {ligaFiltro === g.ligaId && (
+                  <span className="normal-case tracking-normal"> · ✕</span>
+                )}
+              </button>
+            ) : (
+              <span className="font-black text-xs uppercase tracking-widest text-white">
+                {g.nombre}
+              </span>
+            )}
             {g.ligaId && (
               <button
                 onClick={() => onToggleLiga(g.ligaId as string)}
@@ -336,7 +480,7 @@ function ListaPartidos({
           </div>
           <div>
             {g.fixtures.map((f) => (
-              <FilaPartido key={f.providerId} f={f} />
+              <FilaPartido key={f.providerId} f={f} onVerEquipo={onVerEquipo} />
             ))}
           </div>
         </div>
@@ -523,6 +667,200 @@ function GestorSiguiendo({
   )
 }
 
+// ---------- Vista por equipo (pestañas Partidos / Posiciones) -----------------
+
+function VistaEquipo({
+  equipo,
+  favoritos,
+  onToggleEquipo,
+  onVolver,
+  onVerEquipo,
+}: {
+  equipo: EquipoSeguido
+  favoritos: Favoritos
+  onToggleEquipo: (equipo: EquipoSeguido) => void
+  onVolver: () => void
+  onVerEquipo: EquipoTocable
+}) {
+  const [pestana, setPestana] = useState<'partidos' | 'posiciones'>('partidos')
+  const [partidos, setPartidos] = useState<SportsFixture[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const liga = getSupportedLeague(equipo.leagueProviderId)
+  const seguido = favoritos.equipos.some(
+    (e) => e.teamProviderId === equipo.teamProviderId
+  )
+
+  const cargar = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/partidos?liga=${equipo.leagueProviderId}&equipo=${equipo.teamProviderId}`
+      )
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error || 'Error al cargar el equipo')
+      setPartidos(data.fixtures || [])
+      setError(null)
+    } catch (e) {
+      setPartidos((prev) => {
+        if (!prev) {
+          setError(
+            e instanceof Error ? e.message : 'No se pudieron cargar sus partidos.'
+          )
+        }
+        return prev
+      })
+    }
+  }, [equipo.leagueProviderId, equipo.teamProviderId])
+
+  useEffect(() => {
+    cargar()
+    const id = setInterval(cargar, REFRESCO_MS)
+    return () => clearInterval(id)
+  }, [cargar])
+
+  const jugados = useMemo(
+    () =>
+      (partidos || [])
+        .filter((f) => f.status === 'finished')
+        .sort((a, b) => (b.kickoffUtc || '').localeCompare(a.kickoffUtc || ''))
+        .slice(0, 10),
+    [partidos]
+  )
+  const siguientes = useMemo(
+    () =>
+      (partidos || [])
+        .filter(
+          (f) =>
+            f.status === 'live' ||
+            f.status === 'scheduled' ||
+            f.status === 'postponed'
+        )
+        .sort((a, b) => {
+          if (a.status === 'live' && b.status !== 'live') return -1
+          if (b.status === 'live' && a.status !== 'live') return 1
+          return (a.kickoffUtc || '').localeCompare(b.kickoffUtc || '')
+        })
+        .slice(0, 10),
+    [partidos]
+  )
+
+  const seccionPartidos = (titulo: string, filas: SportsFixture[], vacio: string) => (
+    <div className="w-full bg-slate-900/80 border border-slate-800/50 rounded-2xl shadow-2xl overflow-hidden">
+      <div className="px-4 py-2.5 bg-slate-800/60 border-b border-slate-800 font-black text-xs uppercase tracking-widest text-white">
+        {titulo}
+      </div>
+      {filas.length === 0 ? (
+        <p className="px-4 py-6 text-center text-slate-400 font-bold text-sm">
+          {vacio}
+        </p>
+      ) : (
+        <div>
+          {filas.map((f) => (
+            <FilaPartido key={f.providerId} f={f} onVerEquipo={onVerEquipo} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+
+  const clasePestana = (p: 'partidos' | 'posiciones') =>
+    `flex-1 py-2.5 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
+      pestana === p
+        ? 'bg-cyan-600 text-white shadow-[0_0_18px_rgba(8,145,178,0.4)]'
+        : 'text-slate-400 hover:text-white'
+    }`
+
+  return (
+    <div className="w-full max-w-3xl flex flex-col items-center gap-4 animate-in fade-in duration-500">
+      <div className="w-full flex items-center gap-3">
+        <button
+          onClick={onVolver}
+          className="shrink-0 px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white font-black text-xs uppercase tracking-widest transition-all"
+        >
+          ← Volver
+        </button>
+        <div className="flex-1 flex items-center gap-2.5 min-w-0">
+          <Escudo url={equipo.badgeUrl} nombre={equipo.teamName} />
+          <div className="min-w-0">
+            <p className="font-black text-white text-base leading-tight truncate">
+              {equipo.teamName}
+            </p>
+            <p className="text-slate-500 text-[11px] font-bold uppercase tracking-widest truncate">
+              {liga?.name || 'Liga'} · Temporada {liga?.season || ''}
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={() => onToggleEquipo(equipo)}
+          title={seguido ? 'Dejar de seguir' : 'Seguir equipo'}
+          className={`shrink-0 px-3.5 py-2 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all ${
+            seguido
+              ? 'bg-amber-500 text-slate-950'
+              : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+          }`}
+        >
+          {seguido ? '★ Siguiendo' : '☆ Seguir'}
+        </button>
+      </div>
+
+      <div className="flex gap-1 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800/50 w-full">
+        <button onClick={() => setPestana('partidos')} className={clasePestana('partidos')}>
+          ⚽ Partidos
+        </button>
+        <button onClick={() => setPestana('posiciones')} className={clasePestana('posiciones')}>
+          📊 Posiciones
+        </button>
+      </div>
+
+      {pestana === 'posiciones' ? (
+        liga ? (
+          <TablaLiga
+            key={liga.providerId}
+            liga={liga}
+            equipoResaltado={{
+              teamProviderId: equipo.teamProviderId,
+              teamName: equipo.teamName,
+            }}
+          />
+        ) : (
+          <div className="w-full bg-slate-900/80 border border-slate-800 rounded-2xl p-8 text-center">
+            <p className="text-slate-300 font-bold">
+              La liga de este equipo no está en la sección.
+            </p>
+          </div>
+        )
+      ) : !partidos && !error ? (
+        <div className="text-cyan-400 font-bold animate-pulse py-20">
+          Cargando partidos de {equipo.teamName}...
+        </div>
+      ) : error && !partidos ? (
+        <div className="w-full bg-slate-900/80 border border-slate-800 rounded-2xl p-8 text-center">
+          <p className="text-red-400 font-bold mb-4">⚠️ {error}</p>
+          <button
+            onClick={cargar}
+            className="px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-black text-xs uppercase tracking-widest transition-all"
+          >
+            Reintentar
+          </button>
+        </div>
+      ) : (
+        <div className="w-full flex flex-col gap-5">
+          {seccionPartidos(
+            'Próximos partidos',
+            siguientes,
+            'No tiene próximos partidos programados esta temporada.'
+          )}
+          {seccionPartidos(
+            'Últimos resultados',
+            jugados,
+            'Todavía no juega partidos esta temporada.'
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ---------- Sección completa --------------------------------------------------
 
 export default function SeccionPartidos() {
@@ -533,6 +871,14 @@ export default function SeccionPartidos() {
   const [ligaPosiciones, setLigaPosiciones] = useState<SupportedLeague>(
     SUPPORTED_LEAGUES[0]
   )
+  const [equipoVista, setEquipoVista] = useState<EquipoSeguido | null>(null)
+  const [fechaResultados, setFechaResultados] = useState<string>(() =>
+    hoyEnMazatlan()
+  )
+
+  const verEquipo = useCallback((equipo: EquipoSeguido) => {
+    setEquipoVista(equipo)
+  }, [])
 
   useEffect(() => {
     setFavoritos(leerFavoritos())
@@ -587,6 +933,17 @@ export default function SeccionPartidos() {
         </p>
       </div>
 
+      {equipoVista ? (
+        <VistaEquipo
+          key={`${equipoVista.leagueProviderId}-${equipoVista.teamProviderId}`}
+          equipo={equipoVista}
+          favoritos={favoritos}
+          onToggleEquipo={toggleEquipo}
+          onVolver={() => setEquipoVista(null)}
+          onVerEquipo={verEquipo}
+        />
+      ) : (
+      <>
       <div className="flex flex-wrap items-center gap-1.5 w-full mb-4">
         <div className="flex flex-wrap gap-1 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800/50 flex-1">
           <button onClick={() => setVista('favoritos')} className={claseSubVista('favoritos')}>
@@ -623,13 +980,53 @@ export default function SeccionPartidos() {
       </div>
 
       {vista === 'resultados' && (
-        <ListaPartidos
-          dias={1}
-          soloFavoritos={false}
-          soloEnVivo={soloEnVivo}
-          favoritos={favoritos}
-          onToggleLiga={toggleLiga}
-        />
+        <div className="w-full flex flex-col items-center gap-4 animate-in fade-in duration-500">
+          {!soloEnVivo && (
+            <div className="w-full max-w-3xl flex items-center gap-2">
+              <button
+                onClick={() =>
+                  setFechaResultados((f) => sumarDias(f, -1))
+                }
+                aria-label="Día anterior"
+                className="w-11 h-11 shrink-0 rounded-xl bg-slate-900 border border-slate-800 text-white text-xl font-black hover:bg-slate-800 transition-all"
+              >
+                ‹
+              </button>
+              <div className="flex-1 text-center px-2 py-2.5 rounded-xl bg-slate-900/80 border border-slate-800/50">
+                <span className="font-black text-white text-sm capitalize">
+                  {etiquetaFechaLarga(fechaResultados)}
+                </span>
+              </div>
+              {fechaResultados !== hoyEnMazatlan() && (
+                <button
+                  onClick={() => setFechaResultados(hoyEnMazatlan())}
+                  className="shrink-0 px-3.5 h-11 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-black text-xs uppercase tracking-widest transition-all"
+                >
+                  Hoy
+                </button>
+              )}
+              <button
+                onClick={() =>
+                  setFechaResultados((f) => sumarDias(f, 1))
+                }
+                aria-label="Día siguiente"
+                className="w-11 h-11 shrink-0 rounded-xl bg-slate-900 border border-slate-800 text-white text-xl font-black hover:bg-slate-800 transition-all"
+              >
+                ›
+              </button>
+            </div>
+          )}
+          <ListaPartidos
+            key={fechaResultados}
+            dias={1}
+            fecha={fechaResultados}
+            soloFavoritos={false}
+            soloEnVivo={soloEnVivo}
+            favoritos={favoritos}
+            onToggleLiga={toggleLiga}
+            onVerEquipo={verEquipo}
+          />
+        </div>
       )}
 
       {vista === 'favoritos' &&
@@ -640,6 +1037,7 @@ export default function SeccionPartidos() {
             soloEnVivo={soloEnVivo}
             favoritos={favoritos}
             onToggleLiga={toggleLiga}
+            onVerEquipo={verEquipo}
           />
         ) : (
           <div className="text-cyan-400 font-bold animate-pulse py-20">
@@ -674,6 +1072,8 @@ export default function SeccionPartidos() {
           onToggleLiga={toggleLiga}
           onToggleEquipo={toggleEquipo}
         />
+      )}
+      </>
       )}
     </div>
   )
