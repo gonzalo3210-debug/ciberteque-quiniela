@@ -14,7 +14,7 @@
 //                  resultados (vía /api/partidos?liga=).
 //   · Posiciones — la TablaLiga completa de la liga.
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
-import type { SportsFixture, SportsTeam } from '@/lib/sports'
+import type { SportsFixture, SportsTeam } from '@/lib/sports/types'
 import type { SupportedLeague } from '@/lib/sports/leagues'
 import TablaLiga from '@/components/TablaLiga'
 import {

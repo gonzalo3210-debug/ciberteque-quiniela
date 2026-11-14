@@ -18,7 +18,7 @@
 // Los favoritos viven en localStorage (lib/favoritos.ts): este
 // componente trae su propio estado y lo lee al montarse.
 import React, { useState, useEffect, useCallback } from 'react'
-import type { SportsTeam } from '@/lib/sports'
+import type { SportsTeam } from '@/lib/sports/types'
 import { SUPPORTED_LEAGUES } from '@/lib/sports/leagues'
 import { LogoLiga, Escudo } from '@/components/partidosUI'
 import { nombreEquipoES } from '@/lib/sports/nombresES'

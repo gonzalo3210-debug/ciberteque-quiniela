@@ -38,7 +38,7 @@ import type {
   SportsFixture,
   SportsTeamDetail,
   StandingRow,
-} from '@/lib/sports'
+} from '@/lib/sports/types'
 import {
   SUPPORTED_LEAGUES,
   getSupportedLeague,

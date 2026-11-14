@@ -12,7 +12,7 @@
 // equipo y se guarda en favoritos sigue siendo el original del
 // proveedor, para no tocar el matching interno.
 import React from 'react'
-import type { SportsFixture } from '@/lib/sports'
+import type { SportsFixture } from '@/lib/sports/types'
 import { nombreEquipoES } from '@/lib/sports/nombresES'
 import type { EquipoSeguido } from '@/lib/favoritos'
 import {

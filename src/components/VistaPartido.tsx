@@ -23,8 +23,8 @@
 // últimos partidos; lo que no exista se omite. Nunca truena.
 
 import { useEffect, useMemo, useState } from 'react'
-import type { SportsFixture } from '@/lib/sports'
-import { getSupportedLeague } from '@/lib/sports'
+import type { SportsFixture } from '@/lib/sports/types'
+import { getSupportedLeague } from '@/lib/sports/leagues'
 import { nombreEquipoES } from '@/lib/sports/nombresES'
 import { esMismoEquipo } from '@/lib/emparejar'
 import {

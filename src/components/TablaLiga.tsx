@@ -16,7 +16,7 @@
 // app" para distinguirla de la oficial. El aviso clásico queda solo para
 // ligas sin tabla ni cálculo posible.
 import React, { useState, useEffect, useCallback } from 'react'
-import type { StandingRow } from '@/lib/sports'
+import type { StandingRow } from '@/lib/sports/types'
 import type { SupportedLeague } from '@/lib/sports/leagues'
 import { nombreEquipoES } from '@/lib/sports/nombresES'
 
