@@ -249,12 +249,9 @@ export default function Home() {
                   <button onClick={() => cambiarPestana('noticias')} className={claseTab(pestana === 'noticias', 'bg-sky-600 text-white shadow-md')}>
                     📰 Noticias
                   </button>
-                  <button onClick={() => cambiarPestana('billetera')} className={claseTab(pestana === 'billetera', 'bg-green-600 text-white shadow-md')}>
-                    💳 Billetera
-                  </button>
-                  <button onClick={() => cambiarPestana('perfil')} className={claseTab(pestana === 'perfil', 'bg-purple-600 text-white shadow-md')}>
-                    👤 Mi Perfil
-                  </button>
+                  {/* Billetera y Mi Perfil YA NO van en la franja (corrección
+                      de Gonzalo, 2026-11-14): viven en la barra superior —
+                      el chip de saldo y el submenú del botón de perfil. */}
 
                   {/* Accesos de administrador (solo rol admin), en la misma franja */}
                   {usuarioActivo.rol === 'admin' && (
