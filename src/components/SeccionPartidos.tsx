@@ -1588,15 +1588,6 @@ export default function SeccionPartidos() {
 
   return (
     <div className="w-full max-w-3xl flex flex-col items-center animate-in fade-in duration-500">
-      <div className="text-center mb-5">
-        <h2 className="text-3xl font-black tracking-tight text-white">
-          ⚽ PARTIDOS
-        </h2>
-        <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mt-1">
-          Ligas del mundo · En vivo y posiciones
-        </p>
-      </div>
-
       {equipoVista ? (
         <VistaEquipo
           key={`${equipoVista.leagueProviderId}-${equipoVista.teamProviderId}`}

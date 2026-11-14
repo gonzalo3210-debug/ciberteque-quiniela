@@ -370,7 +370,7 @@ export default function Home() {
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                ⚽ Partidos
+                ⚽ Resultados
               </button>
               <button
                 onClick={() => cambiarPestana('siguiendo')}
