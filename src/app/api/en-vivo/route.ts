@@ -15,12 +15,51 @@
 // La CLASIFICACIÓN por prioridad (quiniela → favoritos → resto) la
 // hace el cliente, que es quien conoce la jornada y los favoritos del
 // dispositivo. La llave del proveedor nunca sale del servidor.
+//
+// SOLO EN JUEGO (corrección de Gonzalo 2026-11-14): el livescore del
+// proveedor trae también los recién terminados y la vista Live los
+// listaba como "EN VIVO AHORA" ya marcados FINAL. Aquí se filtran:
+// quedan solo los estados en curso; fuera FT, AET, AWD, WO, PST,
+// CANC, ABD, PP y NS.
 
 import { NextResponse } from 'next/server';
 import { getSportsProvider, getSupportedLeague } from '@/lib/sports';
+import type { SportsFixture } from '@/lib/sports';
 import { claveParFixture, claveParNombres } from '@/lib/emparejar';
 
 export const dynamic = 'force-dynamic';
+
+/** Estados crudos que NUNCA son "en juego" (terminado/pospuesto/no iniciado). */
+const NO_EN_JUEGO = new Set([
+  'FT',
+  'AET',
+  'AWD',
+  'WO',
+  'PST',
+  'CANC',
+  'ABD',
+  'PP',
+  'NS',
+  'TBD',
+  'MATCH FINISHED',
+]);
+
+/** Estados crudos inequívocamente en curso. */
+const EN_CURSO = new Set(['1H', 'HT', '2H', 'ET', 'BT', 'LIVE']);
+
+/**
+ * ¿El partido está EN JUEGO ahora? Códigos en curso o, en su defecto,
+ * el estado neutro 'live' CON minuto en vivo. 'PEN' solo cuenta si
+ * trae progreso (la tanda en curso); un 'PEN' sin minuto ya se cerró
+ * (el adaptador lo mapea como terminado).
+ */
+function estaEnJuego(f: SportsFixture): boolean {
+  const raw = (f.statusRaw || '').trim().toUpperCase();
+  if (NO_EN_JUEGO.has(raw)) return false;
+  if (EN_CURSO.has(raw)) return true;
+  if (raw === 'PEN') return !!f.progress;
+  return f.status === 'live' && !!f.progress;
+}
 
 /** Pares "Local|Visitante" separados por ";" → claves comparables. */
 function clavesDePares(paresParam: string | null): Set<string> {
@@ -43,8 +82,9 @@ export async function GET(request: Request) {
     const fixtures = todos
       .filter(
         (f) =>
-          getSupportedLeague(f.leagueProviderId) ||
-          paresQuiniela.has(claveParFixture(f))
+          estaEnJuego(f) &&
+          (getSupportedLeague(f.leagueProviderId) ||
+            paresQuiniela.has(claveParFixture(f)))
       )
       .sort((a, b) => (a.kickoffUtc || '').localeCompare(b.kickoffUtc || ''));
 
