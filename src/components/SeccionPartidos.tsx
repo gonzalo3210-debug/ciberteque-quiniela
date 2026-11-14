@@ -47,6 +47,7 @@ import {
 import TablaLiga, {
   TablaCard,
   esEquipoResaltado,
+  marcadoresDesdeFixtures,
 } from '@/components/TablaLiga'
 import PaginaLiga from '@/components/PaginaLiga'
 import VistaPartido, {
@@ -567,20 +568,27 @@ function VistaEquipo({
   }, [equipo.teamProviderId])
 
   // Partidos de la competición elegida, para calcular Local/Visitante.
+  // Se refrescan con la MISMA cadencia de la vista (2 min) para que la
+  // tabla de ámbito también se mueva con los marcadores en vivo.
   useEffect(() => {
     if (pestana !== 'posiciones' || ambito === 'completa') return
     let activo = true
     setFixturesAmbito(null)
-    fetch(`/api/partidos?liga=${compSel}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (activo) setFixturesAmbito(d.fixtures || [])
-      })
-      .catch(() => {
-        if (activo) setFixturesAmbito([])
-      })
+    const cargarAmbito = () => {
+      fetch(`/api/partidos?liga=${compSel}`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (activo) setFixturesAmbito(d.fixtures || [])
+        })
+        .catch(() => {
+          if (activo) setFixturesAmbito((prev) => prev ?? [])
+        })
+    }
+    cargarAmbito()
+    const id = setInterval(cargarAmbito, REFRESCO_MS)
     return () => {
       activo = false
+      clearInterval(id)
     }
   }, [pestana, ambito, compSel])
 
@@ -614,8 +622,23 @@ function VistaEquipo({
   const ligaComp = getSupportedLeague(compSel) ?? liga
   const filasAmbito: StandingRow[] | null = useMemo(() => {
     if (ambito === 'completa' || !fixturesAmbito) return null
-    return computeStandingsAmbito(fixturesAmbito, ambito)
+    // Tabla que se mueve en vivo (Bloque 4): los partidos en curso de
+    // la liga cuentan con su marcador actual, como si fueran finales
+    // provisionales; al terminar, la ruta ya los trae 'finished'.
+    const conEnVivo = fixturesAmbito.map((f) =>
+      f.status === 'live' && f.homeScore !== null && f.awayScore !== null
+        ? { ...f, status: 'finished' as const }
+        : f
+    )
+    return computeStandingsAmbito(conEnVivo, ambito)
   }, [ambito, fixturesAmbito])
+  const marcadoresAmbito = useMemo(
+    () =>
+      ambito !== 'completa' && fixturesAmbito
+        ? marcadoresDesdeFixtures(fixturesAmbito)
+        : [],
+    [ambito, fixturesAmbito]
+  )
   const resaltado = {
     teamProviderId: equipo.teamProviderId,
     teamName: equipo.teamName,
@@ -776,10 +799,13 @@ function VistaEquipo({
                 filas={filasAmbito}
                 equipoResaltado={resaltado}
                 onVerEquipo={onVerEquipo}
+                marcadoresEnVivo={marcadoresAmbito}
               />
               <p className="mt-3 text-center text-slate-500 text-xs font-bold">
                 🧮 Tabla calculada por la app desde los resultados de la
                 temporada.
+                {marcadoresAmbito.length > 0 &&
+                  ' Incluye los marcadores en vivo (provisional).'}
               </p>
             </div>
           ) : null}

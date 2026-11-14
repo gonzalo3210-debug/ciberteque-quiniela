@@ -16,7 +16,7 @@
 // app" para distinguirla de la oficial. El aviso clásico queda solo para
 // ligas sin tabla ni cálculo posible.
 import React, { useState, useEffect, useCallback } from 'react'
-import type { StandingRow } from '@/lib/sports/types'
+import type { SportsFixture, StandingRow } from '@/lib/sports/types'
 import type { SupportedLeague } from '@/lib/sports/leagues'
 import { nombreEquipoES } from '@/lib/sports/nombresES'
 import type { EquipoTocable } from './partidosUI'
@@ -24,6 +24,44 @@ import type { EquipoTocable } from './partidosUI'
 interface GrupoTabla {
   label: string | null
   rows: StandingRow[]
+}
+
+/**
+ * Un partido EN CURSO de la liga, para el distintivo que la tabla
+ * pinta junto a cada equipo que está jugando (Bloque 4, 2026-11-14).
+ * Es la forma que devuelve /api/tabla-liga en `liveMatches`.
+ */
+export interface MarcadorEnVivo {
+  homeTeam: string
+  awayTeam: string
+  homeTeamProviderId: string | null
+  awayTeamProviderId: string | null
+  homeScore: number
+  awayScore: number
+  progress: string | null
+  statusRaw: string | null
+}
+
+/** Marcadores en vivo desde fixtures ya cargados por la vista (la
+ *  página del equipo los trae de /api/partidos, que ya mezcla el
+ *  livescore en sus partidos). */
+export function marcadoresDesdeFixtures(
+  fixtures: SportsFixture[]
+): MarcadorEnVivo[] {
+  return fixtures
+    .filter(
+      (f) => f.status === 'live' && f.homeScore !== null && f.awayScore !== null
+    )
+    .map((f) => ({
+      homeTeam: f.homeTeam,
+      awayTeam: f.awayTeam,
+      homeTeamProviderId: f.homeTeamProviderId,
+      awayTeamProviderId: f.awayTeamProviderId,
+      homeScore: f.homeScore as number,
+      awayScore: f.awayScore as number,
+      progress: f.progress,
+      statusRaw: f.statusRaw,
+    }))
 }
 
 interface TablaResponse {
@@ -35,6 +73,7 @@ interface TablaResponse {
   rows: StandingRow[]
   liveRows: StandingRow[] | null
   hasLive: boolean
+  liveMatches?: MarcadorEnVivo[] | null
 }
 
 const REFRESCO_MS = 120_000 // 2 minutos
@@ -109,6 +148,7 @@ export function TablaCard({
   equipoResaltado,
   equiposResaltados,
   onVerEquipo,
+  marcadoresEnVivo,
 }: {
   liga: SupportedLeague
   filas: StandingRow[]
@@ -120,10 +160,44 @@ export function TablaCard({
    *  cualquier equipo, no solo a los resaltados). Sin handler o sin
    *  ID de proveedor en la fila, la celda queda como texto plano. */
   onVerEquipo?: EquipoTocable
+  /** Partidos en curso de la liga: junto a cada equipo que esté
+   *  jugando se pinta su marcador en vivo (desde su óptica) y el
+   *  minuto, con punto rojo pulsante. */
+  marcadoresEnVivo?: MarcadorEnVivo[]
 }) {
   const resaltados = listaResaltados(equipoResaltado, equiposResaltados)
   const esRes = (f: StandingRow) =>
     resaltados.some((eq) => esEquipoResaltado(f, eq))
+  /** Marcador en vivo DEL renglón (desde la óptica de su equipo). */
+  const marcadorDe = (f: StandingRow): { texto: string; titulo: string } | null => {
+    if (!marcadoresEnVivo || marcadoresEnVivo.length === 0) return null
+    for (const m of marcadoresEnVivo) {
+      const comoLocal: EquipoResaltado = {
+        teamProviderId: m.homeTeamProviderId || '',
+        teamName: m.homeTeam,
+      }
+      const comoVisita: EquipoResaltado = {
+        teamProviderId: m.awayTeamProviderId || '',
+        teamName: m.awayTeam,
+      }
+      const esLocal = esEquipoResaltado(f, comoLocal)
+      const esVisita = !esLocal && esEquipoResaltado(f, comoVisita)
+      if (!esLocal && !esVisita) continue
+      const propios = esLocal ? m.homeScore : m.awayScore
+      const rival = esLocal ? m.awayScore : m.homeScore
+      const minuto =
+        m.statusRaw === 'HT'
+          ? 'MT'
+          : m.progress
+            ? `${m.progress}'`
+            : 'EN VIVO'
+      return {
+        texto: `${propios}-${rival} · ${minuto}`,
+        titulo: `En vivo: ${nombreEquipoES(m.homeTeam, m.homeTeamProviderId)} ${m.homeScore}-${m.awayScore} ${nombreEquipoES(m.awayTeam, m.awayTeamProviderId)}`,
+      }
+    }
+    return null
+  }
   const thNum =
     'py-2 px-1 sm:py-3 sm:px-2 text-center font-black whitespace-nowrap'
   const tdNum =
@@ -158,36 +232,48 @@ export function TablaCard({
             >
               <td className="py-2 pl-2 pr-1 sm:py-2.5 sm:px-3 font-black text-slate-300">{f.rank}</td>
               <td className="py-2 px-1.5 sm:py-2.5 sm:px-2 max-w-0">
-                {onVerEquipo && f.teamProviderId ? (
-                  <button
-                    onClick={() =>
-                      onVerEquipo({
-                        leagueProviderId: liga.providerId,
-                        teamProviderId: f.teamProviderId as string,
-                        teamName: f.teamName,
-                        badgeUrl: f.badgeUrl,
-                      })
-                    }
-                    title={`Ver ${nombreEquipoES(f.teamName, f.teamProviderId)}`}
-                    className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 max-w-full text-left hover:opacity-75 transition-opacity"
-                  >
-                    {f.badgeUrl ? (
-                      <img src={f.badgeUrl} alt={nombreEquipoES(f.teamName, f.teamProviderId)} className="w-5 h-5 sm:w-6 sm:h-6 object-contain shrink-0" loading="lazy" />
-                    ) : (
-                      <span className="w-5 h-5 sm:w-6 sm:h-6 shrink-0 rounded bg-slate-800 inline-block" />
-                    )}
-                    <span className={`font-bold truncate ${esRes(f) ? 'text-cyan-300' : 'text-white'}`}>{nombreEquipoES(f.teamName, f.teamProviderId)}</span>
-                  </button>
-                ) : (
-                  <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
-                    {f.badgeUrl ? (
-                      <img src={f.badgeUrl} alt={nombreEquipoES(f.teamName, f.teamProviderId)} className="w-5 h-5 sm:w-6 sm:h-6 object-contain shrink-0" loading="lazy" />
-                    ) : (
-                      <span className="w-5 h-5 sm:w-6 sm:h-6 shrink-0 rounded bg-slate-800 inline-block" />
-                    )}
-                    <span className={`font-bold truncate ${esRes(f) ? 'text-cyan-300' : 'text-white'}`}>{nombreEquipoES(f.teamName, f.teamProviderId)}</span>
-                  </div>
-                )}
+                {(() => {
+                  const marc = marcadorDe(f)
+                  const contenido = (
+                    <>
+                      {f.badgeUrl ? (
+                        <img src={f.badgeUrl} alt={nombreEquipoES(f.teamName, f.teamProviderId)} className="w-5 h-5 sm:w-6 sm:h-6 object-contain shrink-0" loading="lazy" />
+                      ) : (
+                        <span className="w-5 h-5 sm:w-6 sm:h-6 shrink-0 rounded bg-slate-800 inline-block" />
+                      )}
+                      <span className={`font-bold truncate ${esRes(f) ? 'text-cyan-300' : 'text-white'}`}>{nombreEquipoES(f.teamName, f.teamProviderId)}</span>
+                      {marc && (
+                        <span
+                          title={marc.titulo}
+                          className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-red-600/20 border border-red-500/50 text-red-400 text-[10px] font-black whitespace-nowrap"
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                          {marc.texto}
+                        </span>
+                      )}
+                    </>
+                  )
+                  return onVerEquipo && f.teamProviderId ? (
+                    <button
+                      onClick={() =>
+                        onVerEquipo({
+                          leagueProviderId: liga.providerId,
+                          teamProviderId: f.teamProviderId as string,
+                          teamName: f.teamName,
+                          badgeUrl: f.badgeUrl,
+                        })
+                      }
+                      title={`Ver ${nombreEquipoES(f.teamName, f.teamProviderId)}`}
+                      className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 max-w-full text-left hover:opacity-75 transition-opacity"
+                    >
+                      {contenido}
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
+                      {contenido}
+                    </div>
+                  )
+                })()}
               </td>
               <td className={`${tdNum} text-slate-300`}>{f.played}</td>
               <td className={`${tdNum} text-slate-300`}>{f.won}</td>
@@ -424,6 +510,7 @@ export default function TablaLiga({
                 equipoResaltado={equipoResaltado}
                 equiposResaltados={equiposResaltados}
                 onVerEquipo={onVerEquipo}
+                marcadoresEnVivo={datos.liveMatches ?? undefined}
               />
             </div>
           ))}
@@ -482,7 +569,7 @@ export default function TablaLiga({
         )}
       </div>
 
-      <TablaCard liga={liga} filas={filas} equipoResaltado={equipoResaltado} equiposResaltados={equiposResaltados} onVerEquipo={onVerEquipo} />
+      <TablaCard liga={liga} filas={filas} equipoResaltado={equipoResaltado} equiposResaltados={equiposResaltados} onVerEquipo={onVerEquipo} marcadoresEnVivo={datos.liveMatches ?? undefined} />
 
       {filasMax && alVerCompleta && filasCompletas.length > filasMax && (
         <BotonVerCompleta onClick={alVerCompleta} />

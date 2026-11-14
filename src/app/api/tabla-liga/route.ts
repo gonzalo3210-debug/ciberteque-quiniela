@@ -8,7 +8,9 @@
 // Pide la tabla al proveedor vía el adaptador único (cacheada 10 min) y, si
 // la liga tiene partidos EN CURSO, devuelve también la tabla recalculada
 // AL CAER GOL con computeLiveStandings (regla de Gonzalo 2026-11-13) en
-// `liveRows`, para que la vista la marque "EN VIVO".
+// `liveRows`, para que la vista la marque "EN VIVO", y los marcadores en
+// curso en `liveMatches`, para pintar el distintivo junto a cada equipo
+// que está jugando (Bloque 4, 2026-11-14).
 //
 // Champions League (4480): TheSportsDB no trae su tabla, así que el
 // adaptador la pide a la fuente secundaria football-data.org y llega
@@ -49,25 +51,53 @@ interface LigaJson {
   badgeUrl: string | null;
 }
 
-/** Resultados EN VIVO de una liga, en la forma que pide el recálculo. */
-async function resultadosEnVivo(ligaId: string): Promise<LiveResult[]> {
+interface EnVivoLiga {
+  /** En la forma que pide el recálculo de la tabla. */
+  resultados: LiveResult[];
+  /** Marcadores tal cual, para que la vista pinte el distintivo en
+   *  vivo junto a cada equipo que está jugando (Bloque 4, 2026-11-14). */
+  marcadores: {
+    homeTeam: string;
+    awayTeam: string;
+    homeTeamProviderId: string | null;
+    awayTeamProviderId: string | null;
+    homeScore: number;
+    awayScore: number;
+    progress: string | null;
+    statusRaw: string | null;
+  }[];
+}
+
+/** Partidos EN VIVO de una liga (una sola llamada al livescore). */
+async function enVivoDeLiga(ligaId: string): Promise<EnVivoLiga> {
   const enVivo = await getSportsProvider().getLiveScores();
-  return enVivo
-    .filter(
-      (f) =>
-        f.leagueProviderId === ligaId &&
-        f.status === 'live' &&
-        f.homeScore !== null &&
-        f.awayScore !== null
-    )
-    .map((f) => ({
+  const deLaLiga = enVivo.filter(
+    (f) =>
+      f.leagueProviderId === ligaId &&
+      f.status === 'live' &&
+      f.homeScore !== null &&
+      f.awayScore !== null
+  );
+  return {
+    resultados: deLaLiga.map((f) => ({
       homeTeam: f.homeTeam,
       awayTeam: f.awayTeam,
       homeTeamProviderId: f.homeTeamProviderId,
       awayTeamProviderId: f.awayTeamProviderId,
       homeScore: f.homeScore as number,
       awayScore: f.awayScore as number,
-    }));
+    })),
+    marcadores: deLaLiga.map((f) => ({
+      homeTeam: f.homeTeam,
+      awayTeam: f.awayTeam,
+      homeTeamProviderId: f.homeTeamProviderId,
+      awayTeamProviderId: f.awayTeamProviderId,
+      homeScore: f.homeScore as number,
+      awayScore: f.awayScore as number,
+      progress: f.progress,
+      statusRaw: f.statusRaw,
+    })),
+  };
 }
 
 /**
@@ -93,8 +123,11 @@ async function respuestaTablaCalculada(
     // Tabla EN VIVO al caer gol, por grupo: computeLiveStandings ignora
     // los resultados con equipos ajenos a cada tabla.
     let liveGroups: ComputedTable[] | null = null;
+    let marcadores: EnVivoLiga['marcadores'] = [];
     try {
-      const resultados = await resultadosEnVivo(liga.providerId);
+      const vivo = await enVivoDeLiga(liga.providerId);
+      marcadores = vivo.marcadores;
+      const resultados = vivo.resultados;
       if (resultados.length > 0 && groups.length > 0) {
         const recalculadas = groups.map((g) => ({
           label: g.label,
@@ -120,6 +153,7 @@ async function respuestaTablaCalculada(
       groups,
       liveGroups,
       hasLive: liveGroups !== null,
+      liveMatches: marcadores,
       rows: [],
       liveRows: null,
       fetchedAt: new Date().toISOString(),
@@ -179,8 +213,11 @@ export async function GET(request: Request) {
       // ej. la Champions, cuya tabla viene de otra fuente), no se
       // marca "en vivo" una tabla que no cambió.
       let liveRows: StandingRow[] | null = null;
+      let marcadores: EnVivoLiga['marcadores'] = [];
       try {
-        const resultados = await resultadosEnVivo(liga.providerId);
+        const vivo = await enVivoDeLiga(liga.providerId);
+        marcadores = vivo.marcadores;
+        const resultados = vivo.resultados;
         if (resultados.length > 0 && rows.length > 0) {
           const recalculada = computeLiveStandings(rows, resultados);
           const jugadosBase = rows.reduce((a, r) => a + r.played, 0);
@@ -197,6 +234,7 @@ export async function GET(request: Request) {
         rows,
         liveRows,
         hasLive: liveRows !== null,
+        liveMatches: marcadores,
         fetchedAt: new Date().toISOString(),
       });
     } catch (error) {
@@ -231,6 +269,7 @@ export async function GET(request: Request) {
     rows: [],
     liveRows: null,
     hasLive: false,
+    liveMatches: [],
     fetchedAt: new Date().toISOString(),
   });
 }
