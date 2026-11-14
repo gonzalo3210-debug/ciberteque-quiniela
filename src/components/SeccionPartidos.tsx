@@ -49,6 +49,10 @@ import TablaLiga, {
   esEquipoResaltado,
 } from '@/components/TablaLiga'
 import PaginaLiga from '@/components/PaginaLiga'
+import VistaPartido, {
+  datosDesdeFixture,
+  type PartidoVistaDatos,
+} from '@/components/VistaPartido'
 import {
   computeStandingsAmbito,
   type AmbitoTabla,
@@ -119,6 +123,8 @@ interface ListaProps {
   onVerEquipo: EquipoTocable
   /** Tocar el encabezado de una liga abre la PÁGINA de la liga. */
   onVerLiga: (leagueProviderId: string) => void
+  /** Tocar un partido abre su vista (Resumen · Enfrentamientos · Posiciones). */
+  onVerPartido: (f: SportsFixture) => void
 }
 
 function ListaPartidos({
@@ -129,6 +135,7 @@ function ListaPartidos({
   onToggleLiga,
   onVerEquipo,
   onVerLiga,
+  onVerPartido,
 }: ListaProps) {
   const [grupos, setGrupos] = useState<GrupoPartidos[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -328,7 +335,7 @@ function ListaPartidos({
           </div>
           <div>
             {g.fixtures.map((f) => (
-              <FilaPartido key={f.providerId} f={f} onVerEquipo={onVerEquipo} />
+              <FilaPartido key={f.providerId} f={f} onVerEquipo={onVerEquipo} onVerPartido={onVerPartido} />
             ))}
           </div>
         </div>
@@ -450,12 +457,17 @@ function VistaEquipo({
   onToggleEquipo,
   onVolver,
   onVerEquipo,
+  onVerLiga,
+  onVerPartido,
 }: {
   equipo: EquipoSeguido
   favoritos: Favoritos
   onToggleEquipo: (equipo: EquipoSeguido) => void
   onVolver: () => void
   onVerEquipo: EquipoTocable
+  /** La competición principal del Resumen abre la página de la liga. */
+  onVerLiga: (leagueProviderId: string) => void
+  onVerPartido: (f: SportsFixture) => void
 }) {
   const [pestana, setPestana] = useState<'resumen' | 'partidos' | 'posiciones'>('resumen')
   const [partidos, setPartidos] = useState<SportsFixture[] | null>(null)
@@ -625,7 +637,7 @@ function VistaEquipo({
       ) : (
         <div>
           {filas.map((f) => (
-            <FilaPartido key={f.providerId} f={f} onVerEquipo={onVerEquipo} />
+            <FilaPartido key={f.providerId} f={f} onVerEquipo={onVerEquipo} onVerPartido={onVerPartido} />
           ))}
         </div>
       )}
@@ -808,21 +820,37 @@ function VistaEquipo({
               Competición principal
             </div>
             <div className="px-4 py-4 flex flex-col gap-3">
-              <div className="flex items-center gap-2.5">
-                <LogoLiga
-                  url={logoLiga}
-                  nombre={liga?.name || ''}
-                  className="w-8 h-8"
-                />
-                <div>
-                  <p className="font-black text-white text-sm">
-                    {liga?.name || 'Liga'}
-                  </p>
-                  <p className="text-slate-500 text-[11px] font-bold uppercase tracking-widest">
-                    Temporada {liga?.season || ''}
-                  </p>
+              {liga ? (
+                <button
+                  onClick={() => onVerLiga(liga.providerId)}
+                  title={`Ver la página de ${liga.name}`}
+                  className="flex items-center gap-2.5 text-left hover:opacity-75 transition-opacity"
+                >
+                  <LogoLiga
+                    url={logoLiga}
+                    nombre={liga.name}
+                    className="w-8 h-8"
+                  />
+                  <div>
+                    <p className="font-black text-white text-sm">
+                      {liga.name} <span className="text-cyan-400">›</span>
+                    </p>
+                    <p className="text-slate-500 text-[11px] font-bold uppercase tracking-widest">
+                      Temporada {liga.season}
+                    </p>
+                  </div>
+                </button>
+              ) : (
+                <div className="flex items-center gap-2.5">
+                  <LogoLiga url={logoLiga} nombre="Liga" className="w-8 h-8" />
+                  <div>
+                    <p className="font-black text-white text-sm">Liga</p>
+                    <p className="text-slate-500 text-[11px] font-bold uppercase tracking-widest">
+                      Temporada
+                    </p>
+                  </div>
                 </div>
-              </div>
+              )}
               {detalle?.manager && (
                 <p className="text-sm">
                   <span className="font-black text-slate-500 text-[11px] uppercase tracking-widest mr-2">
@@ -853,7 +881,7 @@ function VistaEquipo({
                   ? '🔴 Jugando ahora'
                   : 'Próximo partido'}
               </div>
-              <FilaPartido f={siguientes[0]} onVerEquipo={onVerEquipo} />
+              <FilaPartido f={siguientes[0]} onVerEquipo={onVerEquipo} onVerPartido={onVerPartido} />
             </div>
           ) : (
             <div className="w-full bg-slate-900/80 border border-slate-800 rounded-2xl p-6 text-center">
@@ -900,9 +928,12 @@ function VistaEquipo({
 function FilaPartidoApp({
   partido,
   mapaLogos,
+  onVerPartido,
 }: {
   partido: any
   mapaLogos: Record<string, string>
+  /** Tocar la fila abre la vista del partido con los datos de la app. */
+  onVerPartido?: () => void
 }) {
   const logoDe = (nombre: string) =>
     mapaLogos[(nombre || '').toLowerCase().trim()] || null
@@ -926,7 +957,14 @@ function FilaPartidoApp({
   )
 
   return (
-    <div className="flex items-center gap-2 px-3 py-2.5 border-b border-slate-800/60 last:border-b-0">
+    <div
+      onClick={onVerPartido}
+      role={onVerPartido ? 'button' : undefined}
+      title={onVerPartido ? 'Ver partido' : undefined}
+      className={`flex items-center gap-2 px-3 py-2.5 border-b border-slate-800/60 last:border-b-0 ${
+        onVerPartido ? 'cursor-pointer hover:bg-slate-800/40 transition-colors' : ''
+      }`}
+    >
       <div className="flex-1 flex justify-end min-w-0">
         {lado(partido.equipo_local, true)}
       </div>
@@ -956,7 +994,17 @@ function FilaPartidoApp({
   )
 }
 
-function VistaQuiniela({ onVerEquipo }: { onVerEquipo: EquipoTocable }) {
+function VistaQuiniela({
+  onVerEquipo,
+  onVerPartidoApp,
+  onVerLiga,
+  logosLiga,
+}: {
+  onVerEquipo: EquipoTocable
+  onVerPartidoApp: (partido: any, fixture?: SportsFixture) => void
+  onVerLiga: (leagueProviderId: string) => void
+  logosLiga: Record<string, string | null>
+}) {
   const {
     candidatas,
     seleccionada,
@@ -1002,6 +1050,26 @@ function VistaQuiniela({ onVerEquipo }: { onVerEquipo: EquipoTocable }) {
     () => emparejarPartidosJornada(partidos, fixtures || []),
     [partidos, fixtures]
   )
+
+  // Liga dominante de la jornada (la de más partidos emparejados): el
+  // encabezado la ofrece como acceso directo a su página (Bloque E).
+  const ligaDominante = useMemo(() => {
+    const conteo = new Map<string, number>()
+    for (const f of parejas.values()) {
+      if (f.leagueProviderId) {
+        conteo.set(f.leagueProviderId, (conteo.get(f.leagueProviderId) || 0) + 1)
+      }
+    }
+    let mejor: string | null = null
+    let max = 0
+    for (const [id, n] of conteo) {
+      if (n > max) {
+        max = n
+        mejor = id
+      }
+    }
+    return mejor ? getSupportedLeague(mejor) : undefined
+  }, [parejas])
 
   if (cargando && !seleccionada) {
     return (
@@ -1081,14 +1149,28 @@ function VistaQuiniela({ onVerEquipo }: { onVerEquipo: EquipoTocable }) {
           <span className="text-slate-400 text-[11px] font-bold uppercase tracking-widest">
             {finales} de {partidos.length} partidos jugados
           </span>
+          {ligaDominante && (
+            <button
+              onClick={() => onVerLiga(ligaDominante.providerId)}
+              title={`Ver la página de ${ligaDominante.name}`}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-900 border border-slate-700 text-slate-200 hover:text-cyan-300 hover:border-cyan-500 text-[10px] font-black uppercase tracking-widest transition-all"
+            >
+              <LogoLiga
+                url={logosLiga[ligaDominante.providerId]}
+                nombre={ligaDominante.name}
+                className="w-4 h-4"
+              />
+              {ligaDominante.name} <span className="text-cyan-400">›</span>
+            </button>
+          )}
         </div>
         <div>
           {partidos.map((p) => {
             const fixture = parejas.get(p.id)
             return fixture ? (
-              <FilaPartido key={p.id} f={fixture} onVerEquipo={onVerEquipo} />
+              <FilaPartido key={p.id} f={fixture} onVerEquipo={onVerEquipo} onVerPartido={(f) => onVerPartidoApp(p, f)} />
             ) : (
-              <FilaPartidoApp key={p.id} partido={p} mapaLogos={mapaLogos} />
+              <FilaPartidoApp key={p.id} partido={p} mapaLogos={mapaLogos} onVerPartido={() => onVerPartidoApp(p)} />
             )
           })}
         </div>
@@ -1109,9 +1191,15 @@ const REFRESCO_VIVO_MS = 60_000 // 1 minuto
 function VistaEnVivo({
   favoritos,
   onVerEquipo,
+  onVerLiga,
+  onVerPartido,
+  logosLiga,
 }: {
   favoritos: Favoritos
   onVerEquipo: EquipoTocable
+  onVerLiga: (leagueProviderId: string) => void
+  onVerPartido: (f: SportsFixture) => void
+  logosLiga: Record<string, string | null>
 }) {
   const { seleccionada } = useJornadaActual()
   const [fixtures, setFixtures] = useState<SportsFixture[] | null>(null)
@@ -1246,8 +1334,25 @@ function VistaEnVivo({
                 key={ligaId}
                 className="bg-slate-900/80 border border-slate-800/50 rounded-2xl shadow-2xl overflow-hidden"
               >
-                <div className="px-4 py-2.5 bg-slate-800/60 border-b border-slate-800 font-black text-xs uppercase tracking-widest text-white">
-                  {getSupportedLeague(ligaId)?.name || 'Partido de tu quiniela'}
+                <div className="px-4 py-2.5 bg-slate-800/60 border-b border-slate-800">
+                  {getSupportedLeague(ligaId) ? (
+                    <button
+                      onClick={() => onVerLiga(ligaId)}
+                      title={`Ver la página de ${getSupportedLeague(ligaId)?.name}`}
+                      className="flex items-center gap-2 font-black text-xs uppercase tracking-widest text-white hover:text-cyan-300 transition-colors"
+                    >
+                      <LogoLiga
+                        url={logosLiga[ligaId]}
+                        nombre={getSupportedLeague(ligaId)?.name || ''}
+                      />
+                      {getSupportedLeague(ligaId)?.name}{' '}
+                      <span className="text-cyan-400">›</span>
+                    </button>
+                  ) : (
+                    <span className="font-black text-xs uppercase tracking-widest text-white">
+                      Partido de tu quiniela
+                    </span>
+                  )}
                 </div>
                 <div>
                   {filas.map((f) => (
@@ -1255,6 +1360,7 @@ function VistaEnVivo({
                       key={f.providerId}
                       f={f}
                       onVerEquipo={onVerEquipo}
+                      onVerPartido={onVerPartido}
                     />
                   ))}
                 </div>
@@ -1488,6 +1594,7 @@ export default function SeccionPartidos() {
   const [favListos, setFavListos] = useState(false)
   const [ligaVista, setLigaVista] = useState<SupportedLeague | null>(null)
   const [equipoVista, setEquipoVista] = useState<EquipoSeguido | null>(null)
+  const [partidoVista, setPartidoVista] = useState<PartidoVistaDatos | null>(null)
   const [fechaResultados, setFechaResultados] = useState<string>(() =>
     hoyEnMazatlan()
   )
@@ -1523,6 +1630,52 @@ export default function SeccionPartidos() {
 
   const verEquipo = useCallback((equipo: EquipoSeguido) => {
     setEquipoVista(equipo)
+    setPartidoVista(null)
+  }, [])
+
+  /** Abrir la vista de un partido que viene de la API. */
+  const verPartido = useCallback((f: SportsFixture) => {
+    setPartidoVista(datosDesdeFixture(f))
+  }, [])
+
+  /**
+   * Abrir la vista de un partido DE LA QUINIELA: con su gemelo de la
+   * API si lo hay (se conserva el canal de la quiniela para "dónde
+   * ver") o solo con los datos de la app si no se emparejó.
+   */
+  const verPartidoApp = useCallback((p: any, fixture?: SportsFixture) => {
+    if (fixture) {
+      const d = datosDesdeFixture(fixture)
+      d.canal = p?.canal ?? null
+      setPartidoVista(d)
+      return
+    }
+    const esFinal =
+      p?.es_final === true ||
+      (p?.goles_local !== null &&
+        p?.goles_local !== undefined &&
+        p?.goles_visitante !== null &&
+        p?.goles_visitante !== undefined)
+    setPartidoVista({
+      homeTeam: p?.equipo_local || '',
+      awayTeam: p?.equipo_visitante || '',
+      homeTeamProviderId: null,
+      awayTeamProviderId: null,
+      homeBadgeUrl: null,
+      awayBadgeUrl: null,
+      leagueProviderId: null,
+      leagueName: null,
+      kickoffIso: p?.fecha_hora_partido ?? null,
+      status: esFinal ? 'finished' : 'scheduled',
+      statusRaw: null,
+      progress: null,
+      homeScore: p?.goles_local ?? null,
+      awayScore: p?.goles_visitante ?? null,
+      venue: null,
+      tvStation: null,
+      canal: p?.canal ?? null,
+      fixtureId: null,
+    })
   }, [])
 
   useEffect(() => {
@@ -1582,13 +1735,27 @@ export default function SeccionPartidos() {
       setLigaVista(liga)
       setBuscarAbierto(false)
       setEquipoVista(null)
+      setPartidoVista(null)
     },
     []
   )
 
   return (
     <div className="w-full max-w-3xl flex flex-col items-center animate-in fade-in duration-500">
-      {equipoVista ? (
+      {partidoVista ? (
+        <VistaPartido
+          key={`${partidoVista.fixtureId || partidoVista.homeTeam}-${partidoVista.awayTeam}`}
+          datos={partidoVista}
+          logoLiga={
+            partidoVista.leagueProviderId
+              ? (logosLiga[partidoVista.leagueProviderId] ?? null)
+              : null
+          }
+          onVolver={() => setPartidoVista(null)}
+          onVerEquipo={verEquipo}
+          onVerLiga={verLiga}
+        />
+      ) : equipoVista ? (
         <VistaEquipo
           key={`${equipoVista.leagueProviderId}-${equipoVista.teamProviderId}`}
           equipo={equipoVista}
@@ -1596,6 +1763,8 @@ export default function SeccionPartidos() {
           onToggleEquipo={toggleEquipo}
           onVolver={() => setEquipoVista(null)}
           onVerEquipo={verEquipo}
+          onVerLiga={verLiga}
+          onVerPartido={verPartido}
         />
       ) : ligaVista ? (
         // Página de la liga: Resumen · Partidos · Posiciones.
@@ -1606,6 +1775,7 @@ export default function SeccionPartidos() {
           favoritos={favoritos}
           onToggleLiga={toggleLiga}
           onVerEquipo={verEquipo}
+          onVerPartido={verPartido}
           onVolver={() => setLigaVista(null)}
         />
       ) : (
@@ -1681,10 +1851,23 @@ export default function SeccionPartidos() {
       ) : (
       <>
       {vista === 'envivo' && (
-        <VistaEnVivo favoritos={favoritos} onVerEquipo={verEquipo} />
+        <VistaEnVivo
+          favoritos={favoritos}
+          onVerEquipo={verEquipo}
+          onVerLiga={verLiga}
+          onVerPartido={verPartido}
+          logosLiga={logosLiga}
+        />
       )}
 
-      {vista === 'quiniela' && <VistaQuiniela onVerEquipo={verEquipo} />}
+      {vista === 'quiniela' && (
+        <VistaQuiniela
+          onVerEquipo={verEquipo}
+          onVerPartidoApp={verPartidoApp}
+          onVerLiga={verLiga}
+          logosLiga={logosLiga}
+        />
+      )}
 
       {vista === 'resultados' && (
         <div className="w-full flex flex-col items-center gap-4 animate-in fade-in duration-500">
@@ -1730,6 +1913,7 @@ export default function SeccionPartidos() {
             onToggleLiga={toggleLiga}
             onVerEquipo={verEquipo}
             onVerLiga={verLiga}
+            onVerPartido={verPartido}
           />
         </div>
       )}
@@ -1743,6 +1927,7 @@ export default function SeccionPartidos() {
             onToggleLiga={toggleLiga}
             onVerEquipo={verEquipo}
             onVerLiga={verLiga}
+            onVerPartido={verPartido}
           />
         ) : (
           <div className="text-cyan-400 font-bold animate-pulse py-20">
