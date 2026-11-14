@@ -44,6 +44,13 @@ export interface SupportedLeague {
   zones: LeagueZones;
   /** ¿El proveedor devuelve tabla de posiciones para esta liga? */
   hasStandings: boolean;
+  /**
+   * Sin tabla oficial: cómo la calcula la app desde los resultados de la
+   * temporada (ver computedStandings.ts). 'grupos' = tablas por grupo
+   * derivadas de quién juega contra quién; 'unica' = una sola tabla con
+   * los partidos de la fase principal. undefined = no se calcula.
+   */
+  computedTable?: 'grupos' | 'unica';
   /** ¿Nace seguida en Favoritos (localStorage) si el usuario no ha elegido? */
   defaultFollowed: boolean;
 }
@@ -65,6 +72,7 @@ export const SUPPORTED_LEAGUES: SupportedLeague[] = [
     season: '2026-2027',
     zones: null,
     hasStandings: false, // verificado: lookuptable vacío (grupos)
+    computedTable: 'grupos', // 14 grupos reales derivados del calendario
     defaultFollowed: true,
   },
   {
@@ -74,6 +82,7 @@ export const SUPPORTED_LEAGUES: SupportedLeague[] = [
     season: '2026-2027',
     zones: null,
     hasStandings: false, // verificado: lookuptable vacío (fase de liga sin tabla en v1)
+    computedTable: 'unica', // formato actual: fase de liga, una sola tabla
     defaultFollowed: true,
   },
   {
@@ -137,6 +146,7 @@ export const SUPPORTED_LEAGUES: SupportedLeague[] = [
     season: '2026', // la Libertadores es de año calendario, no "2026-2027"
     zones: null,
     hasStandings: false, // verificado: lookuptable vacío (grupos + llaves)
+    computedTable: 'grupos', // 8 grupos de 4 derivados del calendario
     defaultFollowed: false,
   },
 ];

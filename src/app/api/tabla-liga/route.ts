@@ -11,8 +11,12 @@
 // `liveRows`, para que la vista la marque "EN VIVO".
 //
 // Las ligas de grupos/copa (hasStandings=false: Champions, Nations League,
-// Libertadores) no tienen tabla única en el proveedor: se responde eso
-// mismo sin consultar nada, y la vista muestra el mensaje claro.
+// Libertadores) no tienen tabla en el proveedor: la app la CALCULA desde
+// los resultados de la temporada (computeStandingsFromResults) y la
+// responde con `calculated: true` y `groups` (una tabla por grupo, o una
+// sola en formato fase de liga), para que la vista la marque como
+// "Tabla calculada por la app", distinta de la oficial. La tabla en vivo
+// al caer gol también aplica, por grupo (liveGroups).
 // La llave del proveedor nunca sale del servidor.
 
 import { NextResponse } from 'next/server';
@@ -20,7 +24,9 @@ import {
   getSportsProvider,
   getSupportedLeague,
   computeLiveStandings,
+  computeStandingsFromResults,
   LIGA_MX_PROVIDER_ID,
+  type ComputedTable,
   type LiveResult,
   type StandingRow,
 } from '@/lib/sports';
@@ -48,14 +54,88 @@ export async function GET(request: Request) {
   };
 
   if (!liga.hasStandings) {
-    return NextResponse.json({
-      league: ligaJson,
-      hasStandings: false,
-      rows: [],
-      liveRows: null,
-      hasLive: false,
-      fetchedAt: new Date().toISOString(),
-    });
+    // Sin tabla oficial: si la liga trae modo de cálculo, se computa desde
+    // los resultados de la temporada; si no, se responde vacío como antes.
+    if (!liga.computedTable) {
+      return NextResponse.json({
+        league: ligaJson,
+        hasStandings: false,
+        calculated: false,
+        rows: [],
+        liveRows: null,
+        hasLive: false,
+        fetchedAt: new Date().toISOString(),
+      });
+    }
+    try {
+      const provider = getSportsProvider();
+      const fixtures = await provider.getFixtures(liga.providerId, {
+        season: liga.season,
+      });
+      const groups: ComputedTable[] = computeStandingsFromResults(
+        fixtures,
+        liga.computedTable
+      );
+
+      // Tabla EN VIVO al caer gol, por grupo: computeLiveStandings ignora
+      // los resultados con equipos ajenos a cada tabla.
+      let liveGroups: ComputedTable[] | null = null;
+      try {
+        const enVivo = await provider.getLiveScores();
+        const resultados: LiveResult[] = enVivo
+          .filter(
+            (f) =>
+              f.leagueProviderId === liga.providerId &&
+              f.status === 'live' &&
+              f.homeScore !== null &&
+              f.awayScore !== null
+          )
+          .map((f) => ({
+            homeTeam: f.homeTeam,
+            awayTeam: f.awayTeam,
+            homeTeamProviderId: f.homeTeamProviderId,
+            awayTeamProviderId: f.awayTeamProviderId,
+            homeScore: f.homeScore as number,
+            awayScore: f.awayScore as number,
+          }));
+        if (resultados.length > 0 && groups.length > 0) {
+          const recalculadas = groups.map((g) => ({
+            label: g.label,
+            rows: computeLiveStandings(g.rows, resultados),
+          }));
+          const cambio = recalculadas.some((g, i) =>
+            g.rows.some(
+              (r, j) =>
+                r.played !== groups[i].rows[j].played ||
+                r.points !== groups[i].rows[j].points
+            )
+          );
+          if (cambio) liveGroups = recalculadas;
+        }
+      } catch (e) {
+        console.error(`Tabla calculada ${liga.name}: falló el en vivo:`, e);
+      }
+
+      return NextResponse.json({
+        league: ligaJson,
+        hasStandings: false,
+        calculated: true,
+        groups,
+        liveGroups,
+        hasLive: liveGroups !== null,
+        rows: [],
+        liveRows: null,
+        fetchedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error(`Error al calcular la tabla de ${liga.name}:`, error);
+      return NextResponse.json(
+        {
+          error: `No se pudo cargar la tabla de ${liga.name}. Intenta de nuevo en unos minutos.`,
+        },
+        { status: 502 }
+      );
+    }
   }
 
   try {

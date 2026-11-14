@@ -182,7 +182,11 @@ function mapStatusFields(
     return 'postponed';
   }
   if (s === 'NS' || s === '' || s === 'TBD') return 'scheduled';
-  if (['FT', 'AET', 'PEN', 'Match Finished'].includes(s)) return 'finished';
+  // 'AWD' = partido adjudicado (p. ej. 0-3 por decisión): quedó finalizado
+  // con marcador oficial; sin esto salía como "en vivo" para siempre.
+  if (['FT', 'AET', 'PEN', 'AWD', 'Match Finished'].includes(s)) {
+    return 'finished';
+  }
   // Cualquier otro código ("1H", "HT", "2H", minutos, etc.) = en curso.
   return s ? 'live' : 'unknown';
 }

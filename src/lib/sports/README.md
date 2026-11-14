@@ -35,9 +35,32 @@ y logos a proveedores externos.
   `/api/tabla-liga`, que devuelve `liveRows` recalculada cuando la liga
   tiene partidos en curso, y la vista la marca "EN VIVO" refrescándose
   cada 2 minutos (igual que la lista de partidos).
-- **Sin tabla**: Champions, Nations League y Libertadores devuelven el
-  cuerpo vacío en `lookuptable` (grupos/copa): `hasStandings=false` y la
-  vista de Posiciones muestra un mensaje claro, sin romperse.
+- **Sin tabla oficial → tabla calculada**: Champions, Nations League y
+  Libertadores devuelven el cuerpo vacío en `lookuptable` (grupos/copa),
+  así que `hasStandings=false` — pero ya no se muestra solo el aviso: la
+  app CALCULA la tabla desde los resultados de la temporada con
+  `computeStandingsFromResults(fixtures, modo)` (`computedStandings.ts`,
+  función pura). `/api/tabla-liga` la devuelve con `calculated: true` y
+  `groups`, y la vista la marca **"🧮 Tabla calculada por la app"**,
+  distinta de la oficial; la tabla en vivo al caer gol también aplica
+  por grupo (`liveGroups`). Detalles y límites del cálculo:
+  - Solo cuentan partidos finalizados (3/1 puntos). Desempate:
+    puntos → DG → GF → nombre. **Sin enfrentamiento directo.**
+  - El proveedor NO trae campo de grupo: la fase se aísla por la RONDA
+    (en una jornada de grupos/liga nadie juega dos veces en la misma
+    ronda; las clasificatorias y llaves sí repiten). Champions
+    (`computedTable: 'unica'`): una sola tabla con las rondas
+    "completas" (verificado: rondas 4-8, 36 equipos; las
+    clasificatorias quedan fuera).
+  - Nations y Libertadores (`computedTable: 'grupos'`): los grupos son
+    las componentes del grafo de partidos de la fase (quién juega
+    contra quién — membresía real del calendario, verificado:
+    Nations 14 grupos, Libertadores 8 de 4 con sus 96 partidos). Los
+    nombres oficiales de grupo no vienen en el dato: se etiquetan
+    "Grupo 1", "Grupo 2", ... sin fingir el nombre oficial.
+  - Ojo: un partido con estado `AWD` (adjudicado, p. ej. 0-3) cuenta
+    como finalizado con su marcador; el adaptador lo mapea así desde
+    2026-11-13 (antes salía "en vivo" para siempre).
 - Llave premium de TheSportsDB activa (cuenta gonzalo3210): tabla de
   Liga MX verificada COMPLETA (18/18) y temporada con 153 eventos.
 
