@@ -27,7 +27,7 @@ export const LIGA_MX_SEASON = '2026-2027';
 
 /** Esquema de zonas de color de la tabla de una liga. */
 export type LeagueZones =
-  | 'liga-mx' // 1-6 liguilla directa, 7-10 play-in
+  | 'liga-mx' // 1-8 liguilla (temporada 2026-2027: NO hay play-in)
   | 'europa' // 1-4 Champions, 5 Europa League, últimos 3 descenso
   | null; // sin zonas (torneos de grupos/copa o formatos con rondas)
 

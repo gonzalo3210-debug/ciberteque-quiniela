@@ -46,8 +46,8 @@ const colorForma = (letra: string) => {
 
 const claseZona = (liga: SupportedLeague, rank: number, total: number) => {
   if (liga.zones === 'liga-mx') {
-    if (rank <= 6) return 'border-l-4 border-l-green-500' // Liguilla directa
-    if (rank <= 10) return 'border-l-4 border-l-amber-500' // Play-in
+    // Temporada 2026-2027: NO hay play-in; los primeros 8 van a liguilla.
+    if (rank <= 8) return 'border-l-4 border-l-green-500' // Liguilla
   } else if (liga.zones === 'europa') {
     if (rank <= 4) return 'border-l-4 border-l-green-500' // Champions
     if (rank === 5) return 'border-l-4 border-l-amber-500' // Europa League
@@ -377,8 +377,7 @@ export default function TablaLiga({
 
       {liga.zones === 'liga-mx' && (
         <div className="flex flex-wrap justify-center gap-x-6 gap-y-1 mt-4 text-[11px] font-bold uppercase tracking-widest text-slate-500">
-          <span><span className="text-green-500">▌</span> Liguilla directa (1–6)</span>
-          <span><span className="text-amber-500">▌</span> Play-in (7–10)</span>
+          <span><span className="text-green-500">▌</span> Liguilla (1–8)</span>
         </div>
       )}
       {liga.zones === 'europa' && (
