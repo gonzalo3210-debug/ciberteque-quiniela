@@ -27,6 +27,7 @@ import {
   type SupportedLeague,
 } from '@/lib/sports/leagues'
 import TablaLiga from '@/components/TablaLiga'
+import { nombreEquipoES } from '@/lib/sports/nombresES'
 import {
   leerFavoritos,
   guardarFavoritos,
@@ -131,20 +132,24 @@ function FilaPartido({
 }) {
   const dia = etiquetaDia(f)
 
+  // El nombre VISIBLE va en español si hay traducción; el nombre que se
+  // pasa a la vista por equipo (y se guarda en favoritos) sigue siendo
+  // el original del proveedor, para no tocar el matching interno.
   const ladoEquipo = (
     nombre: string,
     escudo: string | null,
     teamProviderId: string | null,
     esLocal: boolean
   ) => {
+    const nombreVisible = nombreEquipoES(nombre, teamProviderId)
     const contenido = (
       <>
         {esLocal && (
-          <span className="font-bold text-white text-sm truncate">{nombre}</span>
+          <span className="font-bold text-white text-sm truncate">{nombreVisible}</span>
         )}
-        <Escudo url={escudo} nombre={nombre} />
+        <Escudo url={escudo} nombre={nombreVisible} />
         {!esLocal && (
-          <span className="font-bold text-white text-sm truncate">{nombre}</span>
+          <span className="font-bold text-white text-sm truncate">{nombreVisible}</span>
         )}
       </>
     )
@@ -159,7 +164,7 @@ function FilaPartido({
               badgeUrl: escudo,
             })
           }
-          title={`Ver partidos de ${nombre}`}
+          title={`Ver partidos de ${nombreVisible}`}
           className="flex items-center gap-2 min-w-0 hover:opacity-75 transition-opacity"
         >
           {contenido}
@@ -623,8 +628,8 @@ function GestorSiguiendo({
                 key={`${e.leagueProviderId}-${e.teamProviderId}`}
                 className="inline-flex items-center gap-2 pl-2 pr-1 py-1 rounded-full bg-slate-800 border border-slate-700 text-xs font-bold text-white"
               >
-                <Escudo url={e.badgeUrl} nombre={e.teamName} />
-                {e.teamName}
+                <Escudo url={e.badgeUrl} nombre={nombreEquipoES(e.teamName, e.teamProviderId)} />
+                {nombreEquipoES(e.teamName, e.teamProviderId)}
                 <button
                   onClick={() => onToggleEquipo(e)}
                   className="w-5 h-5 rounded-full bg-slate-700 hover:bg-red-600 text-white text-[11px] font-black leading-none"
@@ -687,9 +692,9 @@ function GestorSiguiendo({
                   }
                   className="flex items-center gap-2.5 px-4 py-2.5 border-b border-slate-800/60 text-left hover:bg-slate-800/40 transition-colors"
                 >
-                  <Escudo url={t.badgeUrl} nombre={t.name} />
+                  <Escudo url={t.badgeUrl} nombre={nombreEquipoES(t.name, t.providerId)} />
                   <span className="flex-1 font-bold text-white text-sm truncate">
-                    {t.name}
+                    {nombreEquipoES(t.name, t.providerId)}
                   </span>
                   <span
                     className={`text-lg leading-none ${
@@ -827,10 +832,10 @@ function VistaEquipo({
           ← Volver
         </button>
         <div className="flex-1 flex items-center gap-2.5 min-w-0">
-          <Escudo url={equipo.badgeUrl} nombre={equipo.teamName} />
+          <Escudo url={equipo.badgeUrl} nombre={nombreEquipoES(equipo.teamName, equipo.teamProviderId)} />
           <div className="min-w-0">
             <p className="font-black text-white text-base leading-tight truncate">
-              {equipo.teamName}
+              {nombreEquipoES(equipo.teamName, equipo.teamProviderId)}
             </p>
             <p className="flex items-center gap-1.5 text-slate-500 text-[11px] font-bold uppercase tracking-widest truncate">
               <LogoLiga url={logoLiga} nombre={liga?.name || ''} className="w-4 h-4" />
@@ -879,7 +884,7 @@ function VistaEquipo({
         )
       ) : !partidos && !error ? (
         <div className="text-cyan-400 font-bold animate-pulse py-20">
-          Cargando partidos de {equipo.teamName}...
+          Cargando partidos de {nombreEquipoES(equipo.teamName, equipo.teamProviderId)}...
         </div>
       ) : error && !partidos ? (
         <div className="w-full bg-slate-900/80 border border-slate-800 rounded-2xl p-8 text-center">

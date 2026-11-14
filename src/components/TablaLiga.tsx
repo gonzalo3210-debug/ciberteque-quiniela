@@ -18,6 +18,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import type { StandingRow } from '@/lib/sports'
 import type { SupportedLeague } from '@/lib/sports/leagues'
+import { nombreEquipoES } from '@/lib/sports/nombresES'
 
 interface GrupoTabla {
   label: string | null
@@ -120,11 +121,11 @@ function TablaCard({
                 <td className="py-2.5 px-2">
                   <div className="flex items-center gap-2.5">
                     {f.badgeUrl ? (
-                      <img src={f.badgeUrl} alt={f.teamName} className="w-6 h-6 object-contain shrink-0" loading="lazy" />
+                      <img src={f.badgeUrl} alt={nombreEquipoES(f.teamName, f.teamProviderId)} className="w-6 h-6 object-contain shrink-0" loading="lazy" />
                     ) : (
                       <span className="w-6 h-6 shrink-0 rounded bg-slate-800 inline-block" />
                     )}
-                    <span className={`font-bold whitespace-nowrap ${esEquipoResaltado(f, equipoResaltado) ? 'text-cyan-300' : 'text-white'}`}>{f.teamName}</span>
+                    <span className={`font-bold whitespace-nowrap ${esEquipoResaltado(f, equipoResaltado) ? 'text-cyan-300' : 'text-white'}`}>{nombreEquipoES(f.teamName, f.teamProviderId)}</span>
                   </div>
                 </td>
                 <td className="py-2.5 px-2 text-center text-slate-300">{f.played}</td>
@@ -308,7 +309,7 @@ export default function TablaLiga({
           </p>
           {resaltadaCalc?.fila && (
             <p className="inline-block mt-3 px-3.5 py-1.5 rounded-full bg-cyan-600/20 border border-cyan-500/50 text-cyan-300 text-xs font-black uppercase tracking-widest">
-              🏅 {resaltadaCalc.fila.teamName} · {resaltadaCalc.fila.rank}.º
+              🏅 {nombreEquipoES(resaltadaCalc.fila.teamName, resaltadaCalc.fila.teamProviderId)} · {resaltadaCalc.fila.rank}.º
               lugar{resaltadaCalc.grupo ? ` del ${resaltadaCalc.grupo}` : ''} ·{' '}
               {resaltadaCalc.fila.points} pts
             </p>
@@ -357,7 +358,7 @@ export default function TablaLiga({
         </h3>
         {filaResaltada && (
           <p className="inline-block mt-3 px-3.5 py-1.5 rounded-full bg-cyan-600/20 border border-cyan-500/50 text-cyan-300 text-xs font-black uppercase tracking-widest">
-            🏅 {filaResaltada.teamName} · {filaResaltada.rank}.º lugar ·{' '}
+            🏅 {nombreEquipoES(filaResaltada.teamName, filaResaltada.teamProviderId)} · {filaResaltada.rank}.º lugar ·{' '}
             {filaResaltada.points} pts
           </p>
         )}

@@ -64,6 +64,25 @@ y logos a proveedores externos.
 - Llave premium de TheSportsDB activa (cuenta gonzalo3210): tabla de
   Liga MX verificada COMPLETA (18/18) y temporada con 153 eventos.
 
+## Nombres de equipos en español (capa de mostrar)
+
+El proveedor da los nombres en inglés; la app los muestra en español
+con `nombreEquipoES(nombre, teamProviderId)` de **`nombresES.ts`**
+(archivo puro, importable desde componentes cliente). Es SOLO una capa
+de presentación: no toca datos guardados, favoritos de localStorage ni
+matching interno (siguen con nombre e ID originales del proveedor).
+
+- Clave preferida: el **ID del equipo** en el proveedor; respaldo por
+  nombre normalizado (sin acentos) si una vista no trae el ID.
+- Cobertura: las selecciones de Nations League cuyo nombre difiere del
+  inglés (Dinamarca, Alemania, Bosnia y Herzegovina, Irlanda del
+  Norte...) y los clubes de las ligas soportadas con nombre español
+  distinto (Bayern Múnich, París Saint-Germain, Club Brujas, Inter de
+  Milán...). Lo que no está en el diccionario cae al nombre original.
+- **Agregar un nombre**: una línea `[id, nombre original, nombre ES]`
+  en el arreglo `ENTRADAS` de `nombresES.ts`, con el ID que da el
+  proveedor para ese equipo.
+
 ## Uso (solo servidor: route handlers, server components, scripts)
 
 ```ts
