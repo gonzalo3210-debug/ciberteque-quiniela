@@ -40,6 +40,7 @@ import {
   type SupportedLeague,
 } from '@/lib/sports/leagues'
 import TablaLiga from '@/components/TablaLiga'
+import PaginaLiga from '@/components/PaginaLiga'
 import {
   LogoLiga,
   Escudo,
@@ -92,29 +93,6 @@ const REFRESCO_MS = 120_000 // 2 minutos
 // utilidades de fecha) viven en components/partidosUI.tsx, compartidas
 // con la página de liga, la de equipo y la sección Siguiendo.
 
-/** Aviso de filtro por liga activo, con botón para ver todas. */
-function FiltroLigaChip({
-  nombre,
-  onQuitar,
-}: {
-  nombre: string
-  onQuitar: () => void
-}) {
-  return (
-    <div className="w-full flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl bg-cyan-600/15 border border-cyan-500/40">
-      <span className="text-cyan-300 font-black text-xs uppercase tracking-widest truncate">
-        Solo: {nombre}
-      </span>
-      <button
-        onClick={onQuitar}
-        className="shrink-0 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-black text-[11px] uppercase tracking-widest transition-all"
-      >
-        Ver todas
-      </button>
-    </div>
-  )
-}
-
 // ---------- Lista de partidos (Favoritos / Resultados) ----------------------
 
 interface ListaProps {
@@ -125,6 +103,8 @@ interface ListaProps {
   favoritos: Favoritos
   onToggleLiga: (leagueProviderId: string) => void
   onVerEquipo: EquipoTocable
+  /** Tocar el encabezado de una liga abre la PÁGINA de la liga. */
+  onVerLiga: (leagueProviderId: string) => void
 }
 
 function ListaPartidos({
@@ -134,10 +114,10 @@ function ListaPartidos({
   favoritos,
   onToggleLiga,
   onVerEquipo,
+  onVerLiga,
 }: ListaProps) {
   const [grupos, setGrupos] = useState<GrupoPartidos[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [ligaFiltro, setLigaFiltro] = useState<string | null>(null)
 
   const cargar = useCallback(async () => {
     try {
@@ -243,16 +223,10 @@ function ListaPartidos({
       }))
   }, [grupos, soloFavoritos, favoritos])
 
-  // Filtro por liga (tocar el encabezado de una liga): se queda solo esa.
-  const visiblesFiltrados = ligaFiltro
-    ? visibles.filter((g) => g.ligaId === ligaFiltro)
-    : visibles
+  const visiblesFiltrados = visibles
   const badgePorLiga = new Map(
     (grupos || []).map((g) => [g.league.providerId, g.league.badgeUrl ?? null])
   )
-  const nombreLigaFiltro = ligaFiltro
-    ? getSupportedLeague(ligaFiltro)?.name || 'la liga'
-    : null
 
   if (!grupos && !error) {
     return (
@@ -279,18 +253,10 @@ function ListaPartidos({
   if (visiblesFiltrados.length === 0) {
     return (
       <div className="w-full max-w-3xl flex flex-col items-center gap-4 animate-in fade-in duration-500">
-        {ligaFiltro && (
-          <FiltroLigaChip
-            nombre={nombreLigaFiltro as string}
-            onQuitar={() => setLigaFiltro(null)}
-          />
-        )}
         <div className="w-full bg-slate-900/80 border border-slate-800 rounded-2xl p-8 text-center">
           <p className="text-4xl mb-3">⚽</p>
           <p className="text-slate-300 font-bold">
-            {ligaFiltro
-              ? `No hay partidos de ${nombreLigaFiltro} en este periodo.`
-              : soloFavoritos
+            {soloFavoritos
                 ? 'No hay partidos próximos de tus ligas y equipos seguidos. Revisa la vista Siguiendo para agregar más.'
                 : fecha
                   ? 'Este día no hay partidos en las ligas de la sección.'
@@ -303,12 +269,6 @@ function ListaPartidos({
 
   return (
     <div className="w-full max-w-3xl flex flex-col gap-5 animate-in fade-in duration-500">
-      {ligaFiltro && (
-        <FiltroLigaChip
-          nombre={nombreLigaFiltro as string}
-          onQuitar={() => setLigaFiltro(null)}
-        />
-      )}
       {visiblesFiltrados.map((g) => (
         <div
           key={g.clave}
@@ -322,26 +282,11 @@ function ListaPartidos({
               />
               {g.ligaId ? (
                 <button
-                  onClick={() =>
-                    setLigaFiltro((prev) =>
-                      prev === g.ligaId ? null : (g.ligaId as string)
-                    )
-                  }
-                  title={
-                    ligaFiltro === g.ligaId
-                      ? 'Quitar el filtro de liga'
-                      : `Ver solo ${g.nombre}`
-                  }
-                  className={`font-black text-xs uppercase tracking-widest transition-colors ${
-                    ligaFiltro === g.ligaId
-                      ? 'text-cyan-300'
-                      : 'text-white hover:text-cyan-300'
-                  }`}
+                  onClick={() => onVerLiga(g.ligaId as string)}
+                  title={`Ver la página de ${g.nombre}`}
+                  className="font-black text-xs uppercase tracking-widest text-white hover:text-cyan-300 transition-colors"
                 >
-                  {g.nombre}
-                  {ligaFiltro === g.ligaId && (
-                    <span className="normal-case tracking-normal"> · ✕</span>
-                  )}
+                  {g.nombre} <span className="text-cyan-400">›</span>
                 </button>
               ) : (
                 <span className="font-black text-xs uppercase tracking-widest text-white">
@@ -973,10 +918,14 @@ interface ResultadoBusqueda {
 function BuscadorPartidos({
   onVerEquipo,
   onVerLiga,
+  favoritos,
+  onToggleLiga,
   onCerrar,
 }: {
   onVerEquipo: EquipoTocable
   onVerLiga: (leagueProviderId: string) => void
+  favoritos: Favoritos
+  onToggleLiga: (leagueProviderId: string) => void
   onCerrar: () => void
 }) {
   const [texto, setTexto] = useState('')
@@ -1063,24 +1012,51 @@ function BuscadorPartidos({
             Ligas
           </div>
           <div>
-            {resultados.ligas.map((l) => (
-              <button
+            {resultados.ligas.map((l) => {
+              const seguida = favoritos.ligas.includes(l.providerId)
+              return (
+              <div
                 key={l.providerId}
-                onClick={() => onVerLiga(l.providerId)}
-                className="w-full flex items-center gap-3 px-4 py-3 border-b border-slate-800/60 last:border-b-0 text-left hover:bg-slate-800/40 transition-colors"
+                className="w-full flex items-center gap-2 px-4 py-3 border-b border-slate-800/60 last:border-b-0 hover:bg-slate-800/40 transition-colors"
               >
-                <LogoLiga url={l.badgeUrl} nombre={l.name} className="w-7 h-7" />
-                <span className="flex-1 min-w-0">
-                  <span className="block font-bold text-white text-sm truncate">
-                    {l.name}
+                <button
+                  onClick={() => onVerLiga(l.providerId)}
+                  className="flex-1 flex items-center gap-3 min-w-0 text-left"
+                >
+                  <LogoLiga url={l.badgeUrl} nombre={l.name} className="w-7 h-7" />
+                  <span className="flex-1 min-w-0">
+                    <span className="block font-bold text-white text-sm truncate">
+                      {l.name}
+                    </span>
+                    <span className="block text-slate-500 text-[11px] font-bold uppercase tracking-widest">
+                      Ver liga · Temporada {l.season}
+                    </span>
                   </span>
-                  <span className="block text-slate-500 text-[11px] font-bold uppercase tracking-widest">
-                    Ver posiciones · Temporada {l.season}
-                  </span>
-                </span>
+                </button>
+                <button
+                  onClick={() => onToggleLiga(l.providerId)}
+                  title={
+                    seguida
+                      ? 'Dejar de seguir esta liga'
+                      : 'Agregar a favoritos'
+                  }
+                  aria-label={
+                    seguida
+                      ? 'Dejar de seguir esta liga'
+                      : 'Agregar a favoritos'
+                  }
+                  className={`shrink-0 px-3 py-2 rounded-xl font-black text-base leading-none transition-all ${
+                    seguida
+                      ? 'text-amber-400 bg-amber-500/10'
+                      : 'text-slate-400 hover:text-amber-400 bg-slate-800/60'
+                  }`}
+                >
+                  {seguida ? '★' : '☆'}
+                </button>
                 <span className="text-slate-500">→</span>
-              </button>
-            ))}
+              </div>
+              )
+            })}
           </div>
         </div>
       )}
@@ -1261,29 +1237,16 @@ export default function SeccionPartidos() {
           onVerEquipo={verEquipo}
         />
       ) : ligaVista ? (
-        // Página de la liga (por ahora: su tabla; el Resumen completo
-        // con submenús llega en el bloque siguiente).
-        <div className="w-full max-w-3xl flex flex-col items-center gap-4 animate-in fade-in duration-500">
-          <div className="w-full flex items-center gap-3">
-            <button
-              onClick={() => setLigaVista(null)}
-              className="shrink-0 px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white font-black text-xs uppercase tracking-widest transition-all"
-            >
-              ← Volver
-            </button>
-            <div className="flex items-center gap-2.5 min-w-0">
-              <LogoLiga
-                url={logosLiga[ligaVista.providerId]}
-                nombre={ligaVista.name}
-                className="w-8 h-8"
-              />
-              <p className="font-black text-white text-base truncate">
-                {ligaVista.name}
-              </p>
-            </div>
-          </div>
-          <TablaLiga key={ligaVista.providerId} liga={ligaVista} />
-        </div>
+        // Página de la liga: Resumen · Partidos · Posiciones.
+        <PaginaLiga
+          key={ligaVista.providerId}
+          liga={ligaVista}
+          badgeUrl={logosLiga[ligaVista.providerId] ?? null}
+          favoritos={favoritos}
+          onToggleLiga={toggleLiga}
+          onVerEquipo={verEquipo}
+          onVolver={() => setLigaVista(null)}
+        />
       ) : (
       <>
       {/* ── FILTROS superiores: Live · Calendario · Buscar ── */}
@@ -1350,6 +1313,8 @@ export default function SeccionPartidos() {
             verEquipo(e)
           }}
           onVerLiga={verLiga}
+          favoritos={favoritos}
+          onToggleLiga={toggleLiga}
           onCerrar={() => setBuscarAbierto(false)}
         />
       ) : (
@@ -1403,6 +1368,7 @@ export default function SeccionPartidos() {
             favoritos={favoritos}
             onToggleLiga={toggleLiga}
             onVerEquipo={verEquipo}
+            onVerLiga={verLiga}
           />
         </div>
       )}
@@ -1415,6 +1381,7 @@ export default function SeccionPartidos() {
             favoritos={favoritos}
             onToggleLiga={toggleLiga}
             onVerEquipo={verEquipo}
+            onVerLiga={verLiga}
           />
         ) : (
           <div className="text-cyan-400 font-bold animate-pulse py-20">

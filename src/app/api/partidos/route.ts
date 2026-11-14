@@ -21,9 +21,12 @@
 //                      varios días y no cabe en la ventana normal).
 //   ?liga=&equipo=     temporada completa de UN equipo en su liga (vista
 //                      por equipo: últimos resultados y próximos partidos).
+//   ?liga=             temporada completa de la LIGA (página de la liga:
+//                      Resumen con destacado y pestaña Partidos).
 //
 // Respuesta ventana/fecha: { groups: [{ league, fixtures }], window }
 // Respuesta equipo:        { league, teamProviderId, fixtures }
+// Respuesta liga:          { league, fixtures }
 
 import { NextResponse } from 'next/server';
 import {
@@ -214,6 +217,73 @@ export async function GET(request: Request) {
         league: ligaPublica(liga, logosLiga.get(liga.providerId) ?? null),
         teamProviderId: equipoParam,
         fixtures: delEquipo,
+        fetchedAt: new Date().toISOString(),
+      });
+    }
+
+    // ----- Modo liga (?liga= sin equipo): su temporada completa -----
+    // Para la página de la liga (Resumen con destacado + Partidos).
+    if (ligaParam) {
+      const liga = getSupportedLeague(ligaParam);
+      if (!liga) {
+        return NextResponse.json(
+          { error: 'Liga no soportada.' },
+          { status: 400 }
+        );
+      }
+      let deLaLiga: SportsFixture[] = [];
+      try {
+        deLaLiga = await provider.getFixtures(liga.providerId, {
+          season: liga.season,
+        });
+      } catch (e) {
+        console.error(`Partidos: falló la liga ${ligaParam}:`, e);
+      }
+
+      // Escudos faltantes desde el mapa de equipos de la liga.
+      if (deLaLiga.some((f) => !f.homeBadgeUrl || !f.awayBadgeUrl)) {
+        try {
+          const equipos = await provider.getTeams(liga.providerId);
+          const porId = new Map(equipos.map((t) => [t.providerId, t.badgeUrl]));
+          deLaLiga = deLaLiga.map((f) => ({
+            ...f,
+            homeBadgeUrl:
+              f.homeBadgeUrl ||
+              (f.homeTeamProviderId
+                ? porId.get(f.homeTeamProviderId) ?? null
+                : null),
+            awayBadgeUrl:
+              f.awayBadgeUrl ||
+              (f.awayTeamProviderId
+                ? porId.get(f.awayTeamProviderId) ?? null
+                : null),
+          }));
+        } catch {
+          // Sin mapa de equipos: se muestran sin escudo.
+        }
+      }
+
+      // Mezcla del en vivo para sus partidos en curso.
+      deLaLiga = deLaLiga.map((f) => {
+        const v = vivoPorId.get(f.providerId);
+        if (!v) return f;
+        return {
+          ...f,
+          status: v.status,
+          statusRaw: v.statusRaw,
+          progress: v.progress,
+          homeScore: v.homeScore,
+          awayScore: v.awayScore,
+        };
+      });
+
+      deLaLiga.sort((a, b) =>
+        (a.kickoffUtc || '').localeCompare(b.kickoffUtc || '')
+      );
+
+      return NextResponse.json({
+        league: ligaPublica(liga, logosLiga.get(liga.providerId) ?? null),
+        fixtures: deLaLiga,
         fetchedAt: new Date().toISOString(),
       });
     }
