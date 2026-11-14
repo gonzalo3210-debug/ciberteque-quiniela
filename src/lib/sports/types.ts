@@ -37,6 +37,10 @@ export interface SportsFixture {
   awayTeam: string;
   homeTeamProviderId: string | null;
   awayTeamProviderId: string | null;
+  /** Escudo del equipo local, si el proveedor lo trae en el partido. */
+  homeBadgeUrl: string | null;
+  /** Escudo del equipo visitante, si el proveedor lo trae en el partido. */
+  awayBadgeUrl: string | null;
   /** Fecha/hora de inicio en ISO 8601 UTC (strTimestamp), si existe. */
   kickoffUtc: string | null;
   /** Fecha local del partido (YYYY-MM-DD), si el proveedor la separa. */
@@ -44,6 +48,8 @@ export interface SportsFixture {
   status: FixtureStatus;
   /** Estado crudo del proveedor, por si hace falta depurar. */
   statusRaw: string | null;
+  /** Progreso del partido en vivo (minuto, p. ej. "67" o "45+2"), si va en curso. */
+  progress: string | null;
   homeScore: number | null;
   awayScore: number | null;
   venue: string | null;

@@ -39,6 +39,14 @@ export interface SportsProvider {
     season: string
   ): Promise<StandingRow[]>;
 
+  /**
+   * Marcadores EN VIVO de fútbol de TODAS las ligas (una sola consulta).
+   * Incluye los partidos en curso y los recién terminados; cada quien
+   * filtra por `leagueProviderId`. Es la fuente para recalcular la tabla
+   * en vivo al caer gol (ver liveStandings.ts) y para la vista Live.
+   */
+  getLiveScores(): Promise<SportsFixture[]>;
+
   /** Equipos de una liga, con escudo. */
   getTeams(leagueProviderId: string): Promise<SportsTeam[]>;
 
