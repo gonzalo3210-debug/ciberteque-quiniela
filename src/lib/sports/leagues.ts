@@ -7,3 +7,6 @@
 // junto con la implementación nueva.
 
 export const LIGA_MX_PROVIDER_ID = '4350';
+
+/** Temporada vigente de Liga MX en el formato del proveedor ("AAAA-AAAA"). */
+export const LIGA_MX_SEASON = '2026-2027';

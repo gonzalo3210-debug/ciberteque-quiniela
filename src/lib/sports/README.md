@@ -1,8 +1,24 @@
 # lib/sports — adaptador de proveedor deportivo
 
 Base de la integración con APIs de deportes acordada con Gonzalo
-(2026-11-10/13). Nada de esto está conectado todavía a pantallas: es la
-pieza única por la que la app pedirá partidos, tabla y logos.
+(2026-11-10/13). Es la pieza única por la que la app pide partidos, tabla
+y logos a proveedores externos.
+
+## Ya conectado (2026-11-13)
+
+- **Tabla de la Liga MX**: ruta de servidor `src/app/api/tabla-liga`
+  (usa `getStandings(LIGA_MX_PROVIDER_ID, LIGA_MX_SEASON)`) → componente
+  `src/components/TablaLiga.tsx` en la pestaña "⚽ Tabla Liga MX" de la
+  página principal. OJO: es la tabla DE LA LIGA; el ranking del Club entre
+  jugadores (Supabase, pestaña Ranking) es otra cosa y no se toca.
+- **Tabla EN VIVO**: `computeLiveStandings(base, liveResults)` en
+  `liveStandings.ts` — función pura que recalcula la tabla aplicando los
+  marcadores en curso. Decisión de Gonzalo (2026-11-13): la tabla debe
+  recalcularse AL CAER GOL. El refresco/polling que la invoque al detectar
+  un cambio de marcador aún NO está construido; la función ya quedó lista
+  y probada con datos reales.
+- Llave premium de TheSportsDB activa (cuenta gonzalo3210): tabla de
+  Liga MX verificada COMPLETA (18/18) y temporada con 153 eventos.
 
 ## Uso (solo servidor: route handlers, server components, scripts)
 

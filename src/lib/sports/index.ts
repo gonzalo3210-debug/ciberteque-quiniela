@@ -3,5 +3,6 @@
 
 export * from './types';
 export * from './leagues';
+export * from './liveStandings';
 export type { SportsProvider } from './provider';
 export { getSportsProvider } from './provider';

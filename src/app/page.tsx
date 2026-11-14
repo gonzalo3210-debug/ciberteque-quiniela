@@ -7,6 +7,7 @@ import Login from '@/components/Login'
 import MisJugadas from '@/components/MisJugadas'
 import AdminPanel from '@/components/AdminPanel'
 import Posiciones from '@/components/Posiciones'
+import TablaLiga from '@/components/TablaLiga'
 import MiBilletera from '@/components/MiBilletera'
 import Perfil from '@/components/Perfil'
 import ModuloFinanzas from '@/components/ModuloFinanzas'
@@ -20,7 +21,7 @@ export default function Home() {
   const [vista, setVista] = useState<'login' | 'registro'>('login')
   
   // 👇 Agregamos 'usuarios' a las opciones posibles
-  const [pestana, setPestana] = useState<'jugar' | 'historial' | 'admin' | 'ranking' | 'billetera' | 'perfil' | 'finanzas' | 'usuarios'>('jugar')
+  const [pestana, setPestana] = useState<'jugar' | 'historial' | 'admin' | 'ranking' | 'tabla' | 'billetera' | 'perfil' | 'finanzas' | 'usuarios'>('jugar')
   const [cargandoSesion, setCargandoSesion] = useState(true)
 
   // 1. LA MAGIA DE LA MEMORIA + SINCRONIZACIÓN SILENCIOSA
@@ -60,7 +61,7 @@ export default function Home() {
   }, [])
 
   // FUNCIÓN NUEVA: Cambia la pestaña y la guarda en la memoria
-  const cambiarPestana = (nuevaPestana: 'jugar' | 'historial' | 'admin' | 'ranking' | 'billetera' | 'perfil' | 'finanzas' | 'usuarios') => {
+  const cambiarPestana = (nuevaPestana: 'jugar' | 'historial' | 'admin' | 'ranking' | 'tabla' | 'billetera' | 'perfil' | 'finanzas' | 'usuarios') => {
     setPestana(nuevaPestana)
     localStorage.setItem('club_pronosticos_pestana', nuevaPestana)
   }
@@ -170,7 +171,18 @@ export default function Home() {
               🏆 Ranking
             </button>
 
-            <button 
+            <button
+              onClick={() => cambiarPestana('tabla')}
+              className={`flex-1 min-w-[100px] py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
+                pestana === 'tabla'
+                ? 'bg-cyan-600 text-white shadow-[0_0_20px_rgba(8,145,178,0.4)]'
+                : 'text-cyan-500/70 hover:text-cyan-400'
+              }`}
+            >
+              ⚽ Tabla Liga MX
+            </button>
+
+            <button
               onClick={() => cambiarPestana('billetera')}
               className={`flex-1 min-w-[100px] py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
                 pestana === 'billetera' 
@@ -243,6 +255,10 @@ export default function Home() {
 
             {pestana === 'ranking' && (
               <Posiciones />
+            )}
+
+            {pestana === 'tabla' && (
+              <TablaLiga />
             )}
 
             {pestana === 'billetera' && (
