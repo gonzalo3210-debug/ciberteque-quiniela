@@ -139,6 +139,26 @@ Champions League (liga 4480), que TheSportsDB no publica:
   (Environment Variables), igual que `THESPORTSDB_API_KEY`; sin ella,
   producción simplemente cae al respaldo calculado.
 
+## Sección "📰 Noticias" (submenú de Quiniela, 2026-11-14)
+
+No usa este adaptador, pero vive junto a la sección Partidos:
+
+- **`src/components/SeccionNoticias.tsx`**: UN feed que mezcla
+  noticias del club y de los equipos, con tarjetas distinguidas
+  (🏟️ Del club / ⚽ De los equipos).
+- **Del club** (`src/lib/noticiasClub.ts`, función pura): eventos
+  derivados de Supabase sin esquema nuevo — jornada abierta, cierre
+  en menos de 48 h, finales con marcador (solo de las 2 jornadas más
+  recientes), líder de la jornada en curso (misma cuenta de puntos
+  que el Ranking) y ganador al liquidar.
+- **De los equipos** (ruta `src/app/api/noticias-externas?equipos=`):
+  titulares de RSS PÚBLICO en español — ESPN (espn.com.mx) y Google
+  Noticias edición México, ambas verificadas el 2026-11-14 — con
+  caché de 30 min, emparejados por nombre de equipo con
+  `src/lib/rss.ts` (parser RSS mínimo + matching sin acentos y con
+  nombres en español). Cada tarjeta enlaza a la nota original. Si
+  las fuentes fallan, el feed sigue solo con las del club.
+
 ## Uso (solo servidor: route handlers, server components, scripts)
 
 ```ts

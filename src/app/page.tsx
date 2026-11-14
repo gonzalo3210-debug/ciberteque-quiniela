@@ -8,6 +8,7 @@ import MisJugadas from '@/components/MisJugadas'
 import AdminPanel from '@/components/AdminPanel'
 import Posiciones from '@/components/Posiciones'
 import SeccionPartidos from '@/components/SeccionPartidos'
+import SeccionNoticias from '@/components/SeccionNoticias'
 import MiBilletera from '@/components/MiBilletera'
 import Perfil from '@/components/Perfil'
 import ModuloFinanzas from '@/components/ModuloFinanzas'
@@ -16,7 +17,7 @@ import GestorUsuarios from '@/components/GestorUsuarios'
 // 🔔 Importamos el Centro de Notificaciones
 import CentroNotificaciones from '@/components/CentroNotificaciones'
 
-type Pestana = 'jugar' | 'historial' | 'admin' | 'ranking' | 'partidos' | 'billetera' | 'perfil' | 'finanzas' | 'usuarios'
+type Pestana = 'jugar' | 'historial' | 'admin' | 'ranking' | 'noticias' | 'partidos' | 'billetera' | 'perfil' | 'finanzas' | 'usuarios'
 
 export default function Home() {
   const [usuarioActivo, setUsuarioActivo] = useState<any>(null)
@@ -245,6 +246,9 @@ export default function Home() {
                   <button onClick={() => cambiarPestana('ranking')} className={claseTab(pestana === 'ranking', 'bg-amber-500 text-slate-900 shadow-md shadow-amber-500/20')}>
                     🏆 Ranking
                   </button>
+                  <button onClick={() => cambiarPestana('noticias')} className={claseTab(pestana === 'noticias', 'bg-sky-600 text-white shadow-md')}>
+                    📰 Noticias
+                  </button>
                   <button onClick={() => cambiarPestana('billetera')} className={claseTab(pestana === 'billetera', 'bg-green-600 text-white shadow-md')}>
                     💳 Billetera
                   </button>
@@ -284,6 +288,10 @@ export default function Home() {
 
               {pestana === 'ranking' && (
                 <Posiciones />
+              )}
+
+              {pestana === 'noticias' && (
+                <SeccionNoticias />
               )}
 
               {pestana === 'partidos' && (
