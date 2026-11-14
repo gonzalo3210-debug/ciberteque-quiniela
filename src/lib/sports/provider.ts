@@ -14,6 +14,7 @@ import type {
   GetFixturesOptions,
   SportsFixture,
   SportsTeam,
+  SportsTeamDetail,
   StandingRow,
   TeamLogoMap,
 } from './types';
@@ -58,6 +59,13 @@ export interface SportsProvider {
 
   /** Mapa nombre de equipo -> URL del escudo (para equipos.logo_url). */
   getTeamLogos(leagueProviderId: string): Promise<TeamLogoMap>;
+
+  /**
+   * Detalle de UN equipo (ficha del club: DT, estadio...). null si el
+   * proveedor no conoce el equipo. El DT puede venir null aunque el
+   * equipo exista: TheSportsDB hoy no lo publica (ver types.ts).
+   */
+  getTeamDetail(teamProviderId: string): Promise<SportsTeamDetail | null>;
 }
 
 import { theSportsDbProvider } from './thesportsdb';

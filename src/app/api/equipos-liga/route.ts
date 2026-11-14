@@ -8,6 +8,10 @@
 // de la temporada: el catálogo del proveedor trae huecos en algunas ligas
 // (verificado: Grecia 8 de 14, Liga MX 17 de 18), y así la lista para
 // seguir equipos queda completa.
+//
+// Modo detalle: ?equipo={teamId} (sin liga) devuelve la ficha del
+// equipo — { team: SportsTeamDetail | null } — para el Resumen de su
+// página (competición, estadio y DT si el proveedor lo trajera).
 
 import { NextResponse } from 'next/server';
 import {
@@ -20,6 +24,26 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
+
+  // ----- Modo detalle (?equipo=): la ficha de UN equipo -----
+  const equipoId = searchParams.get('equipo');
+  if (equipoId) {
+    try {
+      const provider = getSportsProvider();
+      const team = await provider.getTeamDetail(equipoId);
+      return NextResponse.json({
+        team,
+        fetchedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error(`Error al obtener el detalle del equipo ${equipoId}:`, error);
+      return NextResponse.json(
+        { error: 'No se pudo cargar la ficha del equipo.' },
+        { status: 502 }
+      );
+    }
+  }
+
   const ligaId = searchParams.get('liga') || '';
   const liga = getSupportedLeague(ligaId);
 

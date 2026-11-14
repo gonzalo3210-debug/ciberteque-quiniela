@@ -27,6 +27,7 @@ import type {
   GetFixturesOptions,
   SportsFixture,
   SportsTeam,
+  SportsTeamDetail,
   StandingRow,
   TeamLogoMap,
   FixtureStatus,
@@ -146,6 +147,15 @@ interface TsdbTeam {
   // La v1 ha usado ambos nombres según el endpoint:
   strTeamBadge?: string;
   strBadge?: string;
+}
+
+/** Ficha de un equipo (lookupteam.php). */
+interface TsdbTeamDetail extends TsdbTeam {
+  strStadium?: string;
+  // strManager: TheSportsDB NO lo devuelve (verificado 2026-11-14 en
+  // v1 y v2, la llave ni siquiera viene en la respuesta). Se declara
+  // por si el proveedor lo empieza a publicar: se lee defensivo.
+  strManager?: string;
 }
 
 interface TsdbStanding {
@@ -367,6 +377,31 @@ async function getTeamLogos(leagueProviderId: string): Promise<TeamLogoMap> {
 }
 
 /**
+ * Detalle de un equipo (lookupteam.php): nombre, escudo, estadio y DT.
+ * El DT (strManager) en la práctica llega null: TheSportsDB no lo
+ * publica en su API (verificado 2026-11-14); se lee defensivo por si
+ * algún día lo agrega. Dato casi fijo: se cachea 1 día.
+ */
+async function getTeamDetail(
+  teamProviderId: string
+): Promise<SportsTeamDetail | null> {
+  const path = `lookupteam.php?id=${encodeURIComponent(teamProviderId)}`;
+  const data = await tsdbFetch<{ teams: TsdbTeamDetail[] | null }>(
+    path,
+    86400
+  );
+  const raw = data?.teams?.[0];
+  if (!raw) return null;
+  return {
+    providerId: raw.idTeam,
+    name: raw.strTeam,
+    badgeUrl: raw.strBadge || raw.strTeamBadge || null,
+    manager: raw.strManager?.trim() ? raw.strManager : null,
+    stadium: raw.strStadium?.trim() ? raw.strStadium : null,
+  };
+}
+
+/**
  * Marcadores en vivo de fútbol (API v2 premium, UNA consulta para todas
  * las ligas). La fuente refresca cada 2 minutos; aquí se cachea 60 s para
  * que el polling de los clientes (cada 2 min contra NUESTRA ruta) no queme
@@ -386,6 +421,7 @@ export const theSportsDbProvider: SportsProvider = {
   getStandings,
   getTeams,
   getTeamLogos,
+  getTeamDetail,
   getLeagueBadge,
   getLiveScores,
 };

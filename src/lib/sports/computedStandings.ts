@@ -144,10 +144,20 @@ function rondasCompletas(
   return out;
 }
 
-/** Construye las filas de UNA tabla con los partidos dados. */
+/** Ámbito de una tabla calculada: completa, solo de local o solo de visita. */
+export type AmbitoTabla = 'completa' | 'local' | 'visitante';
+
+/**
+ * Construye las filas de UNA tabla con los partidos dados.
+ * Con ambito 'local' solo se acumula el renglón del equipo LOCAL de
+ * cada partido (su PJ/GF/GC y su resultado son los de casa); con
+ * 'visitante', solo el del VISITANTE. Es la tabla "de local / de
+ * visita" de la página del equipo, estilo 365Scores.
+ */
 function construirTabla(
   partidos: SportsFixture[],
-  equipos: TeamInfo[]
+  equipos: TeamInfo[],
+  ambito: AmbitoTabla = 'completa'
 ): StandingRow[] {
   interface Acum {
     info: TeamInfo;
@@ -175,6 +185,9 @@ function construirTabla(
     });
   }
 
+  const cuentaLocal = ambito !== 'visitante';
+  const cuentaVisita = ambito !== 'local';
+
   for (const f of partidos) {
     if (f.status !== 'finished') continue;
     if (f.homeScore === null || f.awayScore === null) continue;
@@ -182,32 +195,48 @@ function construirTabla(
     const away = porClave.get(teamKey(f.awayTeamProviderId, f.awayTeam));
     if (!home || !away || home === away) continue;
 
-    home.played += 1;
-    away.played += 1;
-    home.gf += f.homeScore;
-    home.ga += f.awayScore;
-    away.gf += f.awayScore;
-    away.ga += f.homeScore;
+    if (cuentaLocal) {
+      home.played += 1;
+      home.gf += f.homeScore;
+      home.ga += f.awayScore;
+    }
+    if (cuentaVisita) {
+      away.played += 1;
+      away.gf += f.awayScore;
+      away.ga += f.homeScore;
+    }
     const ko = f.kickoffUtc || f.date || '';
     if (f.homeScore > f.awayScore) {
-      home.won += 1;
-      home.points += 3;
-      away.lost += 1;
-      home.forma.push({ kickoff: ko, letra: 'W' });
-      away.forma.push({ kickoff: ko, letra: 'L' });
+      if (cuentaLocal) {
+        home.won += 1;
+        home.points += 3;
+        home.forma.push({ kickoff: ko, letra: 'W' });
+      }
+      if (cuentaVisita) {
+        away.lost += 1;
+        away.forma.push({ kickoff: ko, letra: 'L' });
+      }
     } else if (f.homeScore < f.awayScore) {
-      away.won += 1;
-      away.points += 3;
-      home.lost += 1;
-      home.forma.push({ kickoff: ko, letra: 'L' });
-      away.forma.push({ kickoff: ko, letra: 'W' });
+      if (cuentaVisita) {
+        away.won += 1;
+        away.points += 3;
+        away.forma.push({ kickoff: ko, letra: 'W' });
+      }
+      if (cuentaLocal) {
+        home.lost += 1;
+        home.forma.push({ kickoff: ko, letra: 'L' });
+      }
     } else {
-      home.drawn += 1;
-      away.drawn += 1;
-      home.points += 1;
-      away.points += 1;
-      home.forma.push({ kickoff: ko, letra: 'D' });
-      away.forma.push({ kickoff: ko, letra: 'D' });
+      if (cuentaLocal) {
+        home.drawn += 1;
+        home.points += 1;
+        home.forma.push({ kickoff: ko, letra: 'D' });
+      }
+      if (cuentaVisita) {
+        away.drawn += 1;
+        away.points += 1;
+        away.forma.push({ kickoff: ko, letra: 'D' });
+      }
     }
   }
 
@@ -242,6 +271,24 @@ function construirTabla(
     r.rank = i + 1;
   });
   return rows;
+}
+
+/**
+ * UNA tabla calculada en un ámbito (completa / solo local / solo
+ * visitante) desde los resultados dados, SIN el aislamiento de fases
+ * de computeStandingsFromResults: cuenta todos los partidos
+ * finalizados que le pasen. La usa la página del equipo para su
+ * selector Completa · Local · Visitante (con los partidos de la liga
+ * ya filtrados por la ruta). Mismos desempates que el resto del
+ * módulo: puntos → diferencia → goles a favor → nombre.
+ */
+export function computeStandingsAmbito(
+  fixtures: SportsFixture[],
+  ambito: AmbitoTabla
+): StandingRow[] {
+  if (fixtures.length === 0) return [];
+  const infos = infoEquipos(fixtures);
+  return construirTabla(fixtures, [...infos.values()], ambito);
 }
 
 /**

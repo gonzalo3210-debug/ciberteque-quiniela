@@ -83,3 +83,26 @@ export interface GetFixturesOptions {
 
 /** Mapa nombre de equipo -> URL de su escudo. */
 export type TeamLogoMap = Record<string, string>;
+
+/**
+ * Detalle de UN equipo (para el Resumen de su página): lo que el
+ * proveedor trae en la ficha del club además del escudo.
+ */
+export interface SportsTeamDetail {
+  /** ID del equipo en el proveedor. */
+  providerId: string;
+  /** Nombre completo del equipo. */
+  name: string;
+  /** URL del escudo/logo. */
+  badgeUrl: string | null;
+  /**
+   * Director técnico (strManager en TheSportsDB). OJO: verificado el
+   * 2026-11-14, la API de TheSportsDB NO devuelve este campo en el
+   * detalle del equipo (ni en v1 ni en v2), así que en la práctica
+   * llega null y la UI lo omite; si el proveedor lo empieza a dar, se
+   * muestra sin tocar nada más.
+   */
+  manager: string | null;
+  /** Estadio (strStadium), si el proveedor lo trae. */
+  stadium: string | null;
+}
