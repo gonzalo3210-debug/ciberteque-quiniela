@@ -210,21 +210,37 @@ export function usePosiciones(rolUsuario?: string) {
         }
       })
 
-      // Misma regla que Mis Jugadas: una quiniela NO-sorteo solo está
-      // TERMINADA si está cerrada Y TODOS sus partidos ya son
-      // finales. goles_totales_real ya no sirve de señal: el Árbitro
-      // lo captura en vivo con cada GUARDAR AVANCE.
-      const quinielaTodosFinal = (q: any) => {
+      // Misma regla canónica que Mis Jugadas (grupoQuinielaTerminada):
+      // una quiniela NO-sorteo está TERMINADA si está cerrada
+      // (liquidada) O si tiene partidos y TODOS ya vencieron su
+      // ventana de 3 h tras el inicio — así las jornadas viejas que
+      // nunca se liquidaron ni capturaron completas dejan de contar
+      // como activas. Un partido sin fecha cuenta como vencido solo
+      // si el cierre de la quiniela también venció +3h. Sorteo: sin
+      // cambios (terminada solo si está cerrada).
+      const VENTANA_FIN_MS = 3 * 60 * 60 * 1000
+      const ventanaVencida = (iso: string | null | undefined) => {
+        if (!iso) return false
+        const t = new Date(iso).getTime()
+        return !isNaN(t) && t + VENTANA_FIN_MS < Date.now()
+      }
+      const quinielaTerminada = (q: any) => {
+        if (q.modalidad === 'sorteo') return q.estado === 'cerrada'
+        if (q.estado === 'cerrada') return true
         const ps = q.partidos || []
-        return ps.length > 0 && ps.every((p: any) => p.es_final === true)
+        if (ps.length === 0) return false
+        return ps.every((p: any) => {
+          const fh = p.fecha_hora_partido || p.fecha_hora
+          return fh ? ventanaVencida(fh) : ventanaVencida(q.fecha_cierre)
+        })
       }
 
       const activas = quinielasProcesadas
-        .filter(q => q.estado === 'abierta' || (q.estado === 'cerrada' && q.modalidad !== 'sorteo' && !quinielaTodosFinal(q)))
+        .filter(q => !quinielaTerminada(q))
         .sort((a, b) => new Date(a.fecha_cierre).getTime() - new Date(b.fecha_cierre).getTime())
 
       const pasadas = quinielasProcesadas
-        .filter(q => (q.estado === 'cerrada' && q.modalidad === 'sorteo') || (q.estado === 'cerrada' && q.modalidad !== 'sorteo' && quinielaTodosFinal(q)))
+        .filter(q => quinielaTerminada(q))
         .sort((a, b) => new Date(b.fecha_cierre).getTime() - new Date(a.fecha_cierre).getTime())
 
       setQuinielasAbiertas(activas)

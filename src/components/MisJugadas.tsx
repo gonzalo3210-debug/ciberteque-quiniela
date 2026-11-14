@@ -17,6 +17,37 @@ export function partidoEnVentanaEnVivo(fechaHora: string | null, esFinal: boolea
   return ahora >= inicio && (ahora - inicio) <= VENTANA_EN_VIVO_MS
 }
 
+/** ¿La ventana de un partido ya VENCIÓ? (inicio + 3 h < ahora). */
+export function ventanaVencida(fechaHora: string | null | undefined): boolean {
+  if (!fechaHora) return false
+  const inicio = new Date(fechaHora).getTime()
+  if (isNaN(inicio)) return false
+  return inicio + VENTANA_EN_VIVO_MS < Date.now()
+}
+
+/**
+ * ¿Una quiniela (ya agrupada) está TERMINADA? Regla canónica
+ * (corrección de Gonzalo 2026-11-14): las jornadas viejas se quedaban
+ * "activas" para siempre porque nunca se liquidaron NI se capturaron
+ * todos sus resultados, y la regla anterior exigía TODOS es_final.
+ * NO-sorteo: terminada si está cerrada (liquidada) O si tiene partidos
+ * y TODOS ya vencieron su ventana de 3 h tras el inicio; un partido sin
+ * fecha cuenta como vencido solo si la fecha_cierre de la quiniela
+ * también venció +3h. Activa = todo lo demás. Sorteo: sin cambios
+ * (terminada solo si está cerrada).
+ */
+export function grupoQuinielaTerminada(grupo: any): boolean {
+  if (grupo?.modalidad === 'sorteo') return grupo?.estado === 'cerrada'
+  if (grupo?.estado === 'cerrada') return true
+  const ps = grupo?.partidos || []
+  if (ps.length === 0) return false
+  return ps.every((p: any) =>
+    p.fecha_hora
+      ? ventanaVencida(p.fecha_hora)
+      : ventanaVencida(grupo?.fecha_cierre)
+  )
+}
+
 // ⚡ MINI-COMPONENTE ACTUALIZADO: Maneja la cuenta regresiva y la transición automática a 0-0
 const ContadorPartido = ({ fechaHora, esFinal }: { fechaHora: string | null, esFinal?: boolean }) => {
   const [estado, setEstado] = useState<'espera' | 'vivo' | 'sin_resultado'>('espera');
@@ -149,19 +180,14 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
         .order('fecha_creacion', { ascending: false })
 
       if (data) {
-        // Una quiniela NO-sorteo solo está TERMINADA si está cerrada Y
-        // TODOS sus partidos ya son finales. goles_totales_real ya no
-        // sirve de señal: el Árbitro lo captura en vivo con cada
-        // GUARDAR AVANCE, así que una jornada en curso ya lo trae.
-        const ticketTodosFinal = (t: any) => {
-          const prons = t.pronosticos || []
-          return prons.length > 0 && prons.every((p: any) => p.partidos?.es_final === true)
-        }
-        const activos = data.filter(t => t.quinielas?.estado === 'abierta' || (t.quinielas?.estado === 'cerrada' && t.quinielas?.modalidad !== 'sorteo' && !ticketTodosFinal(t)))
-        const completados = data.filter(t => (t.quinielas?.estado === 'cerrada' && t.quinielas?.modalidad === 'sorteo') || (t.quinielas?.estado === 'cerrada' && t.quinielas?.modalidad !== 'sorteo' && ticketTodosFinal(t)))
-        
-        const gruposA = agruparTicketsPorQuiniela(activos)
-        const gruposC = agruparTicketsPorQuiniela(completados)
+        // Clasificación por GRUPO con la regla canónica
+        // (grupoQuinielaTerminada): una jornada vieja sin liquidar y
+        // sin todos sus resultados capturados ya NO se queda activa
+        // para siempre — si todos sus partidos vencieron su ventana
+        // de 3 h, va al Historial aunque nadie la haya liquidado.
+        const gruposTodos = agruparTicketsPorQuiniela(data)
+        const gruposA = gruposTodos.filter(g => !grupoQuinielaTerminada(g))
+        const gruposC = gruposTodos.filter(g => grupoQuinielaTerminada(g))
 
         gruposA.sort((a, b) => new Date(a.fecha_cierre).getTime() - new Date(b.fecha_cierre).getTime())
         gruposC.sort((a, b) => new Date(b.fecha_cierre).getTime() - new Date(a.fecha_cierre).getTime())
