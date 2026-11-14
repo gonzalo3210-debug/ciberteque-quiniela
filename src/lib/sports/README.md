@@ -6,10 +6,36 @@ y logos a proveedores externos.
 
 ## Ya conectado
 
-- **Sección "⚽ Partidos"** (rediseño 2026-11-13, tipo 365Scores): la vieja
-  pestaña "Tabla Liga MX" se reemplazó por UNA sola sección en el menú
-  (`src/components/SeccionPartidos.tsx`) con vistas Favoritos, Resultados,
-  Posiciones y Siguiendo. Nada de un botón por liga.
+- **Sección "⚽ Partidos"** (rediseño 2026-11-13, tipo 365Scores;
+  reorganizada 2026-11-14 al diseño de Gonzalo): la vieja pestaña
+  "Tabla Liga MX" se reemplazó por UNA sola sección en el menú
+  (`src/components/SeccionPartidos.tsx`). Nada de un botón por liga.
+  Arriba lleva tres FILTROS y debajo las PESTAÑAS de la sección:
+  - **🔴 Live** (ruta `src/app/api/en-vivo`): partidos en vivo ahora,
+    en bloques por prioridad — 🎯 De tu quiniela, ⭐ Tus favoritos,
+    🔴 En vivo ahora (resto de ligas soportadas). La ruta devuelve el
+    livescore v2 filtrado a ligas soportadas MÁS los partidos que
+    coincidan con los pares de la jornada (`?pares=Local|Visitante;…`),
+    porque los de quiniela a veces son de otra competencia (amistosos
+    de selecciones). La clasificación la hace el cliente.
+  - **📅 Calendario**: partidos por día (selector ‹ › y Hoy) de todas
+    las ligas soportadas; es la vista Resultados de siempre.
+  - **🔎 Buscar** (ruta `src/app/api/buscar?q=`): ligas y equipos por
+    nombre, insensible a acentos y con la capa de nombres en español
+    ("Dinamarca" encuentra a "Denmark"). Un equipo abre su vista; una
+    liga, sus posiciones.
+  - **🎯 Quiniela**: los partidos de la jornada activa o abierta del
+    Club (Supabase, hook `src/hooks/useJornadaActual.ts`) EMPAREJADOS
+    con los fixtures de la API (`src/lib/emparejar.ts`: par de equipos
+    con nombres normalizados + diccionario español, fecha ±1 día)
+    para traer marcador y minuto en vivo; el que no se empareja (p.
+    ej. amistosos fuera de las ligas soportadas) se pinta con los
+    datos de la app. Los fixtures se piden con el modo rango de
+    `/api/partidos?desde=&hasta=`.
+  - **⭐ Favoritos / ⭐ Siguiendo**: partidos de las ligas/equipos que
+    sigue el usuario y su administración. Favoritos vive en
+    localStorage (`src/lib/favoritos.ts`), sin tocar Supabase; por
+    defecto se siguen Liga MX, Nations y Champions.
   - **Ligas soportadas**: catálogo `SUPPORTED_LEAGUES` en `leagues.ts`
     (Liga MX, Nations, Champions, Premier, La Liga, Serie A, Bundesliga,
     Ligue 1, Grecia y Copa Libertadores 4501). Cada liga trae su
@@ -17,9 +43,7 @@ y logos a proveedores externos.
   - **Resultados/Favoritos**: ruta `src/app/api/partidos?dias=N` —
     calendario de temporada recortado a la ventana de Mazatlán (ayer a
     hoy+N días), agrupado por liga, con escudos y mezcla de marcadores
-    en vivo. Favoritos (ligas/equipos con estrella) vive en localStorage
-    (`src/lib/favoritos.ts`), sin tocar Supabase; por defecto se siguen
-    Liga MX, Nations y Champions.
+    en vivo.
   - **Posiciones**: ruta `src/app/api/tabla-liga?liga={id}` generalizada
     → `src/components/TablaLiga.tsx` parametrizado por liga, con selector
     dentro de la sección. OJO: es la tabla DE LA LIGA; el ranking del
