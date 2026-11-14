@@ -54,7 +54,7 @@ export interface SupportedLeague {
    * derivadas de quién juega contra quién; 'unica' = una sola tabla con
    * los partidos de la fase principal. undefined = no se calcula.
    */
-  computedTable?: 'grupos' | 'unica';
+  computedTable?: 'grupos' | 'unica' | 'grupos-directos';
   /** ¿Nace seguida en Favoritos (localStorage) si el usuario no ha elegido? */
   defaultFollowed: boolean;
 }
@@ -145,6 +145,30 @@ export const SUPPORTED_LEAGUES: SupportedLeague[] = [
     season: '2026-2027',
     zones: null, // formato con rondas de campeonato/descenso: sin zonas simples
     hasStandings: true,
+    defaultFollowed: false,
+  },
+  {
+    providerId: '5280',
+    // Pedida por Gonzalo (2026-11-14): la Liga de Naciones de Concacaf
+    // SÍ existe en el proveedor (idLeague 5280, verificado contra la
+    // API real: temporada vigente "2026-2027" con 106 eventos y 41
+    // selecciones con escudo). lookuptable devuelve el cuerpo VACÍO
+    // (son Ligas A/B/C por grupos), así que la tabla se CALCULA.
+    // OJO: lookupleague reporta strCurrentSeason "2025", pero los
+    // eventos reales de la edición en curso están bajo "2026-2027"
+    // (verificado: 86 terminados). El modo NO es 'grupos' a secas: el
+    // proveedor mezcla dos fechas en cada ronda de la fase de grupos
+    // y el aislamiento por rondas pierde partidos; con
+    // 'grupos-directos' los grupos salen de las componentes del
+    // calendario sin la ronda 0 (las llaves): 9 grupos, 37 equipos.
+    // Los 4 sembrados (México, EE. UU., Canadá, Panamá) no juegan
+    // fase de grupos: entran en las llaves y no salen en la tabla.
+    name: 'Liga de Naciones Concacaf',
+    providerName: 'CONCACAF Nations League',
+    season: '2026-2027',
+    zones: null,
+    hasStandings: false, // verificado: lookuptable vacío (grupos A/B/C)
+    computedTable: 'grupos-directos', // componentes sin la ronda de llaves
     defaultFollowed: false,
   },
   {

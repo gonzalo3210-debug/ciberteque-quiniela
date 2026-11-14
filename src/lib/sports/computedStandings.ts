@@ -53,7 +53,7 @@
 
 import type { SportsFixture, StandingRow } from './types';
 
-export type ComputedTableMode = 'grupos' | 'unica';
+export type ComputedTableMode = 'grupos' | 'unica' | 'grupos-directos';
 
 export interface ComputedTable {
   /** "Grupo N" en modo grupos; null si es tabla única. */
@@ -315,6 +315,21 @@ export function computeStandingsFromResults(
     return [{ label: null, rows: construirTabla(base, equipos) }];
   }
 
+  if (mode === 'grupos-directos') {
+    // Liga de Naciones Concacaf (verificado 2026-11-14): el proveedor
+    // mezcla DOS fechas en cada intRound de la fase de grupos (en la
+    // "ronda 2" hay equipos repetidos), así que el aislamiento por
+    // rondas de arriba no sirve para esta liga. Lo que SÍ separa las
+    // fases en su calendario: la ronda 0 trae las LLAVES eliminatorias
+    // a ida y vuelta (cruzan equipos de grupos distintos y a los 4
+    // sembrados que no juegan fase de grupos: México, EE. UU., Canadá
+    // y Panamá). Sin la ronda 0, los grupos son exactamente las
+    // componentes del grafo de partidos: 9 grupos (2 de 6 de la Liga
+    // A, 4 de 4 de la B y 3 de 3 de la C), 37 selecciones, PJ 4-5.
+    const base = fixtures.filter((f) => f.round !== 0);
+    return tablasPorComponentes(base, infos);
+  }
+
   // ----- modo 'grupos' -----
   const nucleo = new Set<string>();
   for (const fs of completas.values()) {
@@ -338,7 +353,20 @@ export function computeStandingsFromResults(
   }
   const base = deGrupo.length > 0 ? deGrupo : candidatos;
 
-  // Componentes del grafo de partidos (quién juega contra quién).
+  return tablasPorComponentes(base, infos);
+}
+
+/**
+ * Una tabla por COMPONENTE del grafo de partidos dados (quién juega
+ * contra quién): cada componente es un grupo. Si todo el calendario es
+ * una sola componente, cae a la tabla única. Las etiquetas son
+ * "Grupo N" en orden (tamaño y luego primer nombre): los nombres
+ * oficiales de grupo no vienen en el dato y no se fingen.
+ */
+function tablasPorComponentes(
+  base: SportsFixture[],
+  infos: Map<string, TeamInfo>
+): ComputedTable[] {
   const padre = new Map<string, string>();
   const find = (x: string): string => {
     let r = x;

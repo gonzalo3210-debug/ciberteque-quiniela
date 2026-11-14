@@ -87,7 +87,7 @@ async function respuestaTablaCalculada(
     });
     const groups: ComputedTable[] = computeStandingsFromResults(
       fixtures,
-      liga.computedTable as 'grupos' | 'unica'
+      liga.computedTable as 'grupos' | 'unica' | 'grupos-directos'
     );
 
     // Tabla EN VIVO al caer gol, por grupo: computeLiveStandings ignora
