@@ -2,9 +2,9 @@
 //
 // La jornada "de ahorita" del Club para la sección Partidos (pestaña
 // 🎯 Quiniela y filtro 🔴 Live): la quiniela ABIERTA más próxima a
-// cerrar; si no hay abiertas, la que quedó CERRADA pero sigue en curso
-// (sin goles totales capturados, p. ej. entre el cierre y la
-// liquidación). Respeta la privacidad de siempre: las jornadas
+// cerrar; si no hay abiertas, la que quedó CERRADA pero sigue en
+// curso (todavía le faltan partidos finales, p. ej. entre el cierre
+// y la liquidación). Respeta la privacidad de siempre: las jornadas
 // solo_admins no se le muestran a quien no es admin.
 //
 // Devuelve TODAS las candidatas (puede haber más de una abierta) con
@@ -70,19 +70,38 @@ export function useJornadaActual() {
       let lista: JornadaConPartidos[] = (abiertas || []).map(acomodar)
 
       if (lista.length === 0) {
-        // Sin abiertas: la última cerrada que siga en curso (sin
-        // goles totales = aún no liquidada).
+        // Sin abiertas: la última cerrada que siga EN CURSO, es
+        // decir, a la que todavía le falten partidos finales. No se
+        // puede filtrar por goles_totales_real: el Árbitro lo
+        // captura en vivo con cada GUARDAR AVANCE, así que una
+        // jornada en juego ya lo trae y quedaría fuera. Se traen
+        // las cerradas recientes y se filtra aquí con es_final.
         let consultaCerradas = supabase
           .from('quinielas')
           .select(`id, nombre_jornada, estado, modalidad, precio_ticket, fecha_cierre, goles_totales_real, solo_admins, partidos (${CAMPOS_PARTIDOS})`)
           .eq('estado', 'cerrada')
-          .is('goles_totales_real', null)
           .order('fecha_cierre', { ascending: false })
-          .limit(3)
+          .limit(5)
         if (rol !== 'admin') consultaCerradas = consultaCerradas.neq('solo_admins', true)
         const { data: cerradas, error: errCerradas } = await consultaCerradas
         if (errCerradas) throw errCerradas
-        lista = (cerradas || []).map(acomodar)
+        lista = (cerradas || [])
+          .map(acomodar)
+          .filter(({ quiniela, partidos }) => {
+            // Sorteo conserva su criterio de siempre (sin goles
+            // totales = aún no liquidada); las demás, por finales.
+            if (quiniela.modalidad === 'sorteo') {
+              return (
+                quiniela.goles_totales_real === null ||
+                quiniela.goles_totales_real === undefined
+              )
+            }
+            return !(
+              partidos.length > 0 &&
+              partidos.every((p: any) => p.es_final === true)
+            )
+          })
+          .slice(0, 3)
       }
 
       setCandidatas(lista)

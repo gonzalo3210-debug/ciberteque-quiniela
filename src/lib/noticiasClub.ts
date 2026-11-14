@@ -206,14 +206,27 @@ export function generarNoticiasClub(
       });
     }
 
+    // TERMINADA = cerrada Y TODOS sus partidos ya son finales.
+    // goles_totales_real ya no sirve de señal de liquidación: el
+    // Árbitro lo captura en vivo con cada GUARDAR AVANCE, así que
+    // una jornada a media jugar ya lo trae y NO debe anunciar
+    // ganador todavía. Sorteo conserva su criterio de siempre.
+    const esSorteo = q.modalidad === 'sorteo';
+    const todosFinales =
+      partidos.length > 0 && partidos.every((p: any) => p.es_final === true);
     const enCurso =
       (q.estado === 'abierta' && finales.length > 0) ||
       (q.estado === 'cerrada' &&
-        (q.goles_totales_real === null || q.goles_totales_real === undefined));
+        (esSorteo
+          ? q.goles_totales_real === null ||
+            q.goles_totales_real === undefined
+          : !todosFinales));
     const liquidada =
       q.estado === 'cerrada' &&
-      q.goles_totales_real !== null &&
-      q.goles_totales_real !== undefined;
+      (esSorteo
+        ? q.goles_totales_real !== null &&
+          q.goles_totales_real !== undefined
+        : todosFinales);
 
     // 🏆 Líder de la jornada en curso
     if (enCurso && q.modalidad !== 'sorteo' && finales.length > 0) {
