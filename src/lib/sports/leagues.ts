@@ -22,6 +22,9 @@
 
 export const LIGA_MX_PROVIDER_ID = '4350';
 
+/** UEFA Champions League en el proveedor. */
+export const CHAMPIONS_PROVIDER_ID = '4480';
+
 /** Temporada vigente de Liga MX en el formato del proveedor ("AAAA-AAAA"). */
 export const LIGA_MX_SEASON = '2026-2027';
 
@@ -29,6 +32,7 @@ export const LIGA_MX_SEASON = '2026-2027';
 export type LeagueZones =
   | 'liga-mx' // 1-8 liguilla (temporada 2026-2027: NO hay play-in)
   | 'europa' // 1-4 Champions, 5 Europa League, últimos 3 descenso
+  | 'champions' // fase de liga: 1-8 octavos directo, 9-24 playoff, 25-36 eliminados
   | null; // sin zonas (torneos de grupos/copa o formatos con rondas)
 
 export interface SupportedLeague {
@@ -76,13 +80,17 @@ export const SUPPORTED_LEAGUES: SupportedLeague[] = [
     defaultFollowed: true,
   },
   {
-    providerId: '4480',
+    providerId: CHAMPIONS_PROVIDER_ID,
     name: 'UEFA Champions League',
     providerName: 'UEFA Champions League',
     season: '2026-2027',
-    zones: null,
-    hasStandings: false, // verificado: lookuptable vacío (fase de liga sin tabla en v1)
-    computedTable: 'unica', // formato actual: fase de liga, una sola tabla
+    zones: 'champions', // fase de liga: 1-8 octavos, 9-24 playoff, 25+ fuera
+    // TheSportsDB NO trae esta tabla (lookuptable vacío), pero SÍ hay
+    // tabla oficial: el adaptador la pide a la fuente secundaria
+    // football-data.org (ver footballData.ts). Si esa fuente falla, la
+    // ruta cae al respaldo calculado (computedTable).
+    hasStandings: true,
+    computedTable: 'unica', // RESPALDO si football-data.org falla
     defaultFollowed: true,
   },
   {

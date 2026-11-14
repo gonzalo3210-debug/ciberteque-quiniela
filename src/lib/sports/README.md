@@ -35,7 +35,14 @@ y logos a proveedores externos.
   `/api/tabla-liga`, que devuelve `liveRows` recalculada cuando la liga
   tiene partidos en curso, y la vista la marca "EN VIVO" refrescándose
   cada 2 minutos (igual que la lista de partidos).
-- **Sin tabla oficial → tabla calculada**: Champions, Nations League y
+- **Tabla de Champions desde fuente secundaria (2026-11-14)**:
+  TheSportsDB tampoco trae la tabla de la Champions y la calculada
+  salía incompleta (su calendario no trae todas las jornadas), así que
+  la tabla OFICIAL de la fase de liga (36 equipos) se pide a
+  **football-data.org** — ver la sección propia más abajo. Ya NO se
+  marca "calculada". Si esa fuente falla, la ruta cae al respaldo
+  calculado de siempre.
+- **Sin tabla oficial → tabla calculada**: Nations League y
   Libertadores devuelven el cuerpo vacío en `lookuptable` (grupos/copa),
   así que `hasStandings=false` — pero ya no se muestra solo el aviso: la
   app CALCULA la tabla desde los resultados de la temporada con
@@ -83,6 +90,31 @@ matching interno (siguen con nombre e ID originales del proveedor).
   en el arreglo `ENTRADAS` de `nombresES.ts`, con el ID que da el
   proveedor para ese equipo.
 
+## Fuente secundaria: football-data.org (tabla de Champions)
+
+`footballData.ts` — se usa SOLO para la tabla oficial de la UEFA
+Champions League (liga 4480), que TheSportsDB no publica:
+
+- Endpoint v4: `GET /v4/competitions/CL/standings` con el header
+  `X-Auth-Token`; se toma la tabla de tipo `TOTAL` (fase de liga,
+  36 equipos) y se mapea a la forma neutra `StandingRow`.
+- Cada equipo se devuelve con su **ID y nombre canónico de
+  TheSportsDB** (mapa en el propio archivo, verificado contra ambas
+  APIs) para que la capa de nombres en español, el resaltado por
+  equipo y el recálculo en vivo funcionen igual; el escudo es el
+  `crest` de football-data.
+- Zonas de la fase de liga (en `leagues.ts`, `zones: 'champions'`):
+  **1–8 octavos directo, 9–24 playoff, 25–36 eliminados**.
+- Caché de 1 hora vía `next.revalidate`; el plan gratis permite
+  10 peticiones/minuto, de sobra con ese caché.
+- **Respaldo**: si falta el token o la fuente falla, `getStandings`
+  propaga el error y `/api/tabla-liga` responde con la tabla
+  CALCULADA por la app (la de antes), marcada como tal. Nada se rompe.
+- El token va en la variable **`FOOTBALL_DATA_TOKEN`** de `.env.local`
+  y, al publicar, hay que agregarla también en **Vercel**
+  (Environment Variables), igual que `THESPORTSDB_API_KEY`; sin ella,
+  producción simplemente cae al respaldo calculado.
+
 ## Uso (solo servidor: route handlers, server components, scripts)
 
 ```ts
@@ -103,6 +135,7 @@ En `.env.local` (y en Vercel cuando se apruebe publicar):
 
 ```
 THESPORTSDB_API_KEY=<llave gratis de thesportsdb.com>
+FOOTBALL_DATA_TOKEN=<token gratis de football-data.org> # solo tabla de Champions
 ```
 
 - La llave se registra gratis con el correo de Gonzalo en thesportsdb.com.

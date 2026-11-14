@@ -53,6 +53,11 @@ const claseZona = (liga: SupportedLeague, rank: number, total: number) => {
     if (rank <= 4) return 'border-l-4 border-l-green-500' // Champions
     if (rank === 5) return 'border-l-4 border-l-amber-500' // Europa League
     if (rank > total - 3) return 'border-l-4 border-l-red-500' // Descenso
+  } else if (liga.zones === 'champions') {
+    // Fase de liga: 1-8 a octavos directo, 9-24 al playoff, 25+ fuera.
+    if (rank <= 8) return 'border-l-4 border-l-green-500' // Octavos directo
+    if (rank <= 24) return 'border-l-4 border-l-amber-500' // Playoff
+    return 'border-l-4 border-l-red-500' // Eliminados
   }
   return 'border-l-4 border-l-transparent'
 }
@@ -386,6 +391,13 @@ export default function TablaLiga({
           <span><span className="text-green-500">▌</span> Champions (1–4)</span>
           <span><span className="text-amber-500">▌</span> Europa League (5)</span>
           <span><span className="text-red-500">▌</span> Descenso (últimos 3)</span>
+        </div>
+      )}
+      {liga.zones === 'champions' && (
+        <div className="flex flex-wrap justify-center gap-x-6 gap-y-1 mt-4 text-[11px] font-bold uppercase tracking-widest text-slate-500">
+          <span><span className="text-green-500">▌</span> Octavos directo (1–8)</span>
+          <span><span className="text-amber-500">▌</span> Playoff (9–24)</span>
+          <span><span className="text-red-500">▌</span> Eliminados (25–36)</span>
         </div>
       )}
     </div>

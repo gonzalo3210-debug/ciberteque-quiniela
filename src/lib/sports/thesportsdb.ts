@@ -21,7 +21,8 @@
 // Developer): livescore cada 2 min y límites amplios. Ver README.md.
 
 import type { SportsProvider } from './provider';
-import { getSupportedLeague } from './leagues';
+import { getSupportedLeague, CHAMPIONS_PROVIDER_ID } from './leagues';
+import { getFootballDataChampionsStandings } from './footballData';
 import type {
   GetFixturesOptions,
   SportsFixture,
@@ -299,6 +300,13 @@ async function getStandings(
   leagueProviderId: string,
   season: string
 ): Promise<StandingRow[]> {
+  // Champions League: TheSportsDB no publica su tabla (lookuptable
+  // vacío); la oficial viene de la fuente secundaria football-data.org
+  // (ver footballData.ts). Si esa fuente falla, el error sube y la ruta
+  // de la tabla cae al respaldo calculado por la app.
+  if (leagueProviderId === CHAMPIONS_PROVIDER_ID) {
+    return getFootballDataChampionsStandings();
+  }
   const path =
     `lookuptable.php?l=${encodeURIComponent(leagueProviderId)}` +
     `&s=${encodeURIComponent(season)}`;
