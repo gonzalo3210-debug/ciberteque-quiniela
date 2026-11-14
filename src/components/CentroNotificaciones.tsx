@@ -2,7 +2,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNotificaciones } from '@/hooks/useNotificaciones';
 
-export default function CentroNotificaciones() {
+export default function CentroNotificaciones({ integrada = false }: { integrada?: boolean }) {
+  // `integrada`: la campana vive DENTRO de la barra superior (posición
+  // relativa, tamaño de barra). Sin la prop, flota fija en la esquina
+  // superior derecha como siempre (vista sin sesión).
   const { notificaciones, noLeidas, cargando, marcarComoLeidas, limpiarTodasLasNotificaciones } = useNotificaciones();
   const [menuAbierto, setMenuAbierto] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -62,8 +65,8 @@ export default function CentroNotificaciones() {
   if (!montado) {
     // 🔥 CAMBIO: Se usa 'fixed' anclado a la parte superior derecha (top-4 right-4)
     return (
-      <div className="fixed top-4 right-4 md:top-6 md:right-8 z-[9999]">
-        <button className="w-12 h-12 md:w-14 md:h-14 bg-[#1a2035] border-2 border-slate-800 rounded-full flex items-center justify-center text-xl md:text-2xl shadow-2xl text-slate-400">
+      <div className={integrada ? 'relative' : 'fixed top-4 right-4 md:top-6 md:right-8 z-[9999]'}>
+        <button className={`${integrada ? 'w-11 h-11 text-lg' : 'w-12 h-12 md:w-14 md:h-14 text-xl md:text-2xl'} bg-[#1a2035] border-2 border-slate-800 rounded-full flex items-center justify-center shadow-2xl text-slate-400`}>
           🔔
         </button>
       </div>
@@ -72,7 +75,8 @@ export default function CentroNotificaciones() {
 
   return (
     // 🔥 CAMBIO: Contenedor 'fixed' para que flote al hacer scroll
-    <div className="fixed top-4 right-4 md:top-6 md:right-8 z-[9999]" ref={menuRef}>
+    // (o relativo si va integrada en la barra superior)
+    <div className={integrada ? 'relative' : 'fixed top-4 right-4 md:top-6 md:right-8 z-[9999]'} ref={menuRef}>
       
       <div className="pointer-events-none fixed inset-0 z-[9999] overflow-hidden flex items-center justify-center">
         {animacionesFlotantes.map((anim) => (
@@ -159,9 +163,9 @@ export default function CentroNotificaciones() {
         </div>
       )}
 
-      <button 
+      <button
         onClick={() => setMenuAbierto(!menuAbierto)}
-        className="w-12 h-12 md:w-14 md:h-14 bg-[#1a2035] border-2 border-slate-800 rounded-full flex items-center justify-center text-xl md:text-2xl shadow-2xl hover:scale-110 hover:border-amber-500/50 transition-all relative"
+        className={`${integrada ? 'w-11 h-11 text-lg' : 'w-12 h-12 md:w-14 md:h-14 text-xl md:text-2xl'} bg-[#1a2035] border-2 border-slate-800 rounded-full flex items-center justify-center shadow-2xl hover:scale-110 hover:border-amber-500/50 transition-all relative`}
       >
         <span className={`${noLeidas.length > 0 ? 'animate-wiggle text-amber-400' : 'text-slate-400'}`}>🔔</span>
         {noLeidas.length > 0 && (
