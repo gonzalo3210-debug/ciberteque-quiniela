@@ -149,8 +149,16 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
         .order('fecha_creacion', { ascending: false })
 
       if (data) {
-        const activos = data.filter(t => t.quinielas?.estado === 'abierta' || (t.quinielas?.estado === 'cerrada' && t.quinielas?.modalidad !== 'sorteo' && t.quinielas?.goles_totales_real === null))
-        const completados = data.filter(t => (t.quinielas?.estado === 'cerrada' && t.quinielas?.modalidad === 'sorteo') || (t.quinielas?.estado === 'cerrada' && t.quinielas?.goles_totales_real !== null))
+        // Una quiniela NO-sorteo solo está TERMINADA si está cerrada Y
+        // TODOS sus partidos ya son finales. goles_totales_real ya no
+        // sirve de señal: el Árbitro lo captura en vivo con cada
+        // GUARDAR AVANCE, así que una jornada en curso ya lo trae.
+        const ticketTodosFinal = (t: any) => {
+          const prons = t.pronosticos || []
+          return prons.length > 0 && prons.every((p: any) => p.partidos?.es_final === true)
+        }
+        const activos = data.filter(t => t.quinielas?.estado === 'abierta' || (t.quinielas?.estado === 'cerrada' && t.quinielas?.modalidad !== 'sorteo' && !ticketTodosFinal(t)))
+        const completados = data.filter(t => (t.quinielas?.estado === 'cerrada' && t.quinielas?.modalidad === 'sorteo') || (t.quinielas?.estado === 'cerrada' && t.quinielas?.modalidad !== 'sorteo' && ticketTodosFinal(t)))
         
         const gruposA = agruparTicketsPorQuiniela(activos)
         const gruposC = agruparTicketsPorQuiniela(completados)

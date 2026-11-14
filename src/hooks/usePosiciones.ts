@@ -210,12 +210,21 @@ export function usePosiciones(rolUsuario?: string) {
         }
       })
 
+      // Misma regla que Mis Jugadas: una quiniela NO-sorteo solo está
+      // TERMINADA si está cerrada Y TODOS sus partidos ya son
+      // finales. goles_totales_real ya no sirve de señal: el Árbitro
+      // lo captura en vivo con cada GUARDAR AVANCE.
+      const quinielaTodosFinal = (q: any) => {
+        const ps = q.partidos || []
+        return ps.length > 0 && ps.every((p: any) => p.es_final === true)
+      }
+
       const activas = quinielasProcesadas
-        .filter(q => q.estado === 'abierta' || (q.estado === 'cerrada' && q.goles_totales_real === null && q.modalidad !== 'sorteo') || (q.estado === 'abierta' && q.modalidad === 'sorteo'))
+        .filter(q => q.estado === 'abierta' || (q.estado === 'cerrada' && q.modalidad !== 'sorteo' && !quinielaTodosFinal(q)))
         .sort((a, b) => new Date(a.fecha_cierre).getTime() - new Date(b.fecha_cierre).getTime())
 
       const pasadas = quinielasProcesadas
-        .filter(q => (q.estado === 'cerrada' && q.goles_totales_real !== null) || (q.estado === 'cerrada' && q.modalidad === 'sorteo'))
+        .filter(q => (q.estado === 'cerrada' && q.modalidad === 'sorteo') || (q.estado === 'cerrada' && q.modalidad !== 'sorteo' && quinielaTodosFinal(q)))
         .sort((a, b) => new Date(b.fecha_cierre).getTime() - new Date(a.fecha_cierre).getTime())
 
       setQuinielasAbiertas(activas)
