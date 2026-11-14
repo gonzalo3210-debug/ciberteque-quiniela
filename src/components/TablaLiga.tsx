@@ -62,13 +62,13 @@ const claseZona = (liga: SupportedLeague, rank: number, total: number) => {
   return 'border-l-4 border-l-transparent'
 }
 
-interface EquipoResaltado {
+export interface EquipoResaltado {
   teamProviderId: string;
   teamName: string;
 }
 
 /** ¿Este renglón es el equipo resaltado? Por ID; si no, por nombre sin acentos. */
-function esEquipoResaltado(
+export function esEquipoResaltado(
   f: StandingRow,
   eq: EquipoResaltado | undefined
 ): boolean {
@@ -83,8 +83,17 @@ function esEquipoResaltado(
   return norm(f.teamName) === norm(eq.teamName);
 }
 
-/** La tarjeta con la tabla (encabezados y renglones) de UN grupo o liga. */
-function TablaCard({
+/**
+ * La tarjeta con la tabla (encabezados y renglones) de UN grupo o liga.
+ *
+ * SIN SCROLL HORIZONTAL (corrección de Gonzalo, 2026-11-14): la tabla
+ * ya NO trae ancho mínimo; en pantallas angostas se compacta — letra y
+ * rellenos más chicos, FORMA oculta hasta md y GF/GC ocultos hasta sm —
+ * para que PTS se vea siempre sin deslizar de lado. La celda de equipo
+ * es la única flexible (max-w-0 + truncate): el nombre se recorta con
+ * "…" antes que empujar las columnas de números.
+ */
+export function TablaCard({
   liga,
   filas,
   equipoResaltado,
@@ -93,88 +102,109 @@ function TablaCard({
   filas: StandingRow[]
   equipoResaltado?: EquipoResaltado
 }) {
+  const thNum =
+    'py-2 px-1 sm:py-3 sm:px-2 text-center font-black whitespace-nowrap'
+  const tdNum =
+    'py-2 px-1 sm:py-2.5 sm:px-2 text-center whitespace-nowrap'
   return (
     <div className="bg-slate-900/80 border border-slate-800/50 rounded-2xl shadow-2xl overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[560px]">
-          <thead>
-            <tr className="text-slate-400 text-[11px] uppercase tracking-widest border-b border-slate-800">
-              <th className="py-3 px-3 text-left font-black">#</th>
-              <th className="py-3 px-2 text-left font-black">Equipo</th>
-              <th className="py-3 px-2 text-center font-black">PJ</th>
-              <th className="py-3 px-2 text-center font-black">G</th>
-              <th className="py-3 px-2 text-center font-black">E</th>
-              <th className="py-3 px-2 text-center font-black">P</th>
-              <th className="py-3 px-2 text-center font-black hidden sm:table-cell">GF</th>
-              <th className="py-3 px-2 text-center font-black hidden sm:table-cell">GC</th>
-              <th className="py-3 px-2 text-center font-black">DG</th>
-              <th className="py-3 px-3 text-center font-black text-white">Pts</th>
-              <th className="py-3 px-2 text-center font-black hidden md:table-cell">Forma</th>
+      <table className="w-full text-xs sm:text-sm">
+        <thead>
+          <tr className="text-slate-400 text-[10px] sm:text-[11px] uppercase tracking-widest border-b border-slate-800">
+            <th className="py-2 pl-2 pr-1 sm:py-3 sm:px-3 text-left font-black">#</th>
+            <th className="py-2 px-1.5 sm:py-3 sm:px-2 text-left font-black">Equipo</th>
+            <th className={thNum}>PJ</th>
+            <th className={thNum}>G</th>
+            <th className={thNum}>E</th>
+            <th className={thNum}>P</th>
+            <th className={`${thNum} hidden sm:table-cell`}>GF</th>
+            <th className={`${thNum} hidden sm:table-cell`}>GC</th>
+            <th className={thNum}>DG</th>
+            <th className="py-2 px-2 sm:py-3 sm:px-3 text-center font-black text-white whitespace-nowrap">Pts</th>
+            <th className={`${thNum} hidden md:table-cell`}>Forma</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filas.map((f) => (
+            <tr
+              key={f.teamProviderId || f.teamName}
+              className={`border-b border-slate-800/60 transition-colors ${claseZona(liga, f.rank, filas.length)} ${
+                esEquipoResaltado(f, equipoResaltado)
+                  ? 'bg-cyan-600/15 hover:bg-cyan-600/25'
+                  : 'hover:bg-slate-800/40'
+              }`}
+            >
+              <td className="py-2 pl-2 pr-1 sm:py-2.5 sm:px-3 font-black text-slate-300">{f.rank}</td>
+              <td className="py-2 px-1.5 sm:py-2.5 sm:px-2 max-w-0">
+                <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
+                  {f.badgeUrl ? (
+                    <img src={f.badgeUrl} alt={nombreEquipoES(f.teamName, f.teamProviderId)} className="w-5 h-5 sm:w-6 sm:h-6 object-contain shrink-0" loading="lazy" />
+                  ) : (
+                    <span className="w-5 h-5 sm:w-6 sm:h-6 shrink-0 rounded bg-slate-800 inline-block" />
+                  )}
+                  <span className={`font-bold truncate ${esEquipoResaltado(f, equipoResaltado) ? 'text-cyan-300' : 'text-white'}`}>{nombreEquipoES(f.teamName, f.teamProviderId)}</span>
+                </div>
+              </td>
+              <td className={`${tdNum} text-slate-300`}>{f.played}</td>
+              <td className={`${tdNum} text-slate-300`}>{f.won}</td>
+              <td className={`${tdNum} text-slate-300`}>{f.drawn}</td>
+              <td className={`${tdNum} text-slate-300`}>{f.lost}</td>
+              <td className={`${tdNum} text-slate-400 hidden sm:table-cell`}>{f.goalsFor}</td>
+              <td className={`${tdNum} text-slate-400 hidden sm:table-cell`}>{f.goalsAgainst}</td>
+              <td className={`${tdNum} text-slate-300`}>
+                {f.goalDifference > 0 ? `+${f.goalDifference}` : f.goalDifference}
+              </td>
+              <td className="py-2 px-2 sm:py-2.5 sm:px-3 text-center font-black text-white whitespace-nowrap">{f.points}</td>
+              <td className={`${tdNum} hidden md:table-cell`}>
+                <div className="flex justify-center gap-1">
+                  {(f.form || '')
+                    .split('')
+                    .slice(-5)
+                    .map((letra, i) => (
+                      <span
+                        key={i}
+                        className={`w-[18px] h-[18px] rounded-full text-[10px] font-black flex items-center justify-center ${colorForma(letra)}`}
+                      >
+                        {letra}
+                      </span>
+                    ))}
+                </div>
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {filas.map((f) => (
-              <tr
-                key={f.teamProviderId || f.teamName}
-                className={`border-b border-slate-800/60 transition-colors ${claseZona(liga, f.rank, filas.length)} ${
-                  esEquipoResaltado(f, equipoResaltado)
-                    ? 'bg-cyan-600/15 hover:bg-cyan-600/25'
-                    : 'hover:bg-slate-800/40'
-                }`}
-              >
-                <td className="py-2.5 px-3 font-black text-slate-300">{f.rank}</td>
-                <td className="py-2.5 px-2">
-                  <div className="flex items-center gap-2.5">
-                    {f.badgeUrl ? (
-                      <img src={f.badgeUrl} alt={nombreEquipoES(f.teamName, f.teamProviderId)} className="w-6 h-6 object-contain shrink-0" loading="lazy" />
-                    ) : (
-                      <span className="w-6 h-6 shrink-0 rounded bg-slate-800 inline-block" />
-                    )}
-                    <span className={`font-bold whitespace-nowrap ${esEquipoResaltado(f, equipoResaltado) ? 'text-cyan-300' : 'text-white'}`}>{nombreEquipoES(f.teamName, f.teamProviderId)}</span>
-                  </div>
-                </td>
-                <td className="py-2.5 px-2 text-center text-slate-300">{f.played}</td>
-                <td className="py-2.5 px-2 text-center text-slate-300">{f.won}</td>
-                <td className="py-2.5 px-2 text-center text-slate-300">{f.drawn}</td>
-                <td className="py-2.5 px-2 text-center text-slate-300">{f.lost}</td>
-                <td className="py-2.5 px-2 text-center text-slate-400 hidden sm:table-cell">{f.goalsFor}</td>
-                <td className="py-2.5 px-2 text-center text-slate-400 hidden sm:table-cell">{f.goalsAgainst}</td>
-                <td className="py-2.5 px-2 text-center text-slate-300">
-                  {f.goalDifference > 0 ? `+${f.goalDifference}` : f.goalDifference}
-                </td>
-                <td className="py-2.5 px-3 text-center font-black text-white">{f.points}</td>
-                <td className="py-2.5 px-2 hidden md:table-cell">
-                  <div className="flex justify-center gap-1">
-                    {(f.form || '')
-                      .split('')
-                      .slice(-5)
-                      .map((letra, i) => (
-                        <span
-                          key={i}
-                          className={`w-[18px] h-[18px] rounded-full text-[10px] font-black flex items-center justify-center ${colorForma(letra)}`}
-                        >
-                          {letra}
-                        </span>
-                      ))}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          ))}
+        </tbody>
+      </table>
     </div>
+  )
+}
+
+/** Botón "Ver tabla completa" bajo un avance recortado de la tabla. */
+function BotonVerCompleta({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="mt-3 w-full py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-cyan-300 hover:text-white hover:border-cyan-500 font-black text-xs uppercase tracking-widest transition-all"
+    >
+      Ver tabla completa →
+    </button>
   )
 }
 
 export default function TablaLiga({
   liga,
   equipoResaltado,
+  filasMax,
+  alVerCompleta,
 }: {
   liga: SupportedLeague;
   /** Equipo a resaltar (vista por equipo): su renglón se pinta y se
    *  anuncia su lugar arriba de la tabla. */
   equipoResaltado?: EquipoResaltado;
+  /** Avance de la tabla: mostrar solo las primeras N filas (p. ej. el
+   *  Resumen de la página de liga). Sin definir = tabla completa. */
+  filasMax?: number;
+  /** A dónde ir al tocar "Ver tabla completa" bajo un avance. */
+  alVerCompleta?: () => void;
 }) {
   const [datos, setDatos] = useState<TablaResponse | null>(null)
   const [cargando, setCargando] = useState(true)
@@ -331,20 +361,24 @@ export default function TablaLiga({
               )}
               <TablaCard
                 liga={liga}
-                filas={g.rows}
+                filas={filasMax ? g.rows.slice(0, filasMax) : g.rows}
                 equipoResaltado={equipoResaltado}
               />
             </div>
           ))}
         </div>
+        {filasMax && alVerCompleta && grupos.some((g) => g.rows.length > filasMax) && (
+          <BotonVerCompleta onClick={alVerCompleta} />
+        )}
       </div>
     )
   }
 
   const enVivo = datos.hasLive && datos.liveRows !== null
-  const filas = enVivo ? (datos.liveRows as StandingRow[]) : datos.rows
+  const filasCompletas = enVivo ? (datos.liveRows as StandingRow[]) : datos.rows
+  const filas = filasMax ? filasCompletas.slice(0, filasMax) : filasCompletas
   const filaResaltada = equipoResaltado
-    ? filas.find((f) => esEquipoResaltado(f, equipoResaltado))
+    ? filasCompletas.find((f) => esEquipoResaltado(f, equipoResaltado))
     : undefined
 
   return (
@@ -380,6 +414,10 @@ export default function TablaLiga({
       </div>
 
       <TablaCard liga={liga} filas={filas} equipoResaltado={equipoResaltado} />
+
+      {filasMax && alVerCompleta && filasCompletas.length > filasMax && (
+        <BotonVerCompleta onClick={alVerCompleta} />
+      )}
 
       {liga.zones === 'liga-mx' && (
         <div className="flex flex-wrap justify-center gap-x-6 gap-y-1 mt-4 text-[11px] font-bold uppercase tracking-widest text-slate-500">
