@@ -4,10 +4,10 @@
 // equipos con estrella) en la sección "⚽ Partidos".
 //
 // Ruta de servidor: ?liga={providerId}. Usa getTeams del adaptador
-// (cacheado 24 h). OJO: hay ligas donde el proveedor no llena su catálogo
-// de equipos (verificado: UEFA Nations League devuelve 0); en ese caso la
-// lista se arma desde el propio calendario de la temporada (equipos únicos
-// con su escudo), para que igual se puedan seguir selecciones.
+// (cacheado 24 h) y lo UNE con los equipos que aparecen en el calendario
+// de la temporada: el catálogo del proveedor trae huecos en algunas ligas
+// (verificado: Grecia 8 de 14, Liga MX 17 de 18), y así la lista para
+// seguir equipos queda completa.
 
 import { NextResponse } from 'next/server';
 import {
@@ -32,36 +32,50 @@ export async function GET(request: Request) {
 
   try {
     const provider = getSportsProvider();
-    let teams: SportsTeam[] = await provider.getTeams(liga.providerId);
+    const porId = new Map<string, SportsTeam>();
 
-    if (teams.length === 0) {
-      // Rescate: equipos únicos del calendario de la temporada.
-      const fixtures = await provider.getFixtures(liga.providerId, {
-        season: liga.season,
-      });
-      const porId = new Map<string, SportsTeam>();
-      for (const f of fixtures) {
-        if (f.homeTeamProviderId && !porId.has(f.homeTeamProviderId)) {
-          porId.set(f.homeTeamProviderId, {
-            providerId: f.homeTeamProviderId,
-            name: f.homeTeam,
-            shortName: null,
-            badgeUrl: f.homeBadgeUrl,
-          });
-        }
-        if (f.awayTeamProviderId && !porId.has(f.awayTeamProviderId)) {
-          porId.set(f.awayTeamProviderId, {
-            providerId: f.awayTeamProviderId,
-            name: f.awayTeam,
-            shortName: null,
-            badgeUrl: f.awayBadgeUrl,
-          });
-        }
+    // 1) Equipos únicos del calendario de la temporada (base completa).
+    const fixtures = await provider.getFixtures(liga.providerId, {
+      season: liga.season,
+    });
+    for (const f of fixtures) {
+      if (f.homeTeamProviderId && !porId.has(f.homeTeamProviderId)) {
+        porId.set(f.homeTeamProviderId, {
+          providerId: f.homeTeamProviderId,
+          name: f.homeTeam,
+          shortName: null,
+          badgeUrl: f.homeBadgeUrl,
+        });
       }
-      teams = [...porId.values()].sort((a, b) =>
-        a.name.localeCompare(b.name)
-      );
+      if (f.awayTeamProviderId && !porId.has(f.awayTeamProviderId)) {
+        porId.set(f.awayTeamProviderId, {
+          providerId: f.awayTeamProviderId,
+          name: f.awayTeam,
+          shortName: null,
+          badgeUrl: f.awayBadgeUrl,
+        });
+      }
     }
+
+    // 2) Catálogo del proveedor encima (nombre corto y escudo oficiales).
+    try {
+      const catalogo = await provider.getTeams(liga.providerId);
+      for (const t of catalogo) {
+        const previo = porId.get(t.providerId);
+        porId.set(t.providerId, {
+          providerId: t.providerId,
+          name: t.name,
+          shortName: t.shortName,
+          badgeUrl: t.badgeUrl || previo?.badgeUrl || null,
+        });
+      }
+    } catch {
+      // Sin catálogo no pasa nada: ya está la lista del calendario.
+    }
+
+    const teams = [...porId.values()].sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
 
     return NextResponse.json({
       league: {

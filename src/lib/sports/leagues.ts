@@ -36,6 +36,8 @@ export interface SupportedLeague {
   providerId: string;
   /** Nombre para mostrar en la app. */
   name: string;
+  /** Nombre oficial de la liga EN el proveedor (para search_all_teams). */
+  providerName: string;
   /** Temporada vigente en el formato del proveedor. */
   season: string;
   /** Zonas de color de su tabla (si tiene). */
@@ -50,6 +52,7 @@ export const SUPPORTED_LEAGUES: SupportedLeague[] = [
   {
     providerId: LIGA_MX_PROVIDER_ID,
     name: 'Liga MX',
+    providerName: 'Mexican Primera League',
     season: LIGA_MX_SEASON,
     zones: 'liga-mx',
     hasStandings: true,
@@ -58,6 +61,7 @@ export const SUPPORTED_LEAGUES: SupportedLeague[] = [
   {
     providerId: '4490',
     name: 'UEFA Nations League',
+    providerName: 'UEFA Nations League',
     season: '2026-2027',
     zones: null,
     hasStandings: false, // verificado: lookuptable vacío (grupos)
@@ -66,6 +70,7 @@ export const SUPPORTED_LEAGUES: SupportedLeague[] = [
   {
     providerId: '4480',
     name: 'UEFA Champions League',
+    providerName: 'UEFA Champions League',
     season: '2026-2027',
     zones: null,
     hasStandings: false, // verificado: lookuptable vacío (fase de liga sin tabla en v1)
@@ -74,6 +79,7 @@ export const SUPPORTED_LEAGUES: SupportedLeague[] = [
   {
     providerId: '4328',
     name: 'Premier League',
+    providerName: 'English Premier League',
     season: '2026-2027',
     zones: 'europa',
     hasStandings: true,
@@ -82,6 +88,7 @@ export const SUPPORTED_LEAGUES: SupportedLeague[] = [
   {
     providerId: '4335',
     name: 'La Liga',
+    providerName: 'Spanish La Liga',
     season: '2026-2027',
     zones: 'europa',
     hasStandings: true,
@@ -90,6 +97,7 @@ export const SUPPORTED_LEAGUES: SupportedLeague[] = [
   {
     providerId: '4332',
     name: 'Serie A',
+    providerName: 'Italian Serie A',
     season: '2026-2027',
     zones: 'europa',
     hasStandings: true,
@@ -98,6 +106,7 @@ export const SUPPORTED_LEAGUES: SupportedLeague[] = [
   {
     providerId: '4331',
     name: 'Bundesliga',
+    providerName: 'German Bundesliga',
     season: '2026-2027',
     zones: 'europa',
     hasStandings: true,
@@ -106,6 +115,7 @@ export const SUPPORTED_LEAGUES: SupportedLeague[] = [
   {
     providerId: '4334',
     name: 'Ligue 1',
+    providerName: 'French Ligue 1',
     season: '2026-2027',
     zones: 'europa',
     hasStandings: true,
@@ -114,6 +124,7 @@ export const SUPPORTED_LEAGUES: SupportedLeague[] = [
   {
     providerId: '4336',
     name: 'Superliga de Grecia',
+    providerName: 'Greek Super League 1',
     season: '2026-2027',
     zones: null, // formato con rondas de campeonato/descenso: sin zonas simples
     hasStandings: true,
@@ -122,6 +133,7 @@ export const SUPPORTED_LEAGUES: SupportedLeague[] = [
   {
     providerId: '4501',
     name: 'Copa Libertadores',
+    providerName: 'Copa Libertadores',
     season: '2026', // la Libertadores es de año calendario, no "2026-2027"
     zones: null,
     hasStandings: false, // verificado: lookuptable vacío (grupos + llaves)

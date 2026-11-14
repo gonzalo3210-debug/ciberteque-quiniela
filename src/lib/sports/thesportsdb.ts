@@ -13,7 +13,7 @@
 //   fixtures de temporada:  eventsseason.php?id={liga}&s={temporada}
 //   próximos partidos:      eventsnextleague.php?id={liga}
 //   tabla de posiciones:    lookuptable.php?l={liga}&s={temporada}
-//   equipos de la liga:     lookup_all_teams.php?id={liga}
+//   equipos de la liga:     search_all_teams.php?l={nombre oficial}
 //   en vivo (v2, premium):  api/v2/json/livescore/soccer (llave en header)
 // OJO: lookuptable devuelve el cuerpo VACÍO (200, 0 bytes) para torneos de
 // grupos/copa (Champions, Nations League, Libertadores): getStandings lo
@@ -21,6 +21,7 @@
 // Developer): livescore cada 2 min y límites amplios. Ver README.md.
 
 import type { SportsProvider } from './provider';
+import { getSupportedLeague } from './leagues';
 import type {
   GetFixturesOptions,
   SportsFixture,
@@ -316,7 +317,17 @@ async function getStandings(
 }
 
 async function getTeams(leagueProviderId: string): Promise<SportsTeam[]> {
-  const path = `lookup_all_teams.php?id=${encodeURIComponent(leagueProviderId)}`;
+  // OJO: lookup_all_teams.php YA NO EXISTE en TheSportsDB (404 "endpoint
+  // not found"); el endpoint vigente es search_all_teams.php y busca por
+  // el NOMBRE oficial de la liga, no por su ID. El nombre vive en el
+  // catálogo de ligas soportadas (leagues.ts -> providerName).
+  const liga = getSupportedLeague(leagueProviderId);
+  if (!liga) {
+    throw new Error(
+      `getTeams: la liga ${leagueProviderId} no está en el catálogo de ligas soportadas.`
+    );
+  }
+  const path = `search_all_teams.php?l=${encodeURIComponent(liga.providerName)}`;
   const data = await tsdbFetch<{ teams: TsdbTeam[] | null }>(path, 86400);
   return (data?.teams ?? []).map(mapTeam);
 }
