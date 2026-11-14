@@ -4,7 +4,7 @@
 // VISTA DEL PARTIDO (rediseño 2026-11-14, referencia 365Scores): se
 // abre al tocar cualquier encuentro — en Live, Calendario, la pestaña
 // Quiniela, Favoritos y las listas de liga/equipo — con submenús
-// Resumen · Enfrentamientos · Posiciones.
+// Resumen · Posiciones (Enfrentamientos quedó comentada, ver abajo).
 //
 // - Resumen: encuesta "¿Quién va a ganar?" con porcentajes 1-X-2 de
 //   The Odds API (vía /api/encuesta; si ninguna casa cotiza el
@@ -12,10 +12,16 @@
 //   juego (fecha/hora America/Mazatlan, torneo con logo, estadio y
 //   dónde ver: el canal de la quiniela o el strTVStation del evento)
 //   y los últimos 5 partidos de cada equipo con chip G/E/P.
-// - Enfrentamientos: los últimos cruces entre ambos, buscados en los
-//   calendarios de temporada de sus ligas; si no hay, vacío honesto.
 // - Posiciones: la tabla de la liga del partido marcando a AMBOS
 //   equipos (resaltado en conjunto de TablaLiga).
+//
+// PESTAÑA ENFRENTAMIENTOS — RETIRADA DE MOMENTO (Gonzalo, 2026-11-14):
+// buscaba los últimos cruces entre ambos en los calendarios de
+// temporada, pero las fuentes actuales solo traen la temporada en
+// curso y casi ninguna pareja se ha cruzado antes: la pestaña salía
+// vacía casi siempre. Su código (la entrada del submenú, el cálculo
+// `cruces` y su bloque de pintado) queda COMENTADO más abajo, listo
+// para reactivarse cuando se conecte una API con historial/H2H.
 //
 // Partidos de la quiniela SIN gemelo en la API (amistosos): la vista
 // se abre con los datos de la app (fecha, canal) y trata de resolver
@@ -33,7 +39,9 @@ import {
   etiquetaFechaLarga,
 } from '@/lib/fechaMazatlan'
 import TablaLiga, { type EquipoResaltado } from './TablaLiga'
-import { Escudo, LogoLiga, FilaPartido, type EquipoTocable } from './partidosUI'
+import { Escudo, LogoLiga, type EquipoTocable } from './partidosUI'
+// FilaPartido solo la usaba la pestaña Enfrentamientos (comentada):
+// import { FilaPartido } from './partidosUI'
 
 /** Datos con los que se abre la vista, vengan de un fixture de la API
  *  o de un partido de la quiniela (con o sin gemelo). */
@@ -323,21 +331,23 @@ export default function VistaPartido({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pool, datos.fixtureId])
 
-  const cruces = useMemo(
-    () =>
-      pool
-        .filter(
-          (f) =>
-            f.status === 'finished' &&
-            f.providerId !== datos.fixtureId &&
-            ladoDelEquipo(f, datos.homeTeam, idLocal) !== null &&
-            ladoDelEquipo(f, datos.awayTeam, idVisita) !== null
-        )
-        .sort((a, b) => (b.kickoffUtc || '').localeCompare(a.kickoffUtc || ''))
-        .slice(0, 5),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [pool, datos.fixtureId]
-  )
+  // --- Enfrentamientos (COMENTADO 2026-11-14, ver nota del encabezado):
+  // últimos cruces entre ambos dentro del pool de la temporada.
+  // const cruces = useMemo(
+  //   () =>
+  //     pool
+  //       .filter(
+  //         (f) =>
+  //           f.status === 'finished' &&
+  //           f.providerId !== datos.fixtureId &&
+  //           ladoDelEquipo(f, datos.homeTeam, idLocal) !== null &&
+  //           ladoDelEquipo(f, datos.awayTeam, idVisita) !== null
+  //       )
+  //       .sort((a, b) => (b.kickoffUtc || '').localeCompare(a.kickoffUtc || ''))
+  //       .slice(0, 5),
+  //   // eslint-disable-next-line react-hooks/exhaustive-deps
+  //   [pool, datos.fixtureId]
+  // )
 
   const fechaLarga = datos.kickoffIso
     ? etiquetaFechaLarga(fechaEnMazatlan(datos.kickoffIso))
@@ -493,7 +503,9 @@ export default function VistaPartido({
         {(
           [
             ['resumen', 'Resumen'],
-            ['enfrentamientos', 'Enfrentamientos'],
+            // ['enfrentamientos', 'Enfrentamientos'], // retirada de
+            // momento (2026-11-14): sin historial entre parejas en las
+            // fuentes actuales; vuelve con una API con H2H.
             ['posiciones', 'Posiciones'],
           ] as [SubVista, string][]
         ).map(([id, etiqueta]) => (
@@ -612,6 +624,9 @@ export default function VistaPartido({
         </div>
       )}
 
+      {/* Pestaña Enfrentamientos COMENTADA (2026-11-14): ver la nota
+          del encabezado. Se reactiva junto con `cruces` y la entrada
+          del submenú cuando haya una API con historial/H2H.
       {sub === 'enfrentamientos' && (
         <div className="mt-4 bg-slate-900/80 border border-slate-800/50 rounded-2xl shadow-2xl overflow-hidden">
           {cargandoPool ? (
@@ -635,6 +650,7 @@ export default function VistaPartido({
           )}
         </div>
       )}
+      */}
 
       {sub === 'posiciones' && (
         <div className="mt-4">
