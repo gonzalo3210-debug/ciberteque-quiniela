@@ -219,7 +219,7 @@ export default function PaginaLiga({
       </div>
 
       {sub === 'posiciones' ? (
-        <TablaLiga key={liga.providerId} liga={liga} />
+        <TablaLiga key={liga.providerId} liga={liga} onVerEquipo={onVerEquipo} />
       ) : !fixtures && !error ? (
         <div className="text-cyan-400 font-bold animate-pulse py-20">
           Cargando {liga.name}...
@@ -312,6 +312,7 @@ export default function PaginaLiga({
               liga={liga}
               filasMax={6}
               alVerCompleta={() => setSub('posiciones')}
+              onVerEquipo={onVerEquipo}
             />
           </div>
         </div>

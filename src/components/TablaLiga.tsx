@@ -19,6 +19,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import type { StandingRow } from '@/lib/sports/types'
 import type { SupportedLeague } from '@/lib/sports/leagues'
 import { nombreEquipoES } from '@/lib/sports/nombresES'
+import type { EquipoTocable } from './partidosUI'
 
 interface GrupoTabla {
   label: string | null
@@ -107,12 +108,18 @@ export function TablaCard({
   filas,
   equipoResaltado,
   equiposResaltados,
+  onVerEquipo,
 }: {
   liga: SupportedLeague
   filas: StandingRow[]
   equipoResaltado?: EquipoResaltado
   /** Conjunto de equipos a marcar (p. ej. los dos de un partido). */
   equiposResaltados?: EquipoResaltado[]
+  /** Al tocar el escudo/nombre de CUALQUIER equipo: abre su página
+   *  (regla de Gonzalo 2026-11-14: todas las tablas enlazan a
+   *  cualquier equipo, no solo a los resaltados). Sin handler o sin
+   *  ID de proveedor en la fila, la celda queda como texto plano. */
+  onVerEquipo?: EquipoTocable
 }) {
   const resaltados = listaResaltados(equipoResaltado, equiposResaltados)
   const esRes = (f: StandingRow) =>
@@ -151,14 +158,36 @@ export function TablaCard({
             >
               <td className="py-2 pl-2 pr-1 sm:py-2.5 sm:px-3 font-black text-slate-300">{f.rank}</td>
               <td className="py-2 px-1.5 sm:py-2.5 sm:px-2 max-w-0">
-                <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
-                  {f.badgeUrl ? (
-                    <img src={f.badgeUrl} alt={nombreEquipoES(f.teamName, f.teamProviderId)} className="w-5 h-5 sm:w-6 sm:h-6 object-contain shrink-0" loading="lazy" />
-                  ) : (
-                    <span className="w-5 h-5 sm:w-6 sm:h-6 shrink-0 rounded bg-slate-800 inline-block" />
-                  )}
-                  <span className={`font-bold truncate ${esRes(f) ? 'text-cyan-300' : 'text-white'}`}>{nombreEquipoES(f.teamName, f.teamProviderId)}</span>
-                </div>
+                {onVerEquipo && f.teamProviderId ? (
+                  <button
+                    onClick={() =>
+                      onVerEquipo({
+                        leagueProviderId: liga.providerId,
+                        teamProviderId: f.teamProviderId as string,
+                        teamName: f.teamName,
+                        badgeUrl: f.badgeUrl,
+                      })
+                    }
+                    title={`Ver ${nombreEquipoES(f.teamName, f.teamProviderId)}`}
+                    className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 max-w-full text-left hover:opacity-75 transition-opacity"
+                  >
+                    {f.badgeUrl ? (
+                      <img src={f.badgeUrl} alt={nombreEquipoES(f.teamName, f.teamProviderId)} className="w-5 h-5 sm:w-6 sm:h-6 object-contain shrink-0" loading="lazy" />
+                    ) : (
+                      <span className="w-5 h-5 sm:w-6 sm:h-6 shrink-0 rounded bg-slate-800 inline-block" />
+                    )}
+                    <span className={`font-bold truncate ${esRes(f) ? 'text-cyan-300' : 'text-white'}`}>{nombreEquipoES(f.teamName, f.teamProviderId)}</span>
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
+                    {f.badgeUrl ? (
+                      <img src={f.badgeUrl} alt={nombreEquipoES(f.teamName, f.teamProviderId)} className="w-5 h-5 sm:w-6 sm:h-6 object-contain shrink-0" loading="lazy" />
+                    ) : (
+                      <span className="w-5 h-5 sm:w-6 sm:h-6 shrink-0 rounded bg-slate-800 inline-block" />
+                    )}
+                    <span className={`font-bold truncate ${esRes(f) ? 'text-cyan-300' : 'text-white'}`}>{nombreEquipoES(f.teamName, f.teamProviderId)}</span>
+                  </div>
+                )}
               </td>
               <td className={`${tdNum} text-slate-300`}>{f.played}</td>
               <td className={`${tdNum} text-slate-300`}>{f.won}</td>
@@ -211,6 +240,7 @@ export default function TablaLiga({
   equiposResaltados,
   filasMax,
   alVerCompleta,
+  onVerEquipo,
 }: {
   liga: SupportedLeague;
   /** Equipo a resaltar (vista por equipo): su renglón se pinta y se
@@ -223,6 +253,8 @@ export default function TablaLiga({
   filasMax?: number;
   /** A dónde ir al tocar "Ver tabla completa" bajo un avance. */
   alVerCompleta?: () => void;
+  /** Tocar cualquier equipo de la tabla abre su página. */
+  onVerEquipo?: EquipoTocable;
 }) {
   const [datos, setDatos] = useState<TablaResponse | null>(null)
   const [cargando, setCargando] = useState(true)
@@ -391,6 +423,7 @@ export default function TablaLiga({
                 filas={filasMax ? g.rows.slice(0, filasMax) : g.rows}
                 equipoResaltado={equipoResaltado}
                 equiposResaltados={equiposResaltados}
+                onVerEquipo={onVerEquipo}
               />
             </div>
           ))}
@@ -449,7 +482,7 @@ export default function TablaLiga({
         )}
       </div>
 
-      <TablaCard liga={liga} filas={filas} equipoResaltado={equipoResaltado} equiposResaltados={equiposResaltados} />
+      <TablaCard liga={liga} filas={filas} equipoResaltado={equipoResaltado} equiposResaltados={equiposResaltados} onVerEquipo={onVerEquipo} />
 
       {filasMax && alVerCompleta && filasCompletas.length > filasMax && (
         <BotonVerCompleta onClick={alVerCompleta} />

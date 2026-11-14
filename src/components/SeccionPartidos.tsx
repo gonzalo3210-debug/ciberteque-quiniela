@@ -747,6 +747,7 @@ function VistaEquipo({
                 key={ligaComp.providerId}
                 liga={ligaComp}
                 equipoResaltado={resaltado}
+                onVerEquipo={onVerEquipo}
               />
             ) : (
               <div className="w-full bg-slate-900/80 border border-slate-800 rounded-2xl p-8 text-center">
@@ -774,6 +775,7 @@ function VistaEquipo({
                 liga={ligaComp}
                 filas={filasAmbito}
                 equipoResaltado={resaltado}
+                onVerEquipo={onVerEquipo}
               />
               <p className="mt-3 text-center text-slate-500 text-xs font-bold">
                 🧮 Tabla calculada por la app desde los resultados de la
