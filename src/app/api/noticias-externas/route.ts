@@ -1,20 +1,29 @@
 // src/app/api/noticias-externas/route.ts
 //
-// Noticias EXTERNAS de los equipos para la sección 📰 Noticias
-// (2026-11-14): titulares de medios deportivos en español desde feeds
-// RSS PÚBLICOS, emparejados con los equipos que mande el cliente en
-// ?equipos=Nombre1,Nombre2,... (los de la jornada del Club y los
-// favoritos del jugador).
+// Noticias EXTERNAS para la sección 📰 Noticias (2026-11-14): titulares
+// de medios deportivos en español desde feeds RSS PÚBLICOS, sin llaves
+// ni registros. El cliente manda ?equipos=Nombre1,Nombre2,... con los
+// equipos de la jornada del Club y los favoritos del jugador, y la ruta
+// devuelve TODOS los titulares de las fuentes CLASIFICADOS:
+//
+//   categoria 'equipos'  — el titular menciona a alguno de esos
+//                          equipos (emparejamiento de lib/rss.ts).
+//   categoria 'deportes' — el resto: fútbol general y otros deportes.
+//                          Es el respaldo del chip "📰 Deportes".
+//
+// La vista filtra por chip (Quiniela / Equipos / Deportes) SIN volver a
+// pedir: la clasificación viaja hecha desde aquí.
 //
 // Fuentes verificadas el 2026-11-14 respondiendo RSS válido:
-//   1. ESPN (espn.com.mx) — titulares deportivos en español.
-//   2. Google Noticias (búsqueda "futbol", edición México) — respaldo
-//      y complemento; cada nota trae su medio original.
+//   1. ESPN (espn.com.mx) — titulares deportivos generales en español.
+//   2. Google Noticias (búsqueda "futbol", edición México) — notas de
+//      la jornada y de los equipos, con su medio original.
+//   3. Google Noticias (búsqueda "deportes", edición México) — el
+//      barrido amplio para el chip Deportes (otros deportes incluidos).
 // Los feeds se piden con caché de 30 min (next.revalidate): 40
 // jugadores abriendo Noticias no son 40 consultas a los medios.
-// Sin llaves, sin registros. Si TODAS las fuentes fallan, la ruta
-// responde 200 con la lista vacía y la vista muestra solo las
-// noticias del club.
+// Si TODAS las fuentes fallan, la ruta responde 200 con listas vacías
+// y la vista muestra solo las noticias del club.
 
 import { NextResponse } from 'next/server';
 import { parseRss, textoMencionaEquipo, type NoticiaRss } from '@/lib/rss';
@@ -28,15 +37,24 @@ const FUENTES = [
     url: 'https://news.google.com/rss/search?q=futbol&hl=es-419&gl=MX&ceid=MX:es-419',
     medio: 'Google Noticias',
   },
+  {
+    url: 'https://news.google.com/rss/search?q=deportes&hl=es-419&gl=MX&ceid=MX:es-419',
+    medio: 'Google Noticias',
+  },
 ];
 
 const CACHE_SEGUNDOS = 1800; // 30 minutos
 const MAX_EQUIPOS = 40;
-const MAX_NOTICIAS = 20;
+const MAX_DE_EQUIPOS = 20;
+const MAX_DE_DEPORTES = 20;
+
+export type CategoriaExterna = 'equipos' | 'deportes';
 
 interface NoticiaExterna extends NoticiaRss {
   /** Equipos (de los pedidos) que la nota menciona. */
   equipos: string[];
+  /** Chip al que pertenece: 'equipos' si empareja, 'deportes' si no. */
+  categoria: CategoriaExterna;
 }
 
 export async function GET(request: Request) {
@@ -46,10 +64,6 @@ export async function GET(request: Request) {
     .map((s) => s.trim())
     .filter((s) => s.length >= 3)
     .slice(0, MAX_EQUIPOS);
-
-  if (equipos.length === 0) {
-    return NextResponse.json({ noticias: [], fuentes: [] });
-  }
 
   const resultados = await Promise.allSettled(
     FUENTES.map(async (fuente) => {
@@ -80,24 +94,33 @@ export async function GET(request: Request) {
   }
 
   const vistas = new Set<string>();
-  const noticias: NoticiaExterna[] = [];
+  const deEquipos: NoticiaExterna[] = [];
+  const deDeportes: NoticiaExterna[] = [];
   for (const item of todas) {
     if (vistas.has(item.enlace)) continue;
-    const texto = normalizarNombreEquipo(`${item.titulo} ${item.descripcion}`);
-    const mencionados = equipos.filter((eq) =>
-      textoMencionaEquipo(texto, eq)
-    );
-    if (mencionados.length === 0) continue;
     vistas.add(item.enlace);
-    noticias.push({ ...item, equipos: mencionados });
+    const texto = normalizarNombreEquipo(`${item.titulo} ${item.descripcion}`);
+    const mencionados =
+      equipos.length > 0
+        ? equipos.filter((eq) => textoMencionaEquipo(texto, eq))
+        : [];
+    if (mencionados.length > 0) {
+      deEquipos.push({ ...item, equipos: mencionados, categoria: 'equipos' });
+    } else {
+      deDeportes.push({ ...item, equipos: [], categoria: 'deportes' });
+    }
   }
 
-  noticias.sort((a, b) =>
-    (b.fechaISO || '').localeCompare(a.fechaISO || '')
-  );
+  const porFecha = (a: NoticiaExterna, b: NoticiaExterna) =>
+    (b.fechaISO || '').localeCompare(a.fechaISO || '');
+  deEquipos.sort(porFecha);
+  deDeportes.sort(porFecha);
 
   return NextResponse.json({
-    noticias: noticias.slice(0, MAX_NOTICIAS),
+    noticias: [
+      ...deEquipos.slice(0, MAX_DE_EQUIPOS),
+      ...deDeportes.slice(0, MAX_DE_DEPORTES),
+    ],
     fuentes: fuentesOk,
     fetchedAt: new Date().toISOString(),
   });
