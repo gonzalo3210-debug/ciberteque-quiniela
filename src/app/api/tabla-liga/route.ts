@@ -45,12 +45,21 @@ export async function GET(request: Request) {
     );
   }
 
+  // Logo de la liga (cacheado 7 días en el adaptador); fallo = sin logo.
+  let badgeUrl: string | null = null;
+  try {
+    badgeUrl = await getSportsProvider().getLeagueBadge(liga.providerId);
+  } catch {
+    badgeUrl = null;
+  }
+
   const ligaJson = {
     providerId: liga.providerId,
     name: liga.name,
     season: liga.season,
     zones: liga.zones,
     hasStandings: liga.hasStandings,
+    badgeUrl,
   };
 
   if (!liga.hasStandings) {

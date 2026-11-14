@@ -50,6 +50,12 @@ export interface SportsProvider {
   /** Equipos de una liga, con escudo. */
   getTeams(leagueProviderId: string): Promise<SportsTeam[]>;
 
+  /**
+   * URL del logo/escudo de la liga (para mostrar junto a su nombre).
+   * Dato casi fijo (caché larga); null si el proveedor no trae logo.
+   */
+  getLeagueBadge(leagueProviderId: string): Promise<string | null>;
+
   /** Mapa nombre de equipo -> URL del escudo (para equipos.logo_url). */
   getTeamLogos(leagueProviderId: string): Promise<TeamLogoMap>;
 }

@@ -25,7 +25,7 @@ interface GrupoTabla {
 }
 
 interface TablaResponse {
-  league: SupportedLeague
+  league: SupportedLeague & { badgeUrl?: string | null }
   hasStandings: boolean
   calculated?: boolean
   groups?: GrupoTabla[] | null
@@ -276,7 +276,15 @@ export default function TablaLiga({
     return (
       <div className="w-full max-w-3xl animate-in fade-in duration-500">
         <div className="text-center mb-6">
-          <h3 className="text-2xl font-black tracking-tight text-white">
+          <h3 className="flex items-center justify-center gap-2.5 text-2xl font-black tracking-tight text-white">
+            {datos.league.badgeUrl && (
+              <img
+                src={datos.league.badgeUrl}
+                alt={liga.name}
+                className="w-8 h-8 object-contain shrink-0"
+                loading="lazy"
+              />
+            )}
             {liga.name}
           </h3>
           <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mt-1">
@@ -336,7 +344,15 @@ export default function TablaLiga({
   return (
     <div className="w-full max-w-3xl animate-in fade-in duration-500">
       <div className="text-center mb-6">
-        <h3 className="text-2xl font-black tracking-tight text-white">
+        <h3 className="flex items-center justify-center gap-2.5 text-2xl font-black tracking-tight text-white">
+          {datos.league.badgeUrl && (
+            <img
+              src={datos.league.badgeUrl}
+              alt={liga.name}
+              className="w-8 h-8 object-contain shrink-0"
+              loading="lazy"
+            />
+          )}
           {liga.name}
         </h3>
         {filaResaltada && (

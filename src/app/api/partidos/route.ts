@@ -74,13 +74,14 @@ function compararPartidos(a: SportsFixture, b: SportsFixture): number {
   return a.status === 'finished' ? kb.localeCompare(ka) : ka.localeCompare(kb);
 }
 
-function ligaPublica(liga: SupportedLeague) {
+function ligaPublica(liga: SupportedLeague, badgeUrl: string | null = null) {
   return {
     providerId: liga.providerId,
     name: liga.name,
     season: liga.season,
     zones: liga.zones,
     hasStandings: liga.hasStandings,
+    badgeUrl,
   };
 }
 
@@ -104,6 +105,19 @@ export async function GET(request: Request) {
     const hasta = fecha ?? sumarDias(hoy, dias);
 
     const provider = getSportsProvider();
+
+    // Logos de liga (cacheados 7 días en el adaptador): para mostrarlos
+    // junto al nombre en los encabezados de grupo. Fallo = sin logo.
+    const logosLiga = new Map<string, string | null>();
+    await Promise.all(
+      SUPPORTED_LEAGUES.map(async (l) => {
+        try {
+          logosLiga.set(l.providerId, await provider.getLeagueBadge(l.providerId));
+        } catch {
+          logosLiga.set(l.providerId, null);
+        }
+      })
+    );
 
     // En vivo: si falla, la ruta sigue sin marcadores al momento.
     let enVivo: SportsFixture[] = [];
@@ -181,7 +195,7 @@ export async function GET(request: Request) {
       );
 
       return NextResponse.json({
-        league: ligaPublica(liga),
+        league: ligaPublica(liga, logosLiga.get(liga.providerId) ?? null),
         teamProviderId: equipoParam,
         fixtures: delEquipo,
         fetchedAt: new Date().toISOString(),
@@ -258,7 +272,7 @@ export async function GET(request: Request) {
         }
 
         enVentana.sort(compararPartidos);
-        return { league: ligaPublica(liga), fixtures: enVentana };
+        return { league: ligaPublica(liga, logosLiga.get(liga.providerId) ?? null), fixtures: enVentana };
       })
     );
 

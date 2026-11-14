@@ -77,11 +77,19 @@ export async function GET(request: Request) {
       a.name.localeCompare(b.name)
     );
 
+    let badgeUrl: string | null = null;
+    try {
+      badgeUrl = await provider.getLeagueBadge(liga.providerId);
+    } catch {
+      // Sin logo no pasa nada.
+    }
+
     return NextResponse.json({
       league: {
         providerId: liga.providerId,
         name: liga.name,
         season: liga.season,
+        badgeUrl,
       },
       teams,
       fetchedAt: new Date().toISOString(),

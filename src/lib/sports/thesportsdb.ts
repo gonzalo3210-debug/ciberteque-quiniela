@@ -336,6 +336,19 @@ async function getTeams(leagueProviderId: string): Promise<SportsTeam[]> {
   return (data?.teams ?? []).map(mapTeam);
 }
 
+/**
+ * Logo/escudo de la liga (lookupleague: strBadge, con strLogo de respaldo).
+ * Es dato casi fijo: se cachea 7 días. Si la liga no trae ninguno, null.
+ */
+async function getLeagueBadge(leagueProviderId: string): Promise<string | null> {
+  const path = `lookupleague.php?id=${encodeURIComponent(leagueProviderId)}`;
+  const data = await tsdbFetch<{
+    leagues: { strBadge?: string; strLogo?: string }[] | null;
+  }>(path, 604800); // 7 días
+  const liga = data?.leagues?.[0];
+  return liga?.strBadge || liga?.strLogo || null;
+}
+
 async function getTeamLogos(leagueProviderId: string): Promise<TeamLogoMap> {
   const teams = await getTeams(leagueProviderId);
   const logos: TeamLogoMap = {};
@@ -365,5 +378,6 @@ export const theSportsDbProvider: SportsProvider = {
   getStandings,
   getTeams,
   getTeamLogos,
+  getLeagueBadge,
   getLiveScores,
 };

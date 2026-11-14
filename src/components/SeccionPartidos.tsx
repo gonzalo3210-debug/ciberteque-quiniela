@@ -49,6 +49,28 @@ interface LigaGrupo {
   providerId: string
   name: string
   season: string
+  badgeUrl?: string | null
+}
+
+/** Logo chico de una liga, junto a su nombre. Sin logo: no ocupa lugar. */
+function LogoLiga({
+  url,
+  nombre,
+  className = 'w-5 h-5',
+}: {
+  url: string | null | undefined
+  nombre: string
+  className?: string
+}) {
+  if (!url) return null
+  return (
+    <img
+      src={url}
+      alt={nombre}
+      className={`${className} object-contain shrink-0`}
+      loading="lazy"
+    />
+  )
 }
 
 interface GrupoPartidos {
@@ -365,6 +387,9 @@ function ListaPartidos({
   const visiblesFiltrados = ligaFiltro
     ? visibles.filter((g) => g.ligaId === ligaFiltro)
     : visibles
+  const badgePorLiga = new Map(
+    (grupos || []).map((g) => [g.league.providerId, g.league.badgeUrl ?? null])
+  )
   const nombreLigaFiltro = ligaFiltro
     ? getSupportedLeague(ligaFiltro)?.name || 'la liga'
     : null
@@ -432,34 +457,40 @@ function ListaPartidos({
           className="bg-slate-900/80 border border-slate-800/50 rounded-2xl shadow-2xl overflow-hidden"
         >
           <div className="flex items-center justify-between px-4 py-2.5 bg-slate-800/60 border-b border-slate-800">
-            {g.ligaId ? (
-              <button
-                onClick={() =>
-                  setLigaFiltro((prev) =>
-                    prev === g.ligaId ? null : (g.ligaId as string)
-                  )
-                }
-                title={
-                  ligaFiltro === g.ligaId
-                    ? 'Quitar el filtro de liga'
-                    : `Ver solo ${g.nombre}`
-                }
-                className={`font-black text-xs uppercase tracking-widest transition-colors ${
-                  ligaFiltro === g.ligaId
-                    ? 'text-cyan-300'
-                    : 'text-white hover:text-cyan-300'
-                }`}
-              >
-                {g.nombre}
-                {ligaFiltro === g.ligaId && (
-                  <span className="normal-case tracking-normal"> · ✕</span>
-                )}
-              </button>
-            ) : (
-              <span className="font-black text-xs uppercase tracking-widest text-white">
-                {g.nombre}
-              </span>
-            )}
+            <span className="flex items-center gap-2 min-w-0">
+              <LogoLiga
+                url={g.ligaId ? badgePorLiga.get(g.ligaId) : null}
+                nombre={g.nombre}
+              />
+              {g.ligaId ? (
+                <button
+                  onClick={() =>
+                    setLigaFiltro((prev) =>
+                      prev === g.ligaId ? null : (g.ligaId as string)
+                    )
+                  }
+                  title={
+                    ligaFiltro === g.ligaId
+                      ? 'Quitar el filtro de liga'
+                      : `Ver solo ${g.nombre}`
+                  }
+                  className={`font-black text-xs uppercase tracking-widest transition-colors ${
+                    ligaFiltro === g.ligaId
+                      ? 'text-cyan-300'
+                      : 'text-white hover:text-cyan-300'
+                  }`}
+                >
+                  {g.nombre}
+                  {ligaFiltro === g.ligaId && (
+                    <span className="normal-case tracking-normal"> · ✕</span>
+                  )}
+                </button>
+              ) : (
+                <span className="font-black text-xs uppercase tracking-widest text-white">
+                  {g.nombre}
+                </span>
+              )}
+            </span>
             {g.ligaId && (
               <button
                 onClick={() => onToggleLiga(g.ligaId as string)}
@@ -495,10 +526,12 @@ function GestorSiguiendo({
   favoritos,
   onToggleLiga,
   onToggleEquipo,
+  logosLiga,
 }: {
   favoritos: Favoritos
   onToggleLiga: (leagueProviderId: string) => void
   onToggleEquipo: (equipo: EquipoSeguido) => void
+  logosLiga: Record<string, string | null>
 }) {
   const [ligaEquipos, setLigaEquipos] = useState<string>(
     SUPPORTED_LEAGUES[0].providerId
@@ -549,11 +582,18 @@ function GestorSiguiendo({
                 key={liga.providerId}
                 className="flex items-center justify-between px-4 py-3 border-b border-slate-800/60 last:border-b-0"
               >
-                <div>
-                  <p className="font-bold text-white text-sm">{liga.name}</p>
-                  <p className="text-slate-500 text-[11px] font-bold uppercase tracking-widest">
-                    Temporada {liga.season}
-                  </p>
+                <div className="flex items-center gap-3 min-w-0">
+                  <LogoLiga
+                    url={logosLiga[liga.providerId]}
+                    nombre={liga.name}
+                    className="w-7 h-7"
+                  />
+                  <div>
+                    <p className="font-bold text-white text-sm">{liga.name}</p>
+                    <p className="text-slate-500 text-[11px] font-bold uppercase tracking-widest">
+                      Temporada {liga.season}
+                    </p>
+                  </div>
                 </div>
                 <button
                   onClick={() => onToggleLiga(liga.providerId)}
@@ -602,12 +642,17 @@ function GestorSiguiendo({
             <button
               key={liga.providerId}
               onClick={() => setLigaEquipos(liga.providerId)}
-              className={`px-3 py-1.5 rounded-full font-black text-[11px] uppercase tracking-widest transition-all ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full font-black text-[11px] uppercase tracking-widest transition-all ${
                 ligaEquipos === liga.providerId
                   ? 'bg-cyan-600 text-white'
                   : 'bg-slate-800 text-slate-400 hover:text-white'
               }`}
             >
+              <LogoLiga
+                url={logosLiga[liga.providerId]}
+                nombre={liga.name}
+                className="w-4 h-4"
+              />
               {liga.name}
             </button>
           ))}
@@ -685,6 +730,7 @@ function VistaEquipo({
   const [pestana, setPestana] = useState<'partidos' | 'posiciones'>('partidos')
   const [partidos, setPartidos] = useState<SportsFixture[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [logoLiga, setLogoLiga] = useState<string | null>(null)
 
   const liga = getSupportedLeague(equipo.leagueProviderId)
   const seguido = favoritos.equipos.some(
@@ -699,6 +745,7 @@ function VistaEquipo({
       const data = await res.json()
       if (!res.ok) throw new Error(data?.error || 'Error al cargar el equipo')
       setPartidos(data.fixtures || [])
+      setLogoLiga(data.league?.badgeUrl ?? null)
       setError(null)
     } catch (e) {
       setPartidos((prev) => {
@@ -785,7 +832,8 @@ function VistaEquipo({
             <p className="font-black text-white text-base leading-tight truncate">
               {equipo.teamName}
             </p>
-            <p className="text-slate-500 text-[11px] font-bold uppercase tracking-widest truncate">
+            <p className="flex items-center gap-1.5 text-slate-500 text-[11px] font-bold uppercase tracking-widest truncate">
+              <LogoLiga url={logoLiga} nombre={liga?.name || ''} className="w-4 h-4" />
               {liga?.name || 'Liga'} · Temporada {liga?.season || ''}
             </p>
           </div>
@@ -875,6 +923,20 @@ export default function SeccionPartidos() {
   const [fechaResultados, setFechaResultados] = useState<string>(() =>
     hoyEnMazatlan()
   )
+  const [logosLiga, setLogosLiga] = useState<Record<string, string | null>>({})
+
+  // Logos de liga para las listas del catálogo (Siguiendo, selector de
+  // Posiciones): una sola pedida; si falla, las listas van sin logo.
+  useEffect(() => {
+    fetch('/api/ligas')
+      .then((r) => r.json())
+      .then((d) => {
+        const map: Record<string, string | null> = {}
+        for (const l of d.leagues || []) map[l.providerId] = l.badgeUrl ?? null
+        setLogosLiga(map)
+      })
+      .catch(() => {})
+  }, [])
 
   const verEquipo = useCallback((equipo: EquipoSeguido) => {
     setEquipoVista(equipo)
@@ -1052,12 +1114,17 @@ export default function SeccionPartidos() {
               <button
                 key={liga.providerId}
                 onClick={() => setLigaPosiciones(liga)}
-                className={`px-3.5 py-2 rounded-full font-black text-[11px] uppercase tracking-widest transition-all ${
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full font-black text-[11px] uppercase tracking-widest transition-all ${
                   ligaPosiciones.providerId === liga.providerId
                     ? 'bg-cyan-600 text-white shadow-[0_0_16px_rgba(8,145,178,0.4)]'
                     : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white'
                 }`}
               >
+                <LogoLiga
+                  url={logosLiga[liga.providerId]}
+                  nombre={liga.name}
+                  className="w-4 h-4"
+                />
                 {liga.name}
               </button>
             ))}
@@ -1071,6 +1138,7 @@ export default function SeccionPartidos() {
           favoritos={favoritos}
           onToggleLiga={toggleLiga}
           onToggleEquipo={toggleEquipo}
+          logosLiga={logosLiga}
         />
       )}
       </>
