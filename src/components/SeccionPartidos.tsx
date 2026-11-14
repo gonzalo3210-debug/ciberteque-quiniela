@@ -20,23 +20,32 @@
 //                   datos de la app.
 //   ⭐ Favoritos  — partidos de las ligas/equipos que sigue el usuario
 //                   (estrellas, guardadas en localStorage).
-//   📊 Posiciones — tabla por liga con selector (componente TablaLiga) y
-//                   tabla EN VIVO al caer gol.
-//   ⭐ Siguiendo  — administrar ligas y equipos seguidos.
+// Correcciones de Gonzalo (2026-11-14, tras probar la Fase 2):
+//   · 📊 Posiciones SALIÓ de este menú: la tabla vive dentro de la
+//     página de cada liga y de la página de cada equipo.
+//   · ⭐ Siguiendo SALIÓ de aquí: es la tercera sección de la barra
+//     inferior (components/SeccionSiguiendo.tsx).
+//   · Tocar una liga abre su PÁGINA (components/PaginaLiga.tsx) con
+//     submenús Resumen · Partidos · Posiciones.
 //   👕 Vista por equipo — tocar un equipo en cualquier partido abre SU
-//                   vista con pestañas Partidos (pasados y siguientes) y
+//                   página con submenús Resumen · Partidos ·
 //                   Posiciones (su liga, con su renglón resaltado).
 // Los datos vienen de NUESTRAS rutas de servidor (/api/partidos,
 // /api/equipos-liga, /api/en-vivo, /api/buscar); la vista se refresca
 // sola cada 2 minutos y la llave del proveedor nunca llega al navegador.
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
-import type { SportsFixture, SportsTeam } from '@/lib/sports'
+import type { SportsFixture } from '@/lib/sports'
 import {
-  SUPPORTED_LEAGUES,
   getSupportedLeague,
   type SupportedLeague,
 } from '@/lib/sports/leagues'
 import TablaLiga from '@/components/TablaLiga'
+import {
+  LogoLiga,
+  Escudo,
+  FilaPartido,
+  type EquipoTocable,
+} from '@/components/partidosUI'
 import { nombreEquipoES } from '@/lib/sports/nombresES'
 import { useJornadaActual } from '@/hooks/useJornadaActual'
 import {
@@ -52,7 +61,6 @@ import {
   type EquipoSeguido,
 } from '@/lib/favoritos'
 import {
-  fechaEnMazatlan,
   hoyEnMazatlan,
   sumarDias,
   horaEnMazatlan,
@@ -64,8 +72,6 @@ type Vista =
   | 'quiniela'
   | 'favoritos'
   | 'resultados'
-  | 'posiciones'
-  | 'siguiendo'
   | 'envivo'
 
 interface LigaGrupo {
@@ -75,27 +81,6 @@ interface LigaGrupo {
   badgeUrl?: string | null
 }
 
-/** Logo chico de una liga, junto a su nombre. Sin logo: no ocupa lugar. */
-function LogoLiga({
-  url,
-  nombre,
-  className = 'w-5 h-5',
-}: {
-  url: string | null | undefined
-  nombre: string
-  className?: string
-}) {
-  if (!url) return null
-  return (
-    <img
-      src={url}
-      alt={nombre}
-      className={`${className} object-contain shrink-0`}
-      loading="lazy"
-    />
-  )
-}
-
 interface GrupoPartidos {
   league: LigaGrupo
   fixtures: SportsFixture[]
@@ -103,151 +88,9 @@ interface GrupoPartidos {
 
 const REFRESCO_MS = 120_000 // 2 minutos
 
-// ---------- Utilidades de presentación --------------------------------------
-
-function fechaDelPartido(f: SportsFixture): string | null {
-  if (f.kickoffUtc) {
-    try {
-      return fechaEnMazatlan(f.kickoffUtc)
-    } catch {
-      return f.date
-    }
-  }
-  return f.date
-}
-
-/** "Ayer" / "Mañana" / "vie 14 nov" / null si es hoy. */
-function etiquetaDia(f: SportsFixture): string | null {
-  const fecha = fechaDelPartido(f)
-  if (!fecha) return null
-  const hoy = hoyEnMazatlan()
-  if (fecha === hoy) return null
-  if (fecha === sumarDias(hoy, -1)) return 'Ayer'
-  if (fecha === sumarDias(hoy, 1)) return 'Mañana'
-  return f.kickoffUtc ? fechaCortaEnMazatlan(f.kickoffUtc) : fecha
-}
-
-function Escudo({ url, nombre }: { url: string | null; nombre: string }) {
-  return url ? (
-    <img
-      src={url}
-      alt={nombre}
-      className="w-6 h-6 object-contain shrink-0"
-      loading="lazy"
-    />
-  ) : (
-    <span className="w-6 h-6 shrink-0 rounded bg-slate-800 inline-block" />
-  )
-}
-
-/** Lo que necesita la vista por equipo al tocar un nombre/escudo. */
-type EquipoTocable = (
-  equipo: EquipoSeguido
-) => void
-
-function FilaPartido({
-  f,
-  onVerEquipo,
-}: {
-  f: SportsFixture
-  onVerEquipo?: EquipoTocable
-}) {
-  const dia = etiquetaDia(f)
-
-  // El nombre VISIBLE va en español si hay traducción; el nombre que se
-  // pasa a la vista por equipo (y se guarda en favoritos) sigue siendo
-  // el original del proveedor, para no tocar el matching interno.
-  const ladoEquipo = (
-    nombre: string,
-    escudo: string | null,
-    teamProviderId: string | null,
-    esLocal: boolean
-  ) => {
-    const nombreVisible = nombreEquipoES(nombre, teamProviderId)
-    const contenido = (
-      <>
-        {esLocal && (
-          <span className="font-bold text-white text-sm truncate">{nombreVisible}</span>
-        )}
-        <Escudo url={escudo} nombre={nombreVisible} />
-        {!esLocal && (
-          <span className="font-bold text-white text-sm truncate">{nombreVisible}</span>
-        )}
-      </>
-    )
-    if (onVerEquipo && teamProviderId) {
-      return (
-        <button
-          onClick={() =>
-            onVerEquipo({
-              leagueProviderId: f.leagueProviderId,
-              teamProviderId,
-              teamName: nombre,
-              badgeUrl: escudo,
-            })
-          }
-          title={`Ver partidos de ${nombreVisible}`}
-          className="flex items-center gap-2 min-w-0 hover:opacity-75 transition-opacity"
-        >
-          {contenido}
-        </button>
-      )
-    }
-    return <div className="flex items-center gap-2 min-w-0">{contenido}</div>
-  }
-
-  return (
-    <div className="flex items-center gap-2 px-3 py-2.5 border-b border-slate-800/60 last:border-b-0">
-      <div className="flex-1 flex items-center justify-end min-w-0">
-        {ladoEquipo(f.homeTeam, f.homeBadgeUrl, f.homeTeamProviderId, true)}
-      </div>
-
-      <div className="w-[104px] shrink-0 text-center">
-        {f.status === 'live' ? (
-          <div>
-            <div className="font-black text-white text-base leading-none">
-              {f.homeScore ?? 0} - {f.awayScore ?? 0}
-            </div>
-            <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full bg-red-600/20 border border-red-500/50 text-red-400 text-[10px] font-black">
-              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-              {f.statusRaw === 'HT'
-                ? 'MT'
-                : f.progress
-                  ? `${f.progress}'`
-                  : 'EN VIVO'}
-            </span>
-          </div>
-        ) : f.status === 'finished' ? (
-          <div>
-            <div className="font-black text-slate-200 text-base leading-none">
-              {f.homeScore ?? 0} - {f.awayScore ?? 0}
-            </div>
-            <div className="text-[10px] font-black uppercase tracking-widest text-slate-500 mt-1">
-              Final{dia ? ` · ${dia}` : ''}
-            </div>
-          </div>
-        ) : f.status === 'postponed' ? (
-          <div className="text-[11px] font-black uppercase tracking-widest text-amber-400">
-            Pospuesto
-          </div>
-        ) : (
-          <div>
-            <div className="font-black text-cyan-300 text-base leading-none">
-              {f.kickoffUtc ? horaEnMazatlan(f.kickoffUtc) : '—'}
-            </div>
-            <div className="text-[10px] font-black uppercase tracking-widest text-slate-500 mt-1">
-              {dia || 'Hoy'}
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="flex-1 flex items-center min-w-0">
-        {ladoEquipo(f.awayTeam, f.awayBadgeUrl, f.awayTeamProviderId, false)}
-      </div>
-    </div>
-  )
-}
+// Las piezas de presentación (LogoLiga, Escudo, FilaPartido y sus
+// utilidades de fecha) viven en components/partidosUI.tsx, compartidas
+// con la página de liga, la de equipo y la sección Siguiendo.
 
 /** Aviso de filtro por liga activo, con botón para ver todas. */
 function FiltroLigaChip({
@@ -531,198 +374,6 @@ function ListaPartidos({
           </div>
         </div>
       ))}
-    </div>
-  )
-}
-
-// ---------- Administrar lo que se sigue --------------------------------------
-
-function GestorSiguiendo({
-  favoritos,
-  onToggleLiga,
-  onToggleEquipo,
-  logosLiga,
-}: {
-  favoritos: Favoritos
-  onToggleLiga: (leagueProviderId: string) => void
-  onToggleEquipo: (equipo: EquipoSeguido) => void
-  logosLiga: Record<string, string | null>
-}) {
-  const [ligaEquipos, setLigaEquipos] = useState<string>(
-    SUPPORTED_LEAGUES[0].providerId
-  )
-  const [equiposPorLiga, setEquiposPorLiga] = useState<
-    Record<string, SportsTeam[]>
-  >({})
-  const [cargandoEquipos, setCargandoEquipos] = useState(false)
-  const [errorEquipos, setErrorEquipos] = useState<string | null>(null)
-
-  const cargarEquipos = useCallback(async (ligaId: string) => {
-    setCargandoEquipos(true)
-    setErrorEquipos(null)
-    try {
-      const res = await fetch(`/api/equipos-liga?liga=${ligaId}`)
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.error || 'Error al cargar los equipos')
-      setEquiposPorLiga((prev) => ({ ...prev, [ligaId]: data.teams || [] }))
-    } catch (e) {
-      setErrorEquipos(
-        e instanceof Error ? e.message : 'No se pudieron cargar los equipos.'
-      )
-    } finally {
-      setCargandoEquipos(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!equiposPorLiga[ligaEquipos]) cargarEquipos(ligaEquipos)
-  }, [ligaEquipos, equiposPorLiga, cargarEquipos])
-
-  const sigueEquipo = (teamProviderId: string) =>
-    favoritos.equipos.some((e) => e.teamProviderId === teamProviderId)
-
-  const equipos = equiposPorLiga[ligaEquipos]
-
-  return (
-    <div className="w-full max-w-3xl flex flex-col gap-6 animate-in fade-in duration-500">
-      <div className="bg-slate-900/80 border border-slate-800/50 rounded-2xl shadow-2xl overflow-hidden">
-        <div className="px-4 py-3 bg-slate-800/60 border-b border-slate-800 font-black text-xs uppercase tracking-widest text-white">
-          Mis Ligas
-        </div>
-        <div>
-          {SUPPORTED_LEAGUES.map((liga) => {
-            const seguida = favoritos.ligas.includes(liga.providerId)
-            return (
-              <div
-                key={liga.providerId}
-                className="flex items-center justify-between px-4 py-3 border-b border-slate-800/60 last:border-b-0"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <LogoLiga
-                    url={logosLiga[liga.providerId]}
-                    nombre={liga.name}
-                    className="w-7 h-7"
-                  />
-                  <div>
-                    <p className="font-bold text-white text-sm">{liga.name}</p>
-                    <p className="text-slate-500 text-[11px] font-bold uppercase tracking-widest">
-                      Temporada {liga.season}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => onToggleLiga(liga.providerId)}
-                  className={`px-4 py-2 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all ${
-                    seguida
-                      ? 'bg-amber-500 text-slate-950'
-                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                  }`}
-                >
-                  {seguida ? '★ Siguiendo' : '☆ Seguir'}
-                </button>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
-      <div className="bg-slate-900/80 border border-slate-800/50 rounded-2xl shadow-2xl overflow-hidden">
-        <div className="px-4 py-3 bg-slate-800/60 border-b border-slate-800 font-black text-xs uppercase tracking-widest text-white">
-          Mis Equipos
-        </div>
-
-        {favoritos.equipos.length > 0 && (
-          <div className="flex flex-wrap gap-2 px-4 py-3 border-b border-slate-800/60">
-            {favoritos.equipos.map((e) => (
-              <span
-                key={`${e.leagueProviderId}-${e.teamProviderId}`}
-                className="inline-flex items-center gap-2 pl-2 pr-1 py-1 rounded-full bg-slate-800 border border-slate-700 text-xs font-bold text-white"
-              >
-                <Escudo url={e.badgeUrl} nombre={nombreEquipoES(e.teamName, e.teamProviderId)} />
-                {nombreEquipoES(e.teamName, e.teamProviderId)}
-                <button
-                  onClick={() => onToggleEquipo(e)}
-                  className="w-5 h-5 rounded-full bg-slate-700 hover:bg-red-600 text-white text-[11px] font-black leading-none"
-                  title="Dejar de seguir"
-                >
-                  ✕
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-
-        <div className="flex flex-wrap gap-1.5 px-4 py-3 border-b border-slate-800/60">
-          {SUPPORTED_LEAGUES.map((liga) => (
-            <button
-              key={liga.providerId}
-              onClick={() => setLigaEquipos(liga.providerId)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full font-black text-[11px] uppercase tracking-widest transition-all ${
-                ligaEquipos === liga.providerId
-                  ? 'bg-cyan-600 text-white'
-                  : 'bg-slate-800 text-slate-400 hover:text-white'
-              }`}
-            >
-              <LogoLiga
-                url={logosLiga[liga.providerId]}
-                nombre={liga.name}
-                className="w-4 h-4"
-              />
-              {liga.name}
-            </button>
-          ))}
-        </div>
-
-        {cargandoEquipos && !equipos ? (
-          <p className="px-4 py-8 text-center text-cyan-400 font-bold animate-pulse">
-            Cargando equipos...
-          </p>
-        ) : errorEquipos && !equipos ? (
-          <p className="px-4 py-8 text-center text-red-400 font-bold">
-            ⚠️ {errorEquipos}
-          </p>
-        ) : !equipos || equipos.length === 0 ? (
-          <p className="px-4 py-8 text-center text-slate-400 font-bold text-sm">
-            Esta liga no trae equipos seleccionables por ahora.
-          </p>
-        ) : (
-          <div className="grid sm:grid-cols-2">
-            {equipos.map((t) => {
-              const seguido = sigueEquipo(t.providerId)
-              return (
-                <button
-                  key={t.providerId}
-                  onClick={() =>
-                    onToggleEquipo({
-                      leagueProviderId: ligaEquipos,
-                      teamProviderId: t.providerId,
-                      teamName: t.name,
-                      badgeUrl: t.badgeUrl,
-                    })
-                  }
-                  className="flex items-center gap-2.5 px-4 py-2.5 border-b border-slate-800/60 text-left hover:bg-slate-800/40 transition-colors"
-                >
-                  <Escudo url={t.badgeUrl} nombre={nombreEquipoES(t.name, t.providerId)} />
-                  <span className="flex-1 font-bold text-white text-sm truncate">
-                    {nombreEquipoES(t.name, t.providerId)}
-                  </span>
-                  <span
-                    className={`text-lg leading-none ${
-                      seguido ? 'text-amber-400' : 'text-slate-600'
-                    }`}
-                  >
-                    {seguido ? '★' : '☆'}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-        )}
-      </div>
-
-      <p className="text-center text-slate-500 text-xs font-medium">
-        Tus favoritos se guardan en este dispositivo.
-      </p>
     </div>
   )
 }
@@ -1489,17 +1140,15 @@ export default function SeccionPartidos() {
   const [buscarAbierto, setBuscarAbierto] = useState(false)
   const [favoritos, setFavoritos] = useState<Favoritos>(favoritosPorDefecto())
   const [favListos, setFavListos] = useState(false)
-  const [ligaPosiciones, setLigaPosiciones] = useState<SupportedLeague>(
-    SUPPORTED_LEAGUES[0]
-  )
+  const [ligaVista, setLigaVista] = useState<SupportedLeague | null>(null)
   const [equipoVista, setEquipoVista] = useState<EquipoSeguido | null>(null)
   const [fechaResultados, setFechaResultados] = useState<string>(() =>
     hoyEnMazatlan()
   )
   const [logosLiga, setLogosLiga] = useState<Record<string, string | null>>({})
 
-  // Logos de liga para las listas del catálogo (Siguiendo, selector de
-  // Posiciones): una sola pedida; si falla, las listas van sin logo.
+  // Logos de liga para los encabezados y la página de liga: una sola
+  // pedida; si falla, todo va sin logo.
   useEffect(() => {
     fetch('/api/ligas')
       .then((r) => r.json())
@@ -1509,6 +1158,21 @@ export default function SeccionPartidos() {
         setLogosLiga(map)
       })
       .catch(() => {})
+  }, [])
+
+  // Liga pedida desde la sección Siguiendo ("ver liga"): la sección
+  // deja el ID en sessionStorage y aquí se abre su página al montar.
+  useEffect(() => {
+    try {
+      const pendiente = sessionStorage.getItem('club_abrir_liga')
+      if (pendiente) {
+        sessionStorage.removeItem('club_abrir_liga')
+        const liga = getSupportedLeague(pendiente)
+        if (liga) setLigaVista(liga)
+      }
+    } catch {
+      // Sin sessionStorage no hay liga pendiente.
+    }
   }, [])
 
   const verEquipo = useCallback((equipo: EquipoSeguido) => {
@@ -1563,14 +1227,15 @@ export default function SeccionPartidos() {
         : 'bg-slate-900/80 border-slate-800/50 text-slate-400 hover:text-white'
     }`
 
+  // Tocar una liga abre su PÁGINA (Resumen · Partidos · Posiciones),
+  // ya no manda directo a la tabla (corrección de Gonzalo, 2026-11-14).
   const verLiga = useCallback(
     (leagueProviderId: string) => {
       const liga = getSupportedLeague(leagueProviderId)
       if (!liga) return
-      setLigaPosiciones(liga)
+      setLigaVista(liga)
       setBuscarAbierto(false)
       setEquipoVista(null)
-      setVista('posiciones')
     },
     []
   )
@@ -1595,6 +1260,30 @@ export default function SeccionPartidos() {
           onVolver={() => setEquipoVista(null)}
           onVerEquipo={verEquipo}
         />
+      ) : ligaVista ? (
+        // Página de la liga (por ahora: su tabla; el Resumen completo
+        // con submenús llega en el bloque siguiente).
+        <div className="w-full max-w-3xl flex flex-col items-center gap-4 animate-in fade-in duration-500">
+          <div className="w-full flex items-center gap-3">
+            <button
+              onClick={() => setLigaVista(null)}
+              className="shrink-0 px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white font-black text-xs uppercase tracking-widest transition-all"
+            >
+              ← Volver
+            </button>
+            <div className="flex items-center gap-2.5 min-w-0">
+              <LogoLiga
+                url={logosLiga[ligaVista.providerId]}
+                nombre={ligaVista.name}
+                className="w-8 h-8"
+              />
+              <p className="font-black text-white text-base truncate">
+                {ligaVista.name}
+              </p>
+            </div>
+          </div>
+          <TablaLiga key={ligaVista.providerId} liga={ligaVista} />
+        </div>
       ) : (
       <>
       {/* ── FILTROS superiores: Live · Calendario · Buscar ── */}
@@ -1641,19 +1330,16 @@ export default function SeccionPartidos() {
         </button>
       </div>
 
-      {/* ── PESTAÑAS de la sección ── */}
+      {/* ── PESTAÑAS de la sección: Quiniela y Favoritos. Posiciones
+          salió del menú (vive en la página de cada liga y de cada
+          equipo) y Siguiendo es sección propia de la barra inferior
+          (correcciones de Gonzalo, 2026-11-14). ── */}
       <div className="flex flex-wrap gap-1 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800/50 w-full mb-4">
         <button onClick={() => { setBuscarAbierto(false); setVista('quiniela') }} className={claseSubVista('quiniela')}>
           🎯 Quiniela
         </button>
         <button onClick={() => { setBuscarAbierto(false); setVista('favoritos') }} className={claseSubVista('favoritos')}>
           ⭐ Favoritos
-        </button>
-        <button onClick={() => { setBuscarAbierto(false); setVista('posiciones') }} className={claseSubVista('posiciones')}>
-          📊 Posiciones
-        </button>
-        <button onClick={() => { setBuscarAbierto(false); setVista('siguiendo') }} className={claseSubVista('siguiendo')}>
-          ⭐ Siguiendo
         </button>
       </div>
 
@@ -1736,40 +1422,6 @@ export default function SeccionPartidos() {
           </div>
         ))}
 
-      {vista === 'posiciones' && (
-        <div className="w-full flex flex-col items-center animate-in fade-in duration-500">
-          <div className="flex flex-wrap justify-center gap-1.5 mb-6">
-            {SUPPORTED_LEAGUES.map((liga) => (
-              <button
-                key={liga.providerId}
-                onClick={() => setLigaPosiciones(liga)}
-                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full font-black text-[11px] uppercase tracking-widest transition-all ${
-                  ligaPosiciones.providerId === liga.providerId
-                    ? 'bg-cyan-600 text-white shadow-[0_0_16px_rgba(8,145,178,0.4)]'
-                    : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white'
-                }`}
-              >
-                <LogoLiga
-                  url={logosLiga[liga.providerId]}
-                  nombre={liga.name}
-                  className="w-4 h-4"
-                />
-                {liga.name}
-              </button>
-            ))}
-          </div>
-          <TablaLiga key={ligaPosiciones.providerId} liga={ligaPosiciones} />
-        </div>
-      )}
-
-      {vista === 'siguiendo' && favListos && (
-        <GestorSiguiendo
-          favoritos={favoritos}
-          onToggleLiga={toggleLiga}
-          onToggleEquipo={toggleEquipo}
-          logosLiga={logosLiga}
-        />
-      )}
       </>
       )}
       </>

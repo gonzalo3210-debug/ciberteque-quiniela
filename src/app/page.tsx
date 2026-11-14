@@ -8,6 +8,7 @@ import MisJugadas from '@/components/MisJugadas'
 import AdminPanel from '@/components/AdminPanel'
 import Posiciones from '@/components/Posiciones'
 import SeccionPartidos from '@/components/SeccionPartidos'
+import SeccionSiguiendo from '@/components/SeccionSiguiendo'
 import SeccionNoticias from '@/components/SeccionNoticias'
 import MiBilletera from '@/components/MiBilletera'
 import Perfil from '@/components/Perfil'
@@ -17,7 +18,7 @@ import GestorUsuarios from '@/components/GestorUsuarios'
 // 🔔 Importamos el Centro de Notificaciones
 import CentroNotificaciones from '@/components/CentroNotificaciones'
 
-type Pestana = 'jugar' | 'historial' | 'admin' | 'ranking' | 'noticias' | 'partidos' | 'billetera' | 'perfil' | 'finanzas' | 'usuarios'
+type Pestana = 'jugar' | 'historial' | 'admin' | 'ranking' | 'noticias' | 'partidos' | 'siguiendo' | 'billetera' | 'perfil' | 'finanzas' | 'usuarios'
 
 export default function Home() {
   const [usuarioActivo, setUsuarioActivo] = useState<any>(null)
@@ -28,12 +29,18 @@ export default function Home() {
   const [cargandoSesion, setCargandoSesion] = useState(true)
 
   // 🧭 Carcasa nueva (rediseño tipo 365Scores, 2026-11-14): la navegación
-  // principal son DOS secciones en la barra inferior — Quiniela y
-  // Partidos. `pestana` sigue siendo la vista concreta; la sección se
+  // principal son TRES secciones en la barra inferior — Quiniela,
+  // Partidos y Siguiendo (Siguiendo entró el 2026-11-14 a petición de
+  // Gonzalo). `pestana` sigue siendo la vista concreta; la sección se
   // deriva de ella y se recuerda la última vista de Quiniela para
   // volver a ella al tocar "Quiniela".
   const [ultimaVistaQuiniela, setUltimaVistaQuiniela] = useState<Pestana>('jugar')
-  const seccion: 'quiniela' | 'partidos' = pestana === 'partidos' ? 'partidos' : 'quiniela'
+  const seccion: 'quiniela' | 'partidos' | 'siguiendo' =
+    pestana === 'partidos'
+      ? 'partidos'
+      : pestana === 'siguiendo'
+        ? 'siguiendo'
+        : 'quiniela'
 
   // 👤 Submenú del botón de perfil en la barra superior
   const [menuPerfilAbierto, setMenuPerfilAbierto] = useState(false)
@@ -82,7 +89,9 @@ export default function Home() {
       // La vieja pestaña 'tabla' (Tabla Liga MX) ahora es la sección 'partidos'
       const restaurada = (pestanaGuardada === 'tabla' ? 'partidos' : pestanaGuardada) as Pestana
       setPestana(restaurada)
-      if (restaurada !== 'partidos') setUltimaVistaQuiniela(restaurada)
+      if (restaurada !== 'partidos' && restaurada !== 'siguiendo') {
+        setUltimaVistaQuiniela(restaurada)
+      }
     }
 
     setCargandoSesion(false)
@@ -91,8 +100,21 @@ export default function Home() {
   // FUNCIÓN NUEVA: Cambia la pestaña y la guarda en la memoria
   const cambiarPestana = (nuevaPestana: Pestana) => {
     setPestana(nuevaPestana)
-    if (nuevaPestana !== 'partidos') setUltimaVistaQuiniela(nuevaPestana)
+    if (nuevaPestana !== 'partidos' && nuevaPestana !== 'siguiendo') {
+      setUltimaVistaQuiniela(nuevaPestana)
+    }
     localStorage.setItem('club_pronosticos_pestana', nuevaPestana)
+  }
+
+  // ⭐ Desde Siguiendo, "ver liga": se deja el ID en sessionStorage y se
+  // cambia a la sección Partidos, que al montarse abre esa página.
+  const abrirLigaEnPartidos = (leagueProviderId: string) => {
+    try {
+      sessionStorage.setItem('club_abrir_liga', leagueProviderId)
+    } catch {
+      // Sin sessionStorage, solo se cambia de sección.
+    }
+    cambiarPestana('partidos')
   }
 
   // 2. FUNCIÓN DE LOGIN
@@ -295,6 +317,10 @@ export default function Home() {
                 <SeccionPartidos />
               )}
 
+              {pestana === 'siguiendo' && (
+                <SeccionSiguiendo onAbrirLiga={abrirLigaEnPartidos} />
+              )}
+
               {pestana === 'billetera' && (
                 <MiBilletera usuarioId={usuarioActivo.id} />
               )}
@@ -323,12 +349,12 @@ export default function Home() {
             </div>
           </div>
 
-          {/* ══════════ BARRA INFERIOR: 2 SECCIONES ══════════ */}
+          {/* ══════════ BARRA INFERIOR: 3 SECCIONES ══════════ */}
           <nav className="fixed bottom-0 inset-x-0 z-40 bg-slate-950/90 backdrop-blur border-t border-slate-800/70 print:hidden">
-            <div className="mx-auto w-full max-w-5xl grid grid-cols-2 gap-2 px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+            <div className="mx-auto w-full max-w-5xl grid grid-cols-3 gap-2 px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
               <button
                 onClick={() => cambiarPestana(ultimaVistaQuiniela)}
-                className={`py-3 rounded-2xl font-black text-sm uppercase tracking-widest transition-all ${
+                className={`py-3 rounded-2xl font-black text-xs sm:text-sm uppercase tracking-widest transition-all ${
                   seccion === 'quiniela'
                     ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.4)]'
                     : 'text-slate-400 hover:text-white'
@@ -338,13 +364,23 @@ export default function Home() {
               </button>
               <button
                 onClick={() => cambiarPestana('partidos')}
-                className={`py-3 rounded-2xl font-black text-sm uppercase tracking-widest transition-all ${
+                className={`py-3 rounded-2xl font-black text-xs sm:text-sm uppercase tracking-widest transition-all ${
                   seccion === 'partidos'
                     ? 'bg-cyan-600 text-white shadow-[0_0_20px_rgba(8,145,178,0.4)]'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
                 ⚽ Partidos
+              </button>
+              <button
+                onClick={() => cambiarPestana('siguiendo')}
+                className={`py-3 rounded-2xl font-black text-xs sm:text-sm uppercase tracking-widest transition-all ${
+                  seccion === 'siguiendo'
+                    ? 'bg-amber-500 text-slate-950 shadow-[0_0_20px_rgba(245,158,11,0.4)]'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                ⭐ Siguiendo
               </button>
             </div>
           </nav>
