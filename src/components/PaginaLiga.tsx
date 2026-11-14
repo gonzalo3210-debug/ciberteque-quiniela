@@ -62,6 +62,7 @@ export default function PaginaLiga({
   favoritos,
   onToggleLiga,
   onVerEquipo,
+  onVerPartido,
   onVolver,
 }: {
   liga: SupportedLeague
@@ -69,6 +70,7 @@ export default function PaginaLiga({
   favoritos: Favoritos
   onToggleLiga: (leagueProviderId: string) => void
   onVerEquipo: EquipoTocable
+  onVerPartido?: (f: SportsFixture) => void
   onVolver: () => void
 }) {
   const [sub, setSub] = useState<SubVista>('resumen')
@@ -162,7 +164,7 @@ export default function PaginaLiga({
       ) : (
         <div>
           {(limite ? filas.slice(0, limite) : filas).map((f) => (
-            <FilaPartido key={f.providerId} f={f} onVerEquipo={onVerEquipo} />
+            <FilaPartido key={f.providerId} f={f} onVerEquipo={onVerEquipo} onVerPartido={onVerPartido} />
           ))}
         </div>
       )}
@@ -294,7 +296,7 @@ export default function PaginaLiga({
                   ? '🔴 Partido en vivo'
                   : 'Partido destacado'}
               </div>
-              <FilaPartido f={destacado} onVerEquipo={onVerEquipo} />
+              <FilaPartido f={destacado} onVerEquipo={onVerEquipo} onVerPartido={onVerPartido} />
             </div>
           ) : (
             <div className="w-full bg-slate-900/80 border border-slate-800 rounded-2xl p-6 text-center">

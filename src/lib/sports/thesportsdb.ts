@@ -116,6 +116,8 @@ interface TsdbEvent {
   strProgress?: string;
   strPostponed?: string;
   strVenue?: string;
+  // Dónde ver (no siempre viene; se lee defensivo):
+  strTVStation?: string;
   strHomeTeamBadge?: string;
   strAwayTeamBadge?: string;
 }
@@ -240,6 +242,7 @@ function mapEvent(raw: TsdbEvent, leagueIdFallback: string): SportsFixture {
     homeScore: numOrNull(raw.intHomeScore),
     awayScore: numOrNull(raw.intAwayScore),
     venue: raw.strVenue || null,
+    tvStation: raw.strTVStation || null,
   };
 }
 
@@ -263,6 +266,7 @@ function mapLiveScore(raw: TsdbLiveScore): SportsFixture {
     homeScore: numOrNull(raw.intHomeScore),
     awayScore: numOrNull(raw.intAwayScore),
     venue: raw.strVenue || null,
+    tvStation: null, // el livescore v2 no trae canal de TV
   };
 }
 

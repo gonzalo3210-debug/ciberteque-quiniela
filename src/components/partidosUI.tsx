@@ -91,9 +91,13 @@ export function etiquetaDia(f: SportsFixture): string | null {
 export function FilaPartido({
   f,
   onVerEquipo,
+  onVerPartido,
 }: {
   f: SportsFixture
   onVerEquipo?: EquipoTocable
+  /** Al tocar la fila (fuera de los equipos) se abre la vista del
+   *  partido. Los botones de equipo detienen la propagación. */
+  onVerPartido?: (f: SportsFixture) => void
 }) {
   const dia = etiquetaDia(f)
 
@@ -118,14 +122,15 @@ export function FilaPartido({
     if (onVerEquipo && teamProviderId) {
       return (
         <button
-          onClick={() =>
+          onClick={(e) => {
+            e.stopPropagation()
             onVerEquipo({
               leagueProviderId: f.leagueProviderId,
               teamProviderId,
               teamName: nombre,
               badgeUrl: escudo,
             })
-          }
+          }}
           title={`Ver ${nombreVisible}`}
           className="flex items-center gap-2 min-w-0 hover:opacity-75 transition-opacity"
         >
@@ -137,7 +142,14 @@ export function FilaPartido({
   }
 
   return (
-    <div className="flex items-center gap-2 px-3 py-2.5 border-b border-slate-800/60 last:border-b-0">
+    <div
+      onClick={onVerPartido ? () => onVerPartido(f) : undefined}
+      role={onVerPartido ? 'button' : undefined}
+      title={onVerPartido ? 'Ver partido' : undefined}
+      className={`flex items-center gap-2 px-3 py-2.5 border-b border-slate-800/60 last:border-b-0 ${
+        onVerPartido ? 'cursor-pointer hover:bg-slate-800/40 transition-colors' : ''
+      }`}
+    >
       <div className="flex-1 flex items-center justify-end min-w-0">
         {ladoEquipo(f.homeTeam, f.homeBadgeUrl, f.homeTeamProviderId, true)}
       </div>

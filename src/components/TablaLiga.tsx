@@ -83,6 +83,15 @@ export function esEquipoResaltado(
   return norm(f.teamName) === norm(eq.teamName);
 }
 
+/** Lista efectiva de resaltados: el conjunto manda; el singular es compat. */
+export function listaResaltados(
+  equipoResaltado?: EquipoResaltado,
+  equiposResaltados?: EquipoResaltado[]
+): EquipoResaltado[] {
+  if (equiposResaltados && equiposResaltados.length > 0) return equiposResaltados;
+  return equipoResaltado ? [equipoResaltado] : [];
+}
+
 /**
  * La tarjeta con la tabla (encabezados y renglones) de UN grupo o liga.
  *
@@ -97,11 +106,17 @@ export function TablaCard({
   liga,
   filas,
   equipoResaltado,
+  equiposResaltados,
 }: {
   liga: SupportedLeague
   filas: StandingRow[]
   equipoResaltado?: EquipoResaltado
+  /** Conjunto de equipos a marcar (p. ej. los dos de un partido). */
+  equiposResaltados?: EquipoResaltado[]
 }) {
+  const resaltados = listaResaltados(equipoResaltado, equiposResaltados)
+  const esRes = (f: StandingRow) =>
+    resaltados.some((eq) => esEquipoResaltado(f, eq))
   const thNum =
     'py-2 px-1 sm:py-3 sm:px-2 text-center font-black whitespace-nowrap'
   const tdNum =
@@ -129,7 +144,7 @@ export function TablaCard({
             <tr
               key={f.teamProviderId || f.teamName}
               className={`border-b border-slate-800/60 transition-colors ${claseZona(liga, f.rank, filas.length)} ${
-                esEquipoResaltado(f, equipoResaltado)
+                esRes(f)
                   ? 'bg-cyan-600/15 hover:bg-cyan-600/25'
                   : 'hover:bg-slate-800/40'
               }`}
@@ -142,7 +157,7 @@ export function TablaCard({
                   ) : (
                     <span className="w-5 h-5 sm:w-6 sm:h-6 shrink-0 rounded bg-slate-800 inline-block" />
                   )}
-                  <span className={`font-bold truncate ${esEquipoResaltado(f, equipoResaltado) ? 'text-cyan-300' : 'text-white'}`}>{nombreEquipoES(f.teamName, f.teamProviderId)}</span>
+                  <span className={`font-bold truncate ${esRes(f) ? 'text-cyan-300' : 'text-white'}`}>{nombreEquipoES(f.teamName, f.teamProviderId)}</span>
                 </div>
               </td>
               <td className={`${tdNum} text-slate-300`}>{f.played}</td>
@@ -193,6 +208,7 @@ function BotonVerCompleta({ onClick }: { onClick: () => void }) {
 export default function TablaLiga({
   liga,
   equipoResaltado,
+  equiposResaltados,
   filasMax,
   alVerCompleta,
 }: {
@@ -200,6 +216,8 @@ export default function TablaLiga({
   /** Equipo a resaltar (vista por equipo): su renglón se pinta y se
    *  anuncia su lugar arriba de la tabla. */
   equipoResaltado?: EquipoResaltado;
+  /** Conjunto de equipos a resaltar (vista del partido: los dos). */
+  equiposResaltados?: EquipoResaltado[];
   /** Avance de la tabla: mostrar solo las primeras N filas (p. ej. el
    *  Resumen de la página de liga). Sin definir = tabla completa. */
   filasMax?: number;
@@ -300,14 +318,17 @@ export default function TablaLiga({
     const enVivoCalc =
       datos.hasLive && datos.liveGroups ? datos.liveGroups : null
     const grupos = enVivoCalc ?? gruposBase
-    const resaltadaCalc = equipoResaltado
-      ? grupos
+    const resaltados = listaResaltados(equipoResaltado, equiposResaltados)
+    const resaltadasCalc = resaltados
+      .map((eq) =>
+        grupos
           .map((g) => ({
             grupo: g.label,
-            fila: g.rows.find((f) => esEquipoResaltado(f, equipoResaltado)),
+            fila: g.rows.find((f) => esEquipoResaltado(f, eq)),
           }))
           .find((x) => x.fila)
-      : undefined
+      )
+      .filter((x): x is { grupo: string; fila: StandingRow } => !!x?.fila)
 
     return (
       <div className="w-full max-w-3xl animate-in fade-in duration-500">
@@ -342,12 +363,18 @@ export default function TablaLiga({
             El proveedor no publica la tabla oficial de esta competencia;
             esta se calcula con los resultados de la temporada.
           </p>
-          {resaltadaCalc?.fila && (
-            <p className="inline-block mt-3 px-3.5 py-1.5 rounded-full bg-cyan-600/20 border border-cyan-500/50 text-cyan-300 text-xs font-black uppercase tracking-widest">
-              🏅 {nombreEquipoES(resaltadaCalc.fila.teamName, resaltadaCalc.fila.teamProviderId)} · {resaltadaCalc.fila.rank}.º
-              lugar{resaltadaCalc.grupo ? ` del ${resaltadaCalc.grupo}` : ''} ·{' '}
-              {resaltadaCalc.fila.points} pts
-            </p>
+          {resaltadasCalc.length > 0 && (
+            <div className="flex flex-wrap justify-center gap-2 mt-3">
+              {resaltadasCalc.map((r) => (
+                <p
+                  key={r.fila.teamProviderId || r.fila.teamName}
+                  className="inline-block px-3.5 py-1.5 rounded-full bg-cyan-600/20 border border-cyan-500/50 text-cyan-300 text-xs font-black uppercase tracking-widest"
+                >
+                  🏅 {nombreEquipoES(r.fila.teamName, r.fila.teamProviderId)} · {r.fila.rank}.º
+                  lugar{r.grupo ? ` del ${r.grupo}` : ''} · {r.fila.points} pts
+                </p>
+              ))}
+            </div>
           )}
         </div>
 
@@ -363,6 +390,7 @@ export default function TablaLiga({
                 liga={liga}
                 filas={filasMax ? g.rows.slice(0, filasMax) : g.rows}
                 equipoResaltado={equipoResaltado}
+                equiposResaltados={equiposResaltados}
               />
             </div>
           ))}
@@ -377,9 +405,10 @@ export default function TablaLiga({
   const enVivo = datos.hasLive && datos.liveRows !== null
   const filasCompletas = enVivo ? (datos.liveRows as StandingRow[]) : datos.rows
   const filas = filasMax ? filasCompletas.slice(0, filasMax) : filasCompletas
-  const filaResaltada = equipoResaltado
-    ? filasCompletas.find((f) => esEquipoResaltado(f, equipoResaltado))
-    : undefined
+  const resaltadosOf = listaResaltados(equipoResaltado, equiposResaltados)
+  const filasResaltadas = resaltadosOf
+    .map((eq) => filasCompletas.find((f) => esEquipoResaltado(f, eq)))
+    .filter((f): f is StandingRow => !!f)
 
   return (
     <div className="w-full max-w-3xl animate-in fade-in duration-500">
@@ -395,11 +424,18 @@ export default function TablaLiga({
           )}
           {liga.name}
         </h3>
-        {filaResaltada && (
-          <p className="inline-block mt-3 px-3.5 py-1.5 rounded-full bg-cyan-600/20 border border-cyan-500/50 text-cyan-300 text-xs font-black uppercase tracking-widest">
-            🏅 {nombreEquipoES(filaResaltada.teamName, filaResaltada.teamProviderId)} · {filaResaltada.rank}.º lugar ·{' '}
-            {filaResaltada.points} pts
-          </p>
+        {filasResaltadas.length > 0 && (
+          <div className="flex flex-wrap justify-center gap-2 mt-3">
+            {filasResaltadas.map((f) => (
+              <p
+                key={f.teamProviderId || f.teamName}
+                className="inline-block px-3.5 py-1.5 rounded-full bg-cyan-600/20 border border-cyan-500/50 text-cyan-300 text-xs font-black uppercase tracking-widest"
+              >
+                🏅 {nombreEquipoES(f.teamName, f.teamProviderId)} · {f.rank}.º lugar ·{' '}
+                {f.points} pts
+              </p>
+            ))}
+          </div>
         )}
         <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mt-1">
           Temporada {datos.league.season} ·{' '}
@@ -413,7 +449,7 @@ export default function TablaLiga({
         )}
       </div>
 
-      <TablaCard liga={liga} filas={filas} equipoResaltado={equipoResaltado} />
+      <TablaCard liga={liga} filas={filas} equipoResaltado={equipoResaltado} equiposResaltados={equiposResaltados} />
 
       {filasMax && alVerCompleta && filasCompletas.length > filasMax && (
         <BotonVerCompleta onClick={alVerCompleta} />

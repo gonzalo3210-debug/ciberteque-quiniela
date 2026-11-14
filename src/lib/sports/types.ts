@@ -53,6 +53,9 @@ export interface SportsFixture {
   homeScore: number | null;
   awayScore: number | null;
   venue: string | null;
+  /** Dónde ver en TV (strTVStation del evento), si el proveedor lo
+   *  trae; en el livescore no viene y queda null. */
+  tvStation: string | null;
 }
 
 /** Renglón de tabla de posiciones. */
