@@ -1,6 +1,7 @@
 'use client'
-import React, { useState, useEffect, Fragment } from 'react'
+import React, { useState, useEffect, useMemo, Fragment } from 'react'
 import { usePosiciones } from '@/hooks/usePosiciones'
+import { calcularProyeccion } from '@/lib/proyeccion'
 import { useReacciones } from '@/hooks/useReacciones'
 import { usePerfilUsuario } from '@/hooks/usePerfilUsuario'
 import { useAuth } from '@/contexts/AuthContext'
@@ -435,6 +436,25 @@ export default function Posiciones() {
   
   const [perfilPublicoAbierto, setPerfilPublicoAbierto] = useState<string | null>(null);
 
+  // 📊 Proyección en vivo: vista alterna del ranking (la oficial es la
+  // de siempre y sigue siendo la predeterminada).
+  const [vistaRanking, setVistaRanking] = useState<'oficial' | 'envivo'>('oficial');
+
+  const proyeccionActiva = useMemo(() => {
+    if (!quinielaActiva || quinielaActiva.modalidad === 'sorteo') return null;
+    const ticketsTabla = (quinielaActiva.ranking || []).map((r: any) => ({
+      id: r.id,
+      usuario_id: r.usuario_id,
+      prediccion_goles_total: r.prediccionGoles,
+      pronosticos: r.pronosticos || []
+    }));
+    return calcularProyeccion(
+      { modalidad: quinielaActiva.modalidad, goles_totales_real: quinielaActiva.goles_totales_real },
+      ticketsTabla,
+      quinielaActiva.partidos || []
+    );
+  }, [quinielaActiva]);
+
   const toggleExpandirHistorial = (id: string) => setQuinielaExpandidaId(prevId => prevId === id ? null : id)
   const toggleExpandirJugador = (id: string) => setJugadorExpandidoId(prevId => prevId === id ? null : id)
 
@@ -622,6 +642,26 @@ export default function Posiciones() {
     jugador.nombre.toLowerCase().includes(busqueda.toLowerCase())
   );
 
+  // 📊 Filas de la proyección (parciales + finales) con el movimiento
+  // contra la tabla de solo finales. Si dejan de haber partidos en
+  // vivo, la vista vuelve sola a la oficial.
+  const vistaEnVivoActiva = vistaRanking === 'envivo' && Boolean(proyeccionActiva?.hayEnVivo);
+  const filasProyeccion = vistaEnVivoActiva && proyeccionActiva
+    ? proyeccionActiva.tablaProyeccion
+        .map((f: any) => {
+          const datos = quinielaActiva.ranking.find((r: any) => r.id === f.ticketId);
+          const detalle = proyeccionActiva.porTicket[f.ticketId];
+          return {
+            ...f,
+            nombre: datos?.nombre || 'Jugador',
+            avatar_url: datos?.avatar_url || null,
+            movimiento: detalle?.movimiento ?? 0,
+            puntosEnVivo: f.puntos - (detalle?.puntosSoloFinales ?? f.puntos)
+          };
+        })
+        .filter((f: any) => f.nombre.toLowerCase().includes(busqueda.toLowerCase()))
+    : [];
+
   const opcionesFecha: Intl.DateTimeFormatOptions = { day: '2-digit', month: 'short', hour: '2-digit', minute:'2-digit' };
   const fechaTextoVisible = fechaCierre.toLocaleDateString('es-MX', opcionesFecha).replace(',', ' a las');
 
@@ -666,6 +706,7 @@ export default function Posiciones() {
                   setQuinielaActiva(qa); 
                   setJugadorExpandidoId(null); 
                   setBusqueda('');
+                  setVistaRanking('oficial');
                 }}
                 className={`px-3 py-1.5 rounded-lg text-[10px] md:text-xs font-black uppercase transition-all ${
                   quinielaActiva?.id === qa.id
@@ -766,7 +807,62 @@ export default function Posiciones() {
           </div>
         )}
 
-        {esSorteo ? (
+        {!esSorteo && proyeccionActiva?.hayEnVivo && (
+          <div className="mb-3 flex justify-center">
+            <div className="inline-flex bg-slate-950 border border-slate-700 rounded-xl p-1 gap-1 shadow-inner">
+              <button
+                onClick={() => setVistaRanking('oficial')}
+                className={`px-3 py-1.5 rounded-lg text-[10px] md:text-xs font-black uppercase tracking-widest transition-all ${!vistaEnVivoActiva ? 'bg-amber-500 text-slate-900 shadow' : 'text-slate-400 hover:text-slate-200'}`}
+              >
+                🏆 Oficial
+              </button>
+              <button
+                onClick={() => setVistaRanking('envivo')}
+                className={`px-3 py-1.5 rounded-lg text-[10px] md:text-xs font-black uppercase tracking-widest transition-all ${vistaEnVivoActiva ? 'bg-red-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+              >
+                🔴 En vivo
+              </button>
+            </div>
+          </div>
+        )}
+
+        {vistaEnVivoActiva && (
+          <p className="mb-3 text-center border border-red-900/50 bg-red-950/20 text-red-400 text-[9px] md:text-[10px] px-3 py-2 rounded-lg font-bold uppercase tracking-widest leading-relaxed">
+            📊 Proyección con marcadores parciales — no es el resultado oficial · El movimiento (▲▼) compara contra la tabla con solo partidos finales
+          </p>
+        )}
+
+        {vistaEnVivoActiva ? (
+          <div className="bg-slate-900/80 rounded-xl border border-red-900/40 shadow-2xl p-3 md:p-5">
+            <h3 className="text-center font-black text-red-400 uppercase tracking-widest text-xs mb-1">🔴 Tabla provisional en vivo</h3>
+            <p className="text-center text-slate-500 text-[9px] font-bold uppercase tracking-widest mb-4">Si la jornada terminara ahorita</p>
+            <div className="flex flex-col gap-1.5">
+              {filasProyeccion.map((f: any) => (
+                <div key={f.ticketId} className="flex items-center justify-between gap-2 bg-slate-800/60 border border-slate-700/60 rounded-xl px-2.5 py-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-[10px] font-black text-slate-400 bg-slate-950 border border-slate-800 px-1.5 py-0.5 rounded w-8 text-center shrink-0">{f.posicion}°</span>
+                    <img src={getAvatarUrl(f.nombre, f.avatar_url)} alt={f.nombre} className="w-6 h-6 md:w-7 md:h-7 rounded-full object-cover bg-slate-900 shrink-0" />
+                    <span className="font-black uppercase text-[10px] md:text-xs text-slate-200 truncate max-w-[120px] md:max-w-[200px]">{f.nombre}</span>
+                    {f.movimiento > 0 && <span className="text-[9px] font-black text-green-400 shrink-0">▲{f.movimiento}</span>}
+                    {f.movimiento < 0 && <span className="text-[9px] font-black text-red-400 shrink-0">▼{Math.abs(f.movimiento)}</span>}
+                    {f.movimiento === 0 && <span className="text-[9px] font-black text-slate-600 shrink-0">—</span>}
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {f.puntosEnVivo > 0 && (
+                      <span className="text-[8px] font-black text-red-400 bg-red-950/60 border border-red-900/60 px-1.5 py-0.5 rounded uppercase">+{f.puntosEnVivo} en vivo</span>
+                    )}
+                    <span className="bg-slate-950 text-green-400 px-2 py-0.5 rounded border border-slate-700 font-black text-[11px] md:text-xs">{f.puntos} pts</span>
+                  </div>
+                </div>
+              ))}
+              {filasProyeccion.length === 0 && (
+                <div className="p-6 text-center text-slate-500 text-[10px] font-bold uppercase tracking-widest italic border border-dashed border-slate-700 rounded-xl">
+                  {busqueda ? `No se encontró a "${busqueda}"` : 'Sin boletos en esta quiniela.'}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : esSorteo ? (
            <div className="bg-slate-900/80 rounded-xl border border-blue-900/30 shadow-2xl p-3 md:p-5">
               <h3 className="text-center font-black text-slate-300 uppercase tracking-widest text-xs mb-4">Bombo de Asignaciones</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
