@@ -10,7 +10,10 @@
 //   The Odds API (vía /api/encuesta; si ninguna casa cotiza el
 //   partido, la encuesta simplemente no aparece), información del
 //   juego (fecha/hora America/Mazatlan, torneo con logo, estadio y
-//   dónde ver: el canal de la quiniela o el strTVStation del evento)
+//   dónde ver: primero el canal de la quiniela; si no hay, los
+//   listados de TV de la API vía /api/tv-partido — endpoint dedicado
+//   lookuptv, cobertura parcial, casi nunca de México — con logo y
+//   país; y como último respaldo el strTVStation del evento)
 //   y los últimos 5 partidos de cada equipo con chip G/E/P.
 // - Posiciones: la tabla de la liga del partido marcando a AMBOS
 //   equipos (resaltado en conjunto de TablaLiga).
@@ -29,9 +32,10 @@
 // últimos partidos; lo que no exista se omite. Nunca truena.
 
 import { useEffect, useMemo, useState } from 'react'
-import type { SportsFixture } from '@/lib/sports/types'
+import type { FixtureTVListing, SportsFixture } from '@/lib/sports/types'
 import { getSupportedLeague } from '@/lib/sports/leagues'
 import { nombreEquipoES } from '@/lib/sports/nombresES'
+import { nombrePaisES } from '@/lib/sports/tvListados'
 import { esMismoEquipo } from '@/lib/emparejar'
 import {
   fechaEnMazatlan,
@@ -95,6 +99,10 @@ interface EquipoResuelto {
   teamProviderId: string
   badgeUrl: string | null
 }
+
+/** Tope de transmisiones de la API que se pintan en "Dónde ver"
+ *  (un partido europeo puede traer decenas; el resto se resume). */
+const MAX_TV_VISIBLES = 8
 
 type SubVista = 'resumen' | 'enfrentamientos' | 'posiciones'
 
@@ -196,6 +204,7 @@ export default function VistaPartido({
 }) {
   const [sub, setSub] = useState<SubVista>('resumen')
   const [encuesta, setEncuesta] = useState<EncuestaResp | null>(null)
+  const [tvApi, setTvApi] = useState<FixtureTVListing[]>([])
   const [pool, setPool] = useState<SportsFixture[]>([])
   const [resLocal, setResLocal] = useState<EquipoResuelto | null>(null)
   const [resVisita, setResVisita] = useState<EquipoResuelto | null>(null)
@@ -228,6 +237,25 @@ export default function VistaPartido({
       vivo = false
     }
   }, [datos])
+
+  // ----- Dónde ver según la API (respaldo del canal propio) --------
+  // El canal de la quiniela manda siempre: si existe, ni se pide.
+  // Sin enlace con la API (fixtureId null) tampoco hay qué pedir.
+  // Cobertura parcial: lo normal es que llegue la lista vacía.
+  useEffect(() => {
+    let vivo = true
+    setTvApi([])
+    if (datos.canal || !datos.fixtureId) return
+    fetch(`/api/tv-partido?fixture=${encodeURIComponent(datos.fixtureId)}`)
+      .then((r) => r.json())
+      .then((j) => {
+        if (vivo) setTvApi((j.listings || []) as FixtureTVListing[])
+      })
+      .catch(() => {})
+    return () => {
+      vivo = false
+    }
+  }, [datos.fixtureId, datos.canal])
 
   // ----- Resolución de equipos y pool de fixtures --------------------
   // Con liga + IDs (fixture de la API) basta el calendario de esa liga.
@@ -353,7 +381,10 @@ export default function VistaPartido({
     ? etiquetaFechaLarga(fechaEnMazatlan(datos.kickoffIso))
     : null
   const hora = datos.kickoffIso ? horaEnMazatlan(datos.kickoffIso) : null
-  const dondeVer = datos.canal || datos.tvStation
+  // "Dónde ver": canal de la quiniela > listados TV de la API >
+  // strTVStation del evento (casi nunca viene).
+  const hayDondeVer =
+    Boolean(datos.canal) || tvApi.length > 0 || Boolean(datos.tvStation)
   const resaltados: EquipoResaltado[] = [
     { teamProviderId: idLocal || '', teamName: datos.homeTeam },
     { teamProviderId: idVisita || '', teamName: datos.awayTeam },
@@ -570,13 +601,55 @@ export default function VistaPartido({
                   <dd className="text-white font-bold text-right">{datos.venue}</dd>
                 </div>
               )}
-              {dondeVer && (
+              {datos.canal ? (
                 <div className="flex justify-between gap-3">
                   <dt className="text-slate-500 font-bold">Dónde ver</dt>
-                  <dd className="text-white font-bold text-right">{dondeVer}</dd>
+                  <dd className="text-white font-bold text-right">{datos.canal}</dd>
                 </div>
-              )}
-              {!fechaLarga && !datos.venue && !dondeVer && (
+              ) : tvApi.length > 0 ? (
+                <div className="flex justify-between gap-3">
+                  <dt className="text-slate-500 font-bold shrink-0">Dónde ver</dt>
+                  <dd>
+                    <ul className="flex flex-col gap-1.5">
+                      {tvApi.slice(0, MAX_TV_VISIBLES).map((t, i) => (
+                        <li
+                          key={`${t.channel}|${t.country || ''}|${i}`}
+                          className="flex items-center gap-2 justify-end"
+                        >
+                          {t.logoUrl && (
+                            <img
+                              src={t.logoUrl}
+                              alt=""
+                              className="w-5 h-5 object-contain shrink-0"
+                            />
+                          )}
+                          <span className="text-white font-bold text-right">
+                            {t.channel}
+                            {nombrePaisES(t.country) && (
+                              <span className="text-slate-400">
+                                {' '}
+                                · {nombrePaisES(t.country)}
+                              </span>
+                            )}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {tvApi.length > MAX_TV_VISIBLES && (
+                      <p className="text-slate-500 text-xs font-bold text-right mt-1">
+                        +{tvApi.length - MAX_TV_VISIBLES} transmisiones más
+                        según la API
+                      </p>
+                    )}
+                  </dd>
+                </div>
+              ) : datos.tvStation ? (
+                <div className="flex justify-between gap-3">
+                  <dt className="text-slate-500 font-bold">Dónde ver</dt>
+                  <dd className="text-white font-bold text-right">{datos.tvStation}</dd>
+                </div>
+              ) : null}
+              {!fechaLarga && !datos.venue && !hayDondeVer && (
                 <p className="text-slate-500 text-sm font-medium">
                   Sin datos adicionales de este partido por ahora.
                 </p>
