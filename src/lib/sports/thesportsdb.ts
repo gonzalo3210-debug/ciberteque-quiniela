@@ -186,6 +186,13 @@ const numOrNull = (v: string | null | undefined): number | null => {
 
 const numOrZero = (v: string | undefined): number => numOrNull(v) ?? 0;
 
+/** Códigos crudos que inequívocamente son "en curso" (mismo criterio que
+ *  la ruta /api/en-vivo). */
+const ESTADOS_EN_CURSO = new Set(['1H', 'HT', '2H', 'ET', 'BT', 'LIVE']);
+
+/** Minuto de juego como estado crudo: "67", "45+2", "90+3"... */
+const MINUTO_COMO_ESTADO = /^\d+(\+\d+)?$/;
+
 function mapStatusFields(
   status: string | undefined,
   postponed: string | undefined
@@ -200,8 +207,15 @@ function mapStatusFields(
   if (['FT', 'AET', 'PEN', 'AWD', 'Match Finished'].includes(s)) {
     return 'finished';
   }
-  // Cualquier otro código ("1H", "HT", "2H", minutos, etc.) = en curso.
-  return s ? 'live' : 'unknown';
+  // En curso SOLO con códigos conocidos o con el minuto numérico. Antes
+  // CUALQUIER otro código se adivinaba como 'live' y el feed trae códigos
+  // ajenos al juego (p. ej. de partidos aún no iniciados): así salían
+  // partidos como EN VIVO horas o días antes de su inicio. Un código
+  // desconocido ahora es 'unknown', nunca 'live'.
+  if (ESTADOS_EN_CURSO.has(s.toUpperCase()) || MINUTO_COMO_ESTADO.test(s)) {
+    return 'live';
+  }
+  return 'unknown';
 }
 
 function mapStatus(raw: TsdbEvent): FixtureStatus {
@@ -247,6 +261,18 @@ function mapEvent(raw: TsdbEvent, leagueIdFallback: string): SportsFixture {
 }
 
 function mapLiveScore(raw: TsdbLiveScore): SportsFixture {
+  const kickoffUtc = toUtcIso(raw.strTimestamp);
+  let status = mapStatusFields(raw.strStatus, undefined);
+  // Cordura temporal: un partido NO puede estar en vivo antes de su hora
+  // de inicio, pero el feed v2 a veces lo anuncia en curso horas antes.
+  // Si el inicio aún no llega (con 5 min de tolerancia por relojes y
+  // arranques ligeramente adelantados), se fuerza a programado.
+  if (status === 'live' && kickoffUtc) {
+    const inicio = Date.parse(kickoffUtc);
+    if (!Number.isNaN(inicio) && Date.now() < inicio - 5 * 60_000) {
+      status = 'scheduled';
+    }
+  }
   return {
     providerId: raw.idEvent,
     leagueProviderId: raw.idLeague || '',
@@ -258,9 +284,9 @@ function mapLiveScore(raw: TsdbLiveScore): SportsFixture {
     awayTeamProviderId: raw.idAwayTeam || null,
     homeBadgeUrl: raw.strHomeTeamBadge || null,
     awayBadgeUrl: raw.strAwayTeamBadge || null,
-    kickoffUtc: toUtcIso(raw.strTimestamp),
+    kickoffUtc,
     date: raw.dateEvent || null,
-    status: mapStatusFields(raw.strStatus, undefined),
+    status,
     statusRaw: raw.strStatus || null,
     progress: raw.strProgress || null,
     homeScore: numOrNull(raw.intHomeScore),

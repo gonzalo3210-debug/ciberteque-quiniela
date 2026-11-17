@@ -81,6 +81,81 @@ function compararPartidos(a: SportsFixture, b: SportsFixture): number {
   return a.status === 'finished' ? kb.localeCompare(ka) : ka.localeCompare(kb);
 }
 
+// ----- Mezcla segura del en vivo -------------------------------------------
+// El feed en vivo del proveedor trae también partidos NO iniciados y con
+// estados ajenos al juego; copiar su estado a ciegas marcaba partidos del
+// calendario como EN VIVO horas o días antes de su inicio. La mezcla solo
+// adopta estado/minuto/marcador cuando la entrada del feed está en juego
+// de verdad o ya terminó, y jamás marca 'live' un partido cuyo inicio
+// (según el calendario) aún no llega.
+
+/** Estados crudos que NUNCA son "en juego" (mismo criterio que /api/en-vivo). */
+const NO_EN_JUEGO = new Set([
+  'FT',
+  'AET',
+  'AWD',
+  'WO',
+  'PST',
+  'CANC',
+  'ABD',
+  'PP',
+  'NS',
+  'TBD',
+  'MATCH FINISHED',
+]);
+
+/** Estados crudos inequívocamente en curso (mismo criterio que /api/en-vivo). */
+const EN_CURSO = new Set(['1H', 'HT', '2H', 'ET', 'BT', 'LIVE']);
+
+/**
+ * ¿La entrada del feed está EN JUEGO ahora? Códigos en curso o, en su
+ * defecto, el estado neutro 'live' CON minuto en vivo. 'PEN' solo cuenta
+ * si trae progreso (la tanda en curso). Réplica de /api/en-vivo.
+ */
+function estaEnJuego(f: SportsFixture): boolean {
+  const raw = (f.statusRaw || '').trim().toUpperCase();
+  if (NO_EN_JUEGO.has(raw)) return false;
+  if (EN_CURSO.has(raw)) return true;
+  if (raw === 'PEN') return !!f.progress;
+  return f.status === 'live' && !!f.progress;
+}
+
+/** ¿La entrada del feed puede pisar el estado del partido del calendario?
+ *  Solo si está en juego de verdad o si ya terminó (para adoptar el
+ *  marcador final). */
+function mezclaValida(v: SportsFixture): boolean {
+  return estaEnJuego(v) || v.status === 'finished';
+}
+
+/** ¿El inicio del partido aún no llega? Misma tolerancia de 5 min que el
+ *  adaptador: un partido no puede estar en vivo antes de su hora. */
+function kickoffEsFuturo(f: SportsFixture): boolean {
+  if (!f.kickoffUtc) return false;
+  const inicio = Date.parse(f.kickoffUtc);
+  return !Number.isNaN(inicio) && Date.now() < inicio - 5 * 60_000;
+}
+
+/**
+ * Mezcla segura del en vivo sobre un partido del calendario: adopta
+ * estado/minuto/marcador del feed solo si la entrada está en juego o ya
+ * terminó, y nunca marca 'live' un partido cuyo inicio aún no llega.
+ */
+function mezclarEnVivo(
+  f: SportsFixture,
+  v: SportsFixture | undefined
+): SportsFixture {
+  if (!v || !mezclaValida(v)) return f;
+  if (v.status === 'live' && kickoffEsFuturo(f)) return f;
+  return {
+    ...f,
+    status: v.status,
+    statusRaw: v.statusRaw,
+    progress: v.progress,
+    homeScore: v.homeScore,
+    awayScore: v.awayScore,
+  };
+}
+
 function ligaPublica(liga: SupportedLeague, badgeUrl: string | null = null) {
   return {
     providerId: liga.providerId,
@@ -195,19 +270,10 @@ export async function GET(request: Request) {
         }
       }
 
-      // Mezcla del en vivo para sus partidos en curso.
-      delEquipo = delEquipo.map((f) => {
-        const v = vivoPorId.get(f.providerId);
-        if (!v) return f;
-        return {
-          ...f,
-          status: v.status,
-          statusRaw: v.statusRaw,
-          progress: v.progress,
-          homeScore: v.homeScore,
-          awayScore: v.awayScore,
-        };
-      });
+      // Mezcla segura del en vivo para sus partidos en curso.
+      delEquipo = delEquipo.map((f) =>
+        mezclarEnVivo(f, vivoPorId.get(f.providerId))
+      );
 
       delEquipo.sort((a, b) =>
         (a.kickoffUtc || '').localeCompare(b.kickoffUtc || '')
@@ -263,19 +329,10 @@ export async function GET(request: Request) {
         }
       }
 
-      // Mezcla del en vivo para sus partidos en curso.
-      deLaLiga = deLaLiga.map((f) => {
-        const v = vivoPorId.get(f.providerId);
-        if (!v) return f;
-        return {
-          ...f,
-          status: v.status,
-          statusRaw: v.statusRaw,
-          progress: v.progress,
-          homeScore: v.homeScore,
-          awayScore: v.awayScore,
-        };
-      });
+      // Mezcla segura del en vivo para sus partidos en curso.
+      deLaLiga = deLaLiga.map((f) =>
+        mezclarEnVivo(f, vivoPorId.get(f.providerId))
+      );
 
       deLaLiga.sort((a, b) =>
         (a.kickoffUtc || '').localeCompare(b.kickoffUtc || '')
@@ -330,17 +387,13 @@ export async function GET(request: Request) {
           }
         }
 
-        // Mezcla del en vivo: estado, minuto y marcador al momento.
+        // Mezcla segura del en vivo: estado, minuto y marcador al momento
+        // (los escudos se completan desde el feed como antes).
         enVentana = enVentana.map((f) => {
           const v = vivoPorId.get(f.providerId);
           if (!v) return f;
           return {
-            ...f,
-            status: v.status,
-            statusRaw: v.statusRaw,
-            progress: v.progress,
-            homeScore: v.homeScore,
-            awayScore: v.awayScore,
+            ...mezclarEnVivo(f, v),
             homeBadgeUrl: f.homeBadgeUrl || v.homeBadgeUrl,
             awayBadgeUrl: f.awayBadgeUrl || v.awayBadgeUrl,
           };
