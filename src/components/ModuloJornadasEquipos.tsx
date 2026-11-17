@@ -15,6 +15,10 @@ interface FixtureImportable {
   kickoffUtc: string | null;
   round: number | null;
   venue: string | null;
+  /** true si el API ya lo da por terminado: llega desmarcado. */
+  terminado: boolean;
+  homeScore: number | null;
+  awayScore: number | null;
 }
 
 /**
@@ -97,6 +101,51 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
   const [impResultados, setImpResultados] = useState<FixtureImportable[] | null>(null);
   const [impSeleccionados, setImpSeleccionados] = useState<Set<string>>(new Set());
   const [impBuscando, setImpBuscando] = useState(false);
+  // Qué está mostrando la lista: "lo que sigue" (automático) o una
+  // búsqueda manual por jornada/fechas, y su encabezado.
+  const [impOrigen, setImpOrigen] = useState<'proximos' | 'manual' | null>(null);
+  const [impTitulo, setImpTitulo] = useState('');
+
+  /** Aplica una respuesta de la ruta: pendientes marcados, jugados no. */
+  const aplicarResultadosImportables = (fixtures: FixtureImportable[]) => {
+    setImpResultados(fixtures);
+    setImpSeleccionados(new Set(fixtures.filter(fx => !fx.terminado).map(fx => fx.providerId)));
+  };
+
+  /**
+   * "Lo que sigue" de una liga: la ruta decide sola qué ronda es la que
+   * viene (la más temprana con partidos pendientes). Se carga al abrir
+   * el panel y al cambiar de liga, sin teclear ningún filtro.
+   */
+  const cargarProximos = async (ligaId: string) => {
+    setImpBuscando(true);
+    setImpResultados(null);
+    try {
+      const res = await fetch(`/api/importar-jornada?liga=${ligaId}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'No se pudieron cargar los partidos.');
+      aplicarResultadosImportables(data.fixtures || []);
+      setImpOrigen('proximos');
+      const nombreLiga = data.league?.name || 'la liga';
+      const rondaTxt = data.round !== null && data.round !== undefined ? ` · Jornada ${data.round}` : '';
+      setImpTitulo(data.esMasReciente
+        ? `${nombreLiga}${rondaTxt} — la más reciente (ya no quedan partidos pendientes)`
+        : `Lo que sigue — ${nombreLiga}${rondaTxt}`);
+    } catch (error: any) {
+      setImpOrigen(null);
+      setImpTitulo('');
+      toast.error(error.message || 'Error al consultar la API.');
+    } finally {
+      setImpBuscando(false);
+    }
+  };
+
+  /** Abre/cierra el panel; al abrir sin lista cargada, trae "lo que sigue". */
+  const togglePanelImportar = () => {
+    const abre = !mostrarImportar;
+    setMostrarImportar(abre);
+    if (abre && impResultados === null && !impBuscando) cargarProximos(impLiga);
+  };
 
   const handleBuscarImportables = async () => {
     const params = new URLSearchParams({ liga: impLiga });
@@ -115,9 +164,9 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'No se pudieron cargar los partidos.');
       const fixtures: FixtureImportable[] = data.fixtures || [];
-      setImpResultados(fixtures);
-      // Todos marcados por defecto: Gonzalo desmarca los que no quiera.
-      setImpSeleccionados(new Set(fixtures.map(fx => fx.providerId)));
+      aplicarResultadosImportables(fixtures);
+      setImpOrigen('manual');
+      setImpTitulo(impModo === 'ronda' ? `Búsqueda manual — Jornada ${impRonda}` : 'Búsqueda manual — por fechas');
       if (fixtures.length === 0) toast('Esa liga no trae partidos para ese criterio.', { icon: 'ℹ️' });
     } catch (error: any) {
       toast.error(error.message || 'Error al consultar la API.');
@@ -150,6 +199,8 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
       setMostrarImportar(false);
       setImpResultados(null);
       setImpSeleccionados(new Set());
+      setImpOrigen(null);
+      setImpTitulo('');
     } else {
       toast('Todos esos partidos ya están en la jornada.', { icon: 'ℹ️' });
     }
@@ -340,7 +391,7 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
 
               {/* 🌐 IMPORTAR PARTIDOS DESDE LA API */}
               <div className="bg-emerald-950/20 border border-emerald-900/50 rounded-xl shadow-inner overflow-hidden">
-                <button type="button" onClick={() => setMostrarImportar(v => !v)} className="w-full flex items-center justify-between px-4 py-3 hover:bg-emerald-900/20 transition-colors">
+                <button type="button" onClick={togglePanelImportar} className="w-full flex items-center justify-between px-4 py-3 hover:bg-emerald-900/20 transition-colors">
                   <span className="text-emerald-400 font-black uppercase text-xs tracking-widest flex items-center gap-2"><span>🌐</span> Importar desde la API</span>
                   <span className="text-emerald-500 text-[10px] font-black">{mostrarImportar ? '▲ Cerrar' : '▼ Abrir'}</span>
                 </button>
@@ -348,13 +399,13 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
                 {mostrarImportar && (
                   <div className="px-4 pb-4 space-y-3">
                     <p className="text-slate-400 text-[10px] leading-relaxed">
-                      Trae los partidos de una liga sin teclearlos: eliges liga y jornada (o fechas), marcas los que quieras y se agregan a la lista de abajo <strong className="text-slate-200">ya enlazados</strong> (🔗), para que los marcadores se actualicen solos. Puedes importar de otra liga después para agregar, por ejemplo, un partido europeo.
+                      Al abrirse, el panel muestra solo <strong className="text-slate-200">lo que sigue</strong> de la liga (la jornada que viene, con sus partidos pendientes ya marcados). Los controles de abajo son solo para buscar una jornada más lejana o pasada. Los partidos se agregan a la lista de abajo <strong className="text-slate-200">ya enlazados</strong> (🔗), para que los marcadores se actualicen solos. Puedes importar de otra liga después para agregar, por ejemplo, un partido europeo.
                     </p>
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div>
                         <label className="text-[9px] md:text-[10px] text-slate-500 font-bold uppercase mb-1.5 block tracking-wider">Liga</label>
-                        <select value={impLiga} onChange={(e) => { setImpLiga(e.target.value); setImpResultados(null); }} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white outline-none focus:border-emerald-500 transition-all text-xs font-bold h-[34px]">
+                        <select value={impLiga} onChange={(e) => { setImpLiga(e.target.value); cargarProximos(e.target.value); }} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white outline-none focus:border-emerald-500 transition-all text-xs font-bold h-[34px]">
                           {SUPPORTED_LEAGUES.map(l => <option key={l.providerId} value={l.providerId}>{l.name}</option>)}
                         </select>
                       </div>
@@ -388,6 +439,25 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
                       {impBuscando ? 'Consultando la API...' : '🔎 Buscar partidos'}
                     </button>
 
+                    {impBuscando && impResultados === null && (
+                      <p className="text-center text-[10px] font-bold uppercase tracking-widest text-slate-500">Cargando partidos…</p>
+                    )}
+
+                    {impResultados !== null && (
+                      <div className="flex items-center justify-between gap-2 bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-2">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400 truncate">📍 {impTitulo}</span>
+                        {impOrigen === 'manual' && (
+                          <button type="button" onClick={() => cargarProximos(impLiga)} disabled={impBuscando} className="shrink-0 text-[9px] font-black uppercase tracking-wider text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-1 rounded transition-all disabled:opacity-40">
+                            ↩ Volver a lo que sigue
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {impResultados !== null && impResultados.length === 0 && (
+                      <p className="text-center text-[10px] font-bold uppercase tracking-widest text-slate-500">Sin partidos para mostrar.</p>
+                    )}
+
                     {impResultados !== null && impResultados.length > 0 && (
                       <div className="space-y-2">
                         <div className="max-h-[320px] overflow-y-auto pr-1 space-y-1.5 custom-scrollbar">
@@ -401,6 +471,11 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
                                   <span className="block text-[9px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">
                                     {textoFechaMazatlan(fx.kickoffUtc)}{fx.round !== null ? ` · Jornada ${fx.round}` : ''}{fx.venue ? ` · ${fx.venue}` : ''}
                                   </span>
+                                  {fx.terminado && (
+                                    <span className="inline-block text-[8px] font-black uppercase tracking-wider text-slate-300 bg-slate-800 border border-slate-700 px-1.5 py-0.5 rounded mt-1">
+                                      ✅ Finalizado{fx.homeScore !== null && fx.awayScore !== null ? ` · ${fx.homeScore} - ${fx.awayScore}` : ''}
+                                    </span>
+                                  )}
                                 </div>
                               </label>
                             );
