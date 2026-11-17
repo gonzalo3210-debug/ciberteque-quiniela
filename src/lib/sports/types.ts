@@ -150,6 +150,28 @@ export interface FixtureEventsResult {
   events: FixtureEvent[];
 }
 
+/**
+ * Una transmisión de TV/streaming de un partido, según el proveedor
+ * (en TheSportsDB sale de su endpoint dedicado lookuptv.php: el
+ * strTVStation del evento casi nunca viene, verificado 2026-11-17).
+ * Cobertura PARCIAL: hay partidos sin ningún listado y abundan los
+ * canales de EE.UU./Europa (de Liga MX verificamos solo "Peacock
+ * Premium · United States"); por eso esta lista es solo el respaldo
+ * del canal curado de la quiniela (partidos.canal), que manda siempre.
+ */
+export interface FixtureTVListing {
+  /** Nombre del canal o plataforma (p. ej. "Peacock Premium"). */
+  channel: string;
+  /**
+   * País de ESA transmisión tal como lo nombra el proveedor
+   * (p. ej. "United States"); null si no lo trae. La traducción a
+   * español para mostrar vive en tvListados.ts (nombrePaisES).
+   */
+  country: string | null;
+  /** URL del logo del canal, si el proveedor lo trae. */
+  logoUrl: string | null;
+}
+
 /** Una liga del catálogo COMPLETO del proveedor (all_leagues). */
 export interface LeagueCatalogEntry {
   /** ID de la liga en el proveedor. */

@@ -12,6 +12,7 @@
 
 import type {
   FixtureEventsResult,
+  FixtureTVListing,
   GetFixturesOptions,
   LeagueCatalogEntry,
   LeagueInfo,
@@ -81,6 +82,16 @@ export interface SportsProvider {
   getFixtureEvents(
     fixtureProviderId: string
   ): Promise<FixtureEventsResult | null>;
+
+  /**
+   * Transmisiones de TV/streaming de UN partido (canal + país de
+   * cada una, con logo si hay). Cobertura PARCIAL del proveedor:
+   * muchos partidos no traen ninguna ([]) y abundan los canales de
+   * EE.UU./Europa, casi nada de México. Es solo el respaldo del
+   * canal curado de la quiniela (partidos.canal), que manda siempre
+   * en la vista del partido.
+   */
+  getFixtureTV(fixtureProviderId: string): Promise<FixtureTVListing[]>;
 
   /**
    * Catálogo COMPLETO de ligas del proveedor (todas, no solo las

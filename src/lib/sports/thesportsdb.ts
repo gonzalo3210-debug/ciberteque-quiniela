@@ -20,6 +20,9 @@
 //   en vivo (v2, premium):  api/v2/json/livescore/soccer (llave en header)
 //   línea de tiempo:        lookupevent.php?id={evento} +
 //                           lookuptimeline.php?id={evento}
+//   transmisiones de TV:    lookuptv.php?id={evento} (endpoint
+//                           dedicado: el strTVStation del evento casi
+//                           nunca viene, verificado 2026-11-17)
 //   catálogo de ligas:      all_leagues.php (todas, con su deporte)
 //   ficha de una liga:      lookupleague.php?id={liga}
 // OJO: lookuptable devuelve el cuerpo VACÍO (200, 0 bytes) para torneos de
@@ -30,10 +33,12 @@
 import type { SportsProvider } from './provider';
 import { getSupportedLeague, CHAMPIONS_PROVIDER_ID } from './leagues';
 import { getFootballDataChampionsStandings } from './footballData';
+import { normalizarListadosTV } from './tvListados';
 import type {
   FixtureEvent,
   FixtureEventType,
   FixtureEventsResult,
+  FixtureTVListing,
   GetFixturesOptions,
   LeagueCatalogEntry,
   LeagueInfo,
@@ -196,6 +201,20 @@ interface TsdbTimelineEvent {
   strHome?: string;
   strTeam?: string;
   idTeam?: string;
+}
+
+/**
+ * Transmisión cruda de TV de un evento (lookuptv.php). Forma
+ * verificada contra la API real (2026-11-17): la respuesta trae
+ * `tvevent` con strChannel (canal), strCountry (país de ESA
+ * transmisión) y strLogo (logo del canal). Cobertura parcial: un
+ * partido de Liga MX trajo solo "Peacock Premium / United States"
+ * y los partidos futuros de la J17 trajeron la lista vacía.
+ */
+interface TsdbTvEvent {
+  strChannel?: string;
+  strCountry?: string;
+  strLogo?: string;
 }
 
 interface TsdbStanding {
@@ -607,6 +626,24 @@ async function getFixtureEvents(
 }
 
 /**
+ * Transmisiones de TV de un partido (lookuptv.php, el endpoint
+ * dedicado: el strTVStation del evento casi nunca viene). Los
+ * listados cambian poco — se anuncian y rara vez se mueven — así
+ * que se cachean 6 h. Lista vacía o respuesta sin datos -> []
+ * (la vista simplemente no muestra respaldo de la API).
+ */
+async function getFixtureTV(
+  fixtureProviderId: string
+): Promise<FixtureTVListing[]> {
+  const id = encodeURIComponent(fixtureProviderId);
+  const data = await tsdbFetch<{ tvevent: TsdbTvEvent[] | null }>(
+    `lookuptv.php?id=${id}`,
+    21600
+  );
+  return normalizarListadosTV(data?.tvevent ?? null);
+}
+
+/**
  * Catálogo COMPLETO de ligas del proveedor (all_leagues.php: más de
  * 1,500 ligas de todos los deportes). Dato casi fijo: se cachea 24 h.
  * Se descartan entradas sin ID o sin nombre (el catálogo trae ligas
@@ -674,6 +711,7 @@ export const theSportsDbProvider: SportsProvider = {
   getLeagueBadge,
   getLiveScores,
   getFixtureEvents,
+  getFixtureTV,
   getLeagueCatalog,
   getLeagueInfo,
 };
