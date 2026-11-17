@@ -3,7 +3,9 @@ import { useState, useEffect, useRef } from 'react'
 import { useCartelera } from '@/hooks/useCartelera'
 import { useCuentaRegresiva } from '@/hooks/useCuentaRegresiva' 
 import { useCeremoniaSorteo } from '@/hooks/useCeremoniaSorteo'
+import { useSincronizacionRealtime } from '@/hooks/useSincronizacionRealtime'
 import CeremoniaSorteo from '@/components/CeremoniaSorteo'
+import TableroCaminoFinal from '@/components/TableroCaminoFinal'
 import ModalReglas from '@/components/ModalReglas'
 import {
   segmentosProbabilidades,
@@ -22,6 +24,15 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
   // visible es de sorteo; "realizado" llega cuando el admin ya
   // ejecutó el sorteo y las asignaciones están guardadas.
   const ceremonia = useCeremoniaSorteo(quinielaActual)
+
+  // 🏁 Camino a la final: cuando la tabla partidos cambia (el
+  // árbitro guarda un resultado o corre el programa de marcadores),
+  // se releen los datos del sorteo para que el tablero se mueva. Es
+  // el refresco en tiempo real de siempre de la app
+  // (useSincronizacionRealtime, como en Mis Jugadas), sin polling
+  // nuevo; fuera del sorteo la recarga no hace nada.
+  const recargarCeremonia = ceremonia.recargar
+  useSincronizacionRealtime('partidos', recargarCeremonia, false)
 
   const { textoCuenta, esUrgente, yaCerro } = useCuentaRegresiva(quinielaActual?.fecha_cierre)
 
@@ -397,6 +408,15 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
                 </div>
             )}
           </>
+        )}
+
+        {esSorteo && ceremonia.realizado && (
+          <TableroCaminoFinal
+            usuarioActivoId={usuarioActivo?.id}
+            asignaciones={ceremonia.asignaciones}
+            partidos={ceremonia.partidos}
+            cantidadEquipos={ceremonia.equiposBombo.length}
+          />
         )}
 
         <div className="w-full max-w-[280px] mx-auto flex items-start gap-2 mb-5 bg-slate-950/40 p-2.5 rounded-xl border border-slate-800">
