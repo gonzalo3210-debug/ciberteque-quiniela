@@ -65,6 +65,48 @@ const fmtFechaLarga = new Intl.DateTimeFormat('es-MX', {
 });
 
 /**
+ * Instante UTC (ISO) -> valor para un input datetime-local en hora de
+ * Mazatlán ("YYYY-MM-DDTHH:mm"). El guardado de la jornada interpreta
+ * el campo como hora local del navegador; como el Club opera en
+ * Mazatlán, así el instante que llega a la base es exactamente el del
+ * API. (Vivía en ModuloJornadasEquipos; se compartió aquí para que el
+ * asistente gráfico use la misma conversión.)
+ */
+export function utcADatetimeLocalMazatlan(isoUtc: string | null): string {
+  if (!isoUtc) return '';
+  const fecha = new Date(isoUtc);
+  if (isNaN(fecha.getTime())) return '';
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: ZONA_MAZATLAN,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(fecha);
+  const p: Record<string, string> = {};
+  for (const parte of partes) p[parte.type] = parte.value;
+  const hora = p.hour === '24' ? '00' : p.hour;
+  return `${p.year}-${p.month}-${p.day}T${hora}:${p.minute}`;
+}
+
+/** Instante UTC (ISO) -> texto legible en hora de Mazatlán. */
+export function textoFechaMazatlan(isoUtc: string | null): string {
+  if (!isoUtc) return 'Sin horario en el API';
+  const fecha = new Date(isoUtc);
+  if (isNaN(fecha.getTime())) return 'Sin horario en el API';
+  return new Intl.DateTimeFormat('es-MX', {
+    timeZone: ZONA_MAZATLAN,
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(fecha);
+}
+
+/**
  * Etiqueta larga de un día calendario "YYYY-MM-DD", p. ej.
  * "miércoles 12 de noviembre" (para el selector de día de Resultados).
  * Si es hoy/ayer/mañana en Mazatlán, antepone "Hoy · " / "Ayer · " / "Mañana · ".

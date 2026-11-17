@@ -3,6 +3,11 @@ import { useState } from 'react'
 import { useEquipos } from '@/hooks/useEquipos'
 import { useCreadorJornadas, type PartidoInput } from '@/hooks/useCreadorJornadas'
 import { SUPPORTED_LEAGUES } from '@/lib/sports/leagues'
+import {
+  utcADatetimeLocalMazatlan,
+  textoFechaMazatlan,
+} from '@/lib/fechaMazatlan'
+import AsistenteJornada from '@/components/AsistenteJornada'
 import toast from 'react-hot-toast'
 
 /** Partido tal como lo devuelve /api/importar-jornada. */
@@ -19,46 +24,6 @@ interface FixtureImportable {
   terminado: boolean;
   homeScore: number | null;
   awayScore: number | null;
-}
-
-/**
- * Instante UTC (ISO) -> valor para un input datetime-local en hora de
- * Mazatlán ("YYYY-MM-DDTHH:mm"). El guardado de la jornada interpreta el
- * campo como hora local del navegador; como el Club opera en Mazatlán,
- * así el instante que llega a la base es exactamente el del API.
- */
-function utcADatetimeLocalMazatlan(isoUtc: string | null): string {
-  if (!isoUtc) return '';
-  const fecha = new Date(isoUtc);
-  if (isNaN(fecha.getTime())) return '';
-  const partes = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Mazatlan',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(fecha);
-  const p: Record<string, string> = {};
-  for (const parte of partes) p[parte.type] = parte.value;
-  const hora = p.hour === '24' ? '00' : p.hour;
-  return `${p.year}-${p.month}-${p.day}T${hora}:${p.minute}`;
-}
-
-/** Instante UTC (ISO) -> texto legible en hora de Mazatlán. */
-function textoFechaMazatlan(isoUtc: string | null): string {
-  if (!isoUtc) return 'Sin horario en el API';
-  const fecha = new Date(isoUtc);
-  if (isNaN(fecha.getTime())) return 'Sin horario en el API';
-  return new Intl.DateTimeFormat('es-MX', {
-    timeZone: 'America/Mazatlan',
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(fecha);
 }
 
 interface ModuloJornadasEquiposProps {
@@ -90,6 +55,12 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
 
   // ⚡ NUEVO: Estado para el buscador en la vista de Sorteo
   const [busquedaEquipoSorteo, setBusquedaEquipoSorteo] = useState('');
+
+  // ✨ Asistente gráfico vs formulario clásico: comparten el MISMO
+  // estado del hook (y el mismo borrador), así que se puede cambiar
+  // de vista a mitad de camino sin perder nada. El asistente es el
+  // camino por defecto; el clásico queda a un toque.
+  const [modoCrear, setModoCrear] = useState<'asistente' | 'clasico'>('asistente');
 
   // --- IMPORTAR PARTIDOS DESDE LA API ---
   const [mostrarImportar, setMostrarImportar] = useState(false);
@@ -304,6 +275,20 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
       {/* --- VISTA: CREAR JORNADA --- */}
       {vista === 'crear' && (
         <div className="space-y-4 animate-in fade-in duration-300 w-full max-w-4xl mx-auto">
+          {/* Conmutador asistente / clásico (mismo estado, dos vistas) */}
+          <div className="grid grid-cols-2 gap-2 bg-slate-950/60 p-1.5 rounded-xl border border-slate-800">
+            <button type="button" onClick={() => setModoCrear('asistente')} className={`py-2.5 rounded-lg text-[10px] md:text-xs font-black uppercase tracking-widest transition-all ${modoCrear === 'asistente' ? 'bg-green-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'}`}>
+              ✨ Asistente gráfico
+            </button>
+            <button type="button" onClick={() => setModoCrear('clasico')} className={`py-2.5 rounded-lg text-[10px] md:text-xs font-black uppercase tracking-widest transition-all ${modoCrear === 'clasico' ? 'bg-slate-700 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'}`}>
+              📝 Formulario clásico
+            </button>
+          </div>
+
+          {modoCrear === 'asistente' ? (
+            <AsistenteJornada f={f} s={s} a={a} e={e} equipos={equipos} onCrear={handleCrearJornada} onClasico={() => setModoCrear('clasico')} />
+          ) : (
+          <>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 bg-slate-900/50 p-4 rounded-xl border border-slate-800 shadow-inner">
             <div>
               <label className="text-[9px] md:text-[10px] text-slate-500 font-bold uppercase mb-1.5 block tracking-wider">Nombre de la Jornada</label>
@@ -564,6 +549,8 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
               {e.creando ? 'Procesando...' : <><span>🚀</span> Publicar Jornada en CiberTeque</>}
             </button>
           </div>
+          </>
+          )}
         </div>
       )}
 
