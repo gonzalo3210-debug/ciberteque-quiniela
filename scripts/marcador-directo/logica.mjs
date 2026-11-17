@@ -149,6 +149,338 @@ export function construirHerramientasNombres(nombreEquipoES, normalizar) {
   return { esMismoEquipo, coincideParEquipos, orientacion, buscarEnlace };
 }
 
+// ---------- Puntos y ranking provisional (espejo de la app) -------------
+//
+// Réplica fiel del cálculo EN VIVO de src/hooks/usePosiciones.ts: con
+// los marcadores actuales (aunque el partido siga en juego), cada
+// pronóstico suma 3 si es el marcador exacto en modalidad
+// marcador_exacto (1 si solo acierta la tendencia) y 1 si acierta la
+// tendencia L/E/V en las demás modalidades. El desempate usa la
+// diferencia contra goles_totales_real; como ese total solo existe al
+// liquidar, durante el juego vale 999 para todos (igual que en la app)
+// y el ranking provisional es, en la práctica, por puntos con lugares
+// compartidos en empate.
+
+/** Tendencia L/E/V de una elección o marcador ("L", "2-1", …). */
+export function eleccionATendencia(valor) {
+  if (!valor) return null;
+  const limpio = String(valor).replace(/\s+/g, '').toUpperCase();
+  if (['L', 'E', 'V'].includes(limpio)) return limpio;
+  if (limpio.includes('-')) {
+    const [l, v] = limpio.split('-').map(Number);
+    if (!Number.isNaN(l) && !Number.isNaN(v)) {
+      if (l > v) return 'L';
+      if (l < v) return 'V';
+      return 'E';
+    }
+  }
+  return null;
+}
+
+/**
+ * Puntos provisionales de UN pronóstico con el marcador actual del
+ * partido (0 si el partido aún no tiene ningún resultado).
+ */
+export function puntosPronostico(modalidad, eleccion, partido) {
+  const tieneResultado =
+    (partido.resultado_real !== null && partido.resultado_real !== undefined) ||
+    (partido.goles_local !== null &&
+      partido.goles_local !== undefined &&
+      partido.goles_visitante !== null &&
+      partido.goles_visitante !== undefined);
+  if (!tieneResultado) return 0;
+
+  const pickStr = String(eleccion ?? '').replace(/\s+/g, '');
+  const realStr =
+    partido.goles_local !== null &&
+    partido.goles_local !== undefined &&
+    partido.goles_visitante !== null &&
+    partido.goles_visitante !== undefined
+      ? `${partido.goles_local}-${partido.goles_visitante}`
+      : String(partido.resultado_real ?? '').replace(/\s+/g, '');
+
+  if (pickStr !== '' && pickStr === realStr) {
+    return modalidad === 'marcador_exacto' ? 3 : 1;
+  }
+  const pickLEV = eleccionATendencia(pickStr);
+  const realLEV = eleccionATendencia(realStr) || eleccionATendencia(partido.resultado_real);
+  return pickLEV && realLEV && pickLEV === realLEV ? 1 : 0;
+}
+
+/**
+ * Ranking provisional de una quiniela (NO sorteo: esa modalidad se
+ * ordena con puntos_totales de la base, que este programa no toca).
+ *
+ * @param quiniela  { modalidad, goles_totales_real }
+ * @param tickets   [{ id, usuario_id, prediccion_goles_total,
+ *                     pronosticos: [{ partido_id, eleccion_usuario }] }]
+ * @param partidos  [{ id, goles_local, goles_visitante, resultado_real }]
+ * @returns [{ ticket_id, usuario_id, puntos, golesDiff, posicion }]
+ *          ordenado como en la app (puntos desc, golesDiff asc,
+ *          lugares compartidos en empate exacto).
+ */
+export function calcularRankingProvisional(quiniela, tickets, partidos) {
+  if (quiniela.modalidad === 'sorteo') return [];
+  const porId = new Map(partidos.map((p) => [p.id, p]));
+  const golesReales =
+    quiniela.goles_totales_real !== null && quiniela.goles_totales_real !== undefined
+      ? quiniela.goles_totales_real
+      : -1;
+
+  const filas = tickets.map((ticket) => {
+    let puntos = 0;
+    for (const pron of ticket.pronosticos || []) {
+      const partido = porId.get(pron.partido_id);
+      if (partido) puntos += puntosPronostico(quiniela.modalidad, pron.eleccion_usuario, partido);
+    }
+    return {
+      ticket_id: ticket.id,
+      usuario_id: ticket.usuario_id,
+      puntos,
+      golesDiff:
+        golesReales !== -1
+          ? Math.abs((ticket.prediccion_goles_total || 0) - golesReales)
+          : 999,
+    };
+  });
+
+  filas.sort((a, b) => b.puntos - a.puntos || a.golesDiff - b.golesDiff);
+  filas.forEach((fila, idx) => {
+    if (idx > 0) {
+      const anterior = filas[idx - 1];
+      fila.posicion =
+        fila.puntos === anterior.puntos && fila.golesDiff === anterior.golesDiff
+          ? anterior.posicion
+          : idx + 1;
+    } else {
+      fila.posicion = 1;
+    }
+  });
+  return filas;
+}
+
+// ---------- Detección de eventos para notificaciones push ----------------
+//
+// El programa compara la FOTO actual (marcadores + ranking
+// provisional) contra el ESTADO que persiste entre ciclos y reinicios
+// (estado-notificaciones.json). De esa comparación salen los eventos
+// que se mandan a /api/push/despachar.
+//
+// Reglas:
+//  - Línea base silenciosa: lo primero que se ve de un partido o de
+//    un liderato se anota SIN notificar (nada de spamear el pasado al
+//    arrancar el programa a mitad de jornada).
+//  - Un gol se anuncia una sola vez por marcador: la clave incluye el
+//    marcador tras el gol y queda en `despachadas` cuando el despacho
+//    sale bien; ni un reinicio lo repite.
+//  - Gol anulado (el total de goles BAJA entre fotos): si el gol
+//    original nunca salió (no está en despachadas), no sale nada; si
+//    ya salió, sale UNA corrección "gol anulado".
+//  - Liderato: quien entra al 1° recibe lider_nuevo y quien sale del
+//    1° recibe rebasado; la clave lleva sus puntos del momento, así
+//    un vaivén con los mismos puntos no spamea y un liderato nuevo
+//    con más puntos sí avisa.
+
+/** Estado vacío de detección (la forma que se persiste en disco). */
+export function crearEstadoNotificaciones() {
+  return { v: 1, despachadas: [], partidos: {}, lideres: {} };
+}
+
+const MARCADOR_RE = /^(\d+)-(\d+)$/;
+
+function totalDeMarcador(marcador) {
+  const m = MARCADOR_RE.exec(marcador || '');
+  return m ? Number(m[1]) + Number(m[2]) : null;
+}
+
+function marcadorDe(partido) {
+  if (
+    partido.goles_local === null ||
+    partido.goles_local === undefined ||
+    partido.goles_visitante === null ||
+    partido.goles_visitante === undefined
+  ) {
+    return null;
+  }
+  return `${partido.goles_local}-${partido.goles_visitante}`;
+}
+
+/**
+ * Detecta los eventos de UNA foto nueva.
+ *
+ * @param estado  El estado persistido (no se muta).
+ * @param foto    { partidos: [...], quinielas: { [id]: { nombre } },
+ *                  rankings: { [quinielaId]: filasDeRanking } }
+ * @returns {{ eventos: object[], estadoNuevo: object }} — el llamador
+ *          despacha `eventos` y, solo si el despacho sale bien,
+ *          persiste estadoNuevo ya marcado con marcarDespachadas.
+ */
+export function detectarEventosNotificacion(estado, foto) {
+  const estadoNuevo = {
+    v: 1,
+    despachadas: [...(estado.despachadas || [])],
+    partidos: { ...(estado.partidos || {}) },
+    lideres: { ...(estado.lideres || {}) },
+  };
+  const yaDespachadas = new Set(estadoNuevo.despachadas);
+  const eventos = [];
+  const emitidas = new Set();
+  const emitir = (evento) => {
+    if (yaDespachadas.has(evento.clave) || emitidas.has(evento.clave)) return;
+    emitidas.add(evento.clave);
+    eventos.push(evento);
+  };
+
+  const nombreQuiniela = (qid) => foto.quinielas?.[qid]?.nombre || 'tu quiniela';
+
+  // ----- Partidos: goles, goles anulados y finales -----
+  for (const partido of foto.partidos || []) {
+    const marcadorActual = marcadorDe(partido);
+    const previo = estado.partidos?.[partido.id];
+    const registro = {
+      marcador: marcadorActual ?? previo?.marcador ?? null,
+      esFinal: Boolean(partido.es_final),
+    };
+
+    if (!previo) {
+      // Primera vez que se ve este partido: línea base silenciosa.
+      estadoNuevo.partidos[partido.id] = registro;
+      continue;
+    }
+
+    if (previo.marcador && marcadorActual) {
+      const totalAntes = totalDeMarcador(previo.marcador);
+      const totalAhora = totalDeMarcador(marcadorActual);
+      const [lAntes, vAntes] = previo.marcador.split('-').map(Number);
+
+      if (totalAntes !== null && totalAhora !== null && totalAhora > totalAntes) {
+        let anoto = null;
+        if (partido.goles_local > lAntes) anoto = partido.equipo_local;
+        else if (partido.goles_visitante > vAntes) anoto = partido.equipo_visitante;
+        const base = {
+          quiniela_id: partido.quiniela_id,
+          equipo_provider_ids: [
+            partido.equipo_local_provider_id,
+            partido.equipo_visitante_provider_id,
+          ].filter(Boolean),
+          titulo: anoto ? `⚽ ¡GOL de ${anoto}!` : '⚽ ¡GOL!',
+          cuerpo:
+            `${partido.equipo_local} ${marcadorActual} ` +
+            `${partido.equipo_visitante} · ${nombreQuiniela(partido.quiniela_id)}`,
+          url: '/',
+        };
+        emitir({ ...base, tipo: 'gol_equipo', clave: `gol:${partido.id}:${marcadorActual}:equipos` });
+        emitir({ ...base, tipo: 'gol_boleto', clave: `gol:${partido.id}:${marcadorActual}:boleto` });
+      } else if (totalAntes !== null && totalAhora !== null && totalAhora < totalAntes) {
+        // Gol anulado: solo se corrige si el aviso original SÍ salió.
+        const salioGol =
+          yaDespachadas.has(`gol:${partido.id}:${previo.marcador}:equipos`) ||
+          yaDespachadas.has(`gol:${partido.id}:${previo.marcador}:boleto`);
+        if (salioGol) {
+          emitir({
+            tipo: 'gol_anulado',
+            clave: `anulado:${partido.id}:${previo.marcador}`,
+            quiniela_id: partido.quiniela_id,
+            equipo_provider_ids: [
+              partido.equipo_local_provider_id,
+              partido.equipo_visitante_provider_id,
+            ].filter(Boolean),
+            titulo: '🚫 Gol anulado',
+            cuerpo:
+              `El VAR anuló un gol: ${partido.equipo_local} ${marcadorActual} ` +
+              `${partido.equipo_visitante} · ${nombreQuiniela(partido.quiniela_id)}`,
+            url: '/',
+          });
+        }
+      }
+    }
+
+    if (partido.es_final && !previo.esFinal) {
+      emitir({
+        tipo: 'fin_partido',
+        clave: `fin:${partido.id}`,
+        quiniela_id: partido.quiniela_id,
+        titulo: '🏁 Partido terminado',
+        cuerpo:
+          `${partido.equipo_local} ${marcadorActual ?? previo.marcador ?? ''} ` +
+          `${partido.equipo_visitante} · ${nombreQuiniela(partido.quiniela_id)}`,
+        url: '/',
+      });
+    }
+
+    estadoNuevo.partidos[partido.id] = registro;
+  }
+
+  // ----- Liderato por quiniela -----
+  for (const [qid, ranking] of Object.entries(foto.rankings || {})) {
+    const nuevos = [...new Set(ranking.filter((f) => f.posicion === 1).map((f) => f.usuario_id))];
+    const previos = estado.lideres?.[qid];
+    if (previos === undefined) {
+      // Primera foto de esta quiniela: línea base silenciosa.
+      estadoNuevo.lideres[qid] = nuevos;
+      continue;
+    }
+    const puntosDe = (uid) => {
+      const fila = ranking.find((f) => f.usuario_id === uid && f.posicion === 1) ||
+        ranking.find((f) => f.usuario_id === uid);
+      return fila ? fila.puntos : 0;
+    };
+    for (const uid of nuevos) {
+      if (!previos.includes(uid)) {
+        emitir({
+          tipo: 'lider_nuevo',
+          clave: `lider:${qid}:${uid}:${puntosDe(uid)}`,
+          usuarios: [uid],
+          titulo: '👑 ¡Vas en primer lugar!',
+          cuerpo: `Vas líder en ${nombreQuiniela(qid)} con ${puntosDe(uid)} pts (con los marcadores actuales).`,
+          url: '/',
+        });
+      }
+    }
+    for (const uid of previos) {
+      if (!nuevos.includes(uid)) {
+        emitir({
+          tipo: 'rebasado',
+          clave: `rebasado:${qid}:${uid}:${puntosDe(uid)}`,
+          usuarios: [uid],
+          titulo: '⚠️ Te rebasaron',
+          cuerpo: `Ya no vas en primer lugar en ${nombreQuiniela(qid)}. ¡Aún puedes remontar!`,
+          url: '/',
+        });
+      }
+    }
+    estadoNuevo.lideres[qid] = nuevos;
+  }
+
+  return { eventos, estadoNuevo };
+}
+
+/**
+ * Anota las claves como despachadas (tope FIFO: se conservan las
+ * últimas 500 para que el archivo de estado no crezca sin fin).
+ */
+export function marcarDespachadas(estado, claves) {
+  const despachadas = [...(estado.despachadas || [])];
+  for (const clave of claves) {
+    if (!despachadas.includes(clave)) despachadas.push(clave);
+  }
+  return { ...estado, despachadas: despachadas.slice(-500) };
+}
+
+/** ¿La quiniela cierra dentro del margen (y aún no cierra)? */
+export function debeRecordarCierre(fechaCierreIso, ahoraMs, margenMs = 2 * 60 * 60_000) {
+  if (!fechaCierreIso) return false;
+  const cierre = Date.parse(fechaCierreIso);
+  if (Number.isNaN(cierre)) return false;
+  const falta = cierre - ahoraMs;
+  return falta > 0 && falta <= margenMs;
+}
+
+/** Clave de dedupe del recordatorio de cierre (una vez por jugador). */
+export function claveRecordatorioCierre(quinielaId, usuarioId) {
+  return `cierre:${quinielaId}:${usuarioId}`;
+}
+
 // ---------- Estados del feed -------------------------------------------
 
 /** Códigos crudos que inequívocamente son "en curso" (thesportsdb.ts). */

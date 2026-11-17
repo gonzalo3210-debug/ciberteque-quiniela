@@ -18,6 +18,11 @@
 //    confirmado con la API, y no escribe si el marcador no cambió.
 //  - Un fallo de red o de la API se anota y se reintenta al siguiente
 //    ciclo; el programa no se cae.
+//  - Con la misma pasada detecta eventos de NOTIFICACIÓN push (gol,
+//    gol anulado, fin de partido, cambios de liderato y recordatorios
+//    de cierre) y los despacha a la app; si el despacho falla, los
+//    marcadores ya quedaron y los eventos se reintentan al siguiente
+//    ciclo. Sin PUSH_DISPATCH_SECRET no despacha nada.
 //
 // Uso (desde la raíz del repo, con las dependencias instaladas):
 //   node scripts/marcador-directo/marcador-directo.mjs            (continuo)
@@ -29,12 +34,18 @@
 // Configuración: variables de entorno o el .env.local del repo (las del
 // sistema tienen prioridad). Ver README.md de esta carpeta.
 
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 import {
+  calcularRankingProvisional,
+  claveRecordatorioCierre,
   construirHerramientasNombres,
+  crearEstadoNotificaciones,
+  debeRecordarCierre,
+  detectarEventosNotificacion,
+  marcarDespachadas,
   normalizarNombreEquipo,
   planEscritura,
 } from './logica.mjs';
@@ -152,6 +163,12 @@ async function cargarConfig() {
   const anon = tomar('SUPABASE_ANON_KEY', 'NEXT_PUBLIC_SUPABASE_ANON_KEY');
   const supabaseKey = serviceRole || anon;
   const tsdbKey = tomar('THESPORTSDB_API_KEY');
+  // Notificaciones push (opcionales): sin PUSH_DISPATCH_SECRET el
+  // programa trabaja como siempre y no despacha nada.
+  const pushUrl =
+    tomar('PUSH_DISPATCH_URL') ||
+    'https://ciberteque-quiniela.vercel.app/api/push/despachar';
+  const pushSecret = tomar('PUSH_DISPATCH_SECRET');
 
   const faltan = [];
   if (!supabaseUrl) faltan.push('SUPABASE_URL (o NEXT_PUBLIC_SUPABASE_URL)');
@@ -168,6 +185,8 @@ async function cargarConfig() {
     supabaseKey,
     tipoLlave: serviceRole ? 'service_role' : 'anon',
     tsdbKey,
+    pushUrl,
+    pushSecret,
   };
 }
 
@@ -322,11 +341,252 @@ async function descubrirPartidos(sb, ahoraMs) {
   });
 }
 
+// ---------- Notificaciones push ---------------------------------------------
+//
+// Con la misma pasada que detecta goles y finales, el programa detecta
+// eventos de aviso (gol, gol anulado, fin de partido, cambios de
+// liderato y recordatorios de cierre) y los manda a /api/push/despachar
+// con el secreto. La detección es lógica pura (logica.mjs); aquí solo
+// se junta la foto, se despacha y se persiste el estado.
+//
+// El estado vive en estado-notificaciones.json junto al programa: es
+// el dedupe que sobrevive a los reinicios (la ruta también dedupea en
+// la base). Si el despacho falla, el estado NO avanza y los eventos se
+// regeneran al siguiente ciclo. Y si algo de esto falla, los
+// marcadores —que son lo primero— ya quedaron escritos.
+
+const RUTA_ESTADO_NOTIF = path.join(DIR, 'estado-notificaciones.json');
+
+async function cargarEstadoNotificaciones() {
+  try {
+    const datos = JSON.parse(await readFile(RUTA_ESTADO_NOTIF, 'utf8'));
+    if (datos && typeof datos === 'object' && datos.partidos && datos.lideres) {
+      return { ...crearEstadoNotificaciones(), ...datos };
+    }
+  } catch {
+    // Sin archivo o corrupto: se arranca con estado vacío (línea base).
+  }
+  return crearEstadoNotificaciones();
+}
+
+async function guardarEstadoNotificaciones(estadoNotif) {
+  if (DRY_RUN) return; // el modo seco no persiste nada
+  try {
+    await writeFile(RUTA_ESTADO_NOTIF, JSON.stringify(estadoNotif), 'utf8');
+  } catch (e) {
+    log(`Aviso: no se pudo guardar el estado de notificaciones: ${e.message}`);
+  }
+}
+
+async function despacharEventos(config, eventos) {
+  const res = await fetch(config.pushUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-push-secret': config.pushSecret,
+    },
+    body: JSON.stringify({ eventos }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) throw new Error(`el despachador respondió HTTP ${res.status}`);
+  return res.json().catch(() => ({}));
+}
+
+function describirEvento(e) {
+  return `[${e.tipo}] ${e.titulo} — ${e.cuerpo}`;
+}
+
+/**
+ * Junta la foto (marcadores actuales + ranking provisional de las
+ * quinielas con partidos en ventana), detecta eventos y los despacha.
+ * `planes` trae los cambios de ESTE ciclo (en seco aún no están en la
+ * base; en real ya se escribieron, y sobreponerlos no cambia nada).
+ */
+async function procesarNotificaciones(sb, config, herramientas, estado, partidosVentana, porId, planes) {
+  const quinielaIds = [...new Set(partidosVentana.map((p) => p.quiniela_id))];
+  if (quinielaIds.length === 0) return;
+
+  const { data: quinielas, error: errQ } = await sb
+    .from('quinielas')
+    .select('id, nombre_jornada, modalidad, goles_totales_real')
+    .in('id', quinielaIds);
+  if (errQ) throw new Error(`leyendo quinielas para notificar: ${errQ.message}`);
+  const quinielaPorId = new Map((quinielas ?? []).map((q) => [q.id, q]));
+
+  const { data: partidosQ, error: errP } = await sb
+    .from('partidos')
+    .select(
+      'id, quiniela_id, equipo_local, equipo_visitante, goles_local, goles_visitante, ' +
+        'resultado_real, es_final, api_fixture_id'
+    )
+    .in('quiniela_id', quinielaIds);
+  if (errP) throw new Error(`leyendo partidos para notificar: ${errP.message}`);
+
+  const partidosFoto = (partidosQ ?? []).map((p) => {
+    const fila = { ...p };
+    const plan = planes.get(p.id);
+    if (plan) Object.assign(fila, plan);
+    // IDs de proveedor por equipo (para la audiencia de Siguiendo ⭐):
+    // salen del feed de este ciclo, cruzados a la orientación de la base.
+    let localProviderId = null;
+    let visitanteProviderId = null;
+    const feed = fila.api_fixture_id ? porId.get(String(fila.api_fixture_id)) : null;
+    if (feed) {
+      const orient = herramientas.orientacion(fila, feed);
+      if (orient === 'directo') {
+        localProviderId = feed.homeTeamProviderId;
+        visitanteProviderId = feed.awayTeamProviderId;
+      } else if (orient === 'cruzado') {
+        localProviderId = feed.awayTeamProviderId;
+        visitanteProviderId = feed.homeTeamProviderId;
+      }
+    }
+    return {
+      ...fila,
+      equipo_local_provider_id: localProviderId,
+      equipo_visitante_provider_id: visitanteProviderId,
+    };
+  });
+
+  const rankings = {};
+  for (const qid of quinielaIds) {
+    const quiniela = quinielaPorId.get(qid);
+    if (!quiniela || quiniela.modalidad === 'sorteo') continue;
+    const { data: tickets, error: errT } = await sb
+      .from('tickets')
+      .select('id, usuario_id, prediccion_goles_total, pronosticos(partido_id, eleccion_usuario)')
+      .eq('quiniela_id', qid);
+    if (errT) throw new Error(`leyendo tickets para notificar: ${errT.message}`);
+    rankings[qid] = calcularRankingProvisional(
+      quiniela,
+      tickets ?? [],
+      partidosFoto.filter((p) => p.quiniela_id === qid)
+    );
+  }
+
+  const foto = {
+    partidos: partidosFoto,
+    quinielas: Object.fromEntries(
+      [...quinielaPorId.values()].map((q) => [q.id, { nombre: q.nombre_jornada }])
+    ),
+    rankings,
+  };
+
+  const { eventos, estadoNuevo } = detectarEventosNotificacion(estado.notif, foto);
+
+  if (eventos.length === 0) {
+    estado.notif = estadoNuevo;
+    await guardarEstadoNotificaciones(estado.notif);
+    return;
+  }
+
+  if (DRY_RUN) {
+    for (const e of eventos) log(`NOTIFICARÍA: ${describirEvento(e)} (clave ${e.clave})`);
+    return; // en seco el estado no avanza ni se persiste
+  }
+
+  const resultado = await despacharEventos(config, eventos);
+  estado.notif = marcarDespachadas(
+    estadoNuevo,
+    eventos.map((e) => e.clave)
+  );
+  await guardarEstadoNotificaciones(estado.notif);
+  log(
+    `Notificaciones: ${eventos.length} evento(s) despachados · ` +
+      `enviados ${resultado.enviados ?? '?'} · omitidos ${resultado.omitidos ?? '?'} · ` +
+      `suscripciones limpiadas ${resultado.limpiadas ?? '?'}` +
+      (resultado.sin_dedupe ? ' · OJO: la ruta no encontró la tabla de dedupe (¿corriste la migración?)' : '')
+  );
+}
+
+const fmtHoraCierre = new Intl.DateTimeFormat('es-MX', {
+  timeZone: 'America/Mazatlan',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
+/**
+ * Recordatorios de cierre: quinielas abiertas que cierran en menos de
+ * 2 h; avisa una sola vez a cada jugador SIN boleto en esa quiniela.
+ * Se revisa como mucho una vez por minuto (no depende de que haya
+ * partidos en ventana).
+ */
+async function chequearCierres(sb, config, estado, ahoraMs) {
+  if (ahoraMs - estado.ultimoChequeoCierre < 60_000) return;
+  estado.ultimoChequeoCierre = ahoraMs;
+
+  const { data: quinielas, error } = await sb
+    .from('quinielas')
+    .select('id, nombre_jornada, fecha_cierre')
+    .eq('estado', 'abierta');
+  if (error) throw new Error(`leyendo cierres: ${error.message}`);
+
+  const porCerrar = (quinielas ?? []).filter((q) =>
+    debeRecordarCierre(q.fecha_cierre, ahoraMs)
+  );
+  if (porCerrar.length === 0) return;
+
+  const { data: usuarios, error: errU } = await sb.from('usuarios').select('id');
+  if (errU) throw new Error(`leyendo usuarios para cierres: ${errU.message}`);
+  const todos = (usuarios ?? []).map((u) => String(u.id));
+
+  const eventos = [];
+  for (const q of porCerrar) {
+    const { data: tickets } = await sb
+      .from('tickets')
+      .select('usuario_id')
+      .eq('quiniela_id', q.id);
+    const conBoleto = new Set((tickets ?? []).map((t) => String(t.usuario_id)));
+    const hora = fmtHoraCierre.format(new Date(q.fecha_cierre));
+    for (const uid of todos) {
+      if (conBoleto.has(uid)) continue;
+      const clave = claveRecordatorioCierre(q.id, uid);
+      if (estado.notif.despachadas.includes(clave)) continue;
+      eventos.push({
+        tipo: 'recordatorio_cierre',
+        clave,
+        usuarios: [uid],
+        titulo: '⏰ La quiniela cierra pronto',
+        cuerpo: `${q.nombre_jornada} cierra a las ${hora} y aún no tienes boleto. ¡No te quedes fuera!`,
+        url: '/',
+      });
+    }
+  }
+  if (eventos.length === 0) return;
+
+  if (DRY_RUN) {
+    for (const e of eventos) log(`NOTIFICARÍA: ${describirEvento(e)} (clave ${e.clave})`);
+    return;
+  }
+
+  const resultado = await despacharEventos(config, eventos);
+  estado.notif = marcarDespachadas(
+    estado.notif,
+    eventos.map((e) => e.clave)
+  );
+  await guardarEstadoNotificaciones(estado.notif);
+  log(
+    `Recordatorios de cierre: ${eventos.length} jugador(es) sin boleto · ` +
+      `enviados ${resultado.enviados ?? '?'}`
+  );
+}
+
 // ---------- Un ciclo --------------------------------------------------------
 
 async function ciclo(sb, config, herramientas, estado) {
   const ahoraMs = Date.now();
   const partidos = await descubrirPartidos(sb, ahoraMs);
+
+  // Recordatorios de cierre: corren aunque no haya partidos en
+  // ventana (el cierre suele ser horas antes del primer partido).
+  if (config.pushSecret || DRY_RUN) {
+    try {
+      await chequearCierres(sb, config, estado, ahoraMs);
+    } catch (e) {
+      log(`Aviso: el chequeo de cierres falló: ${e.message}`);
+    }
+  }
 
   if (partidos.length === 0) {
     if (ahoraMs - estado.ultimoAvisoSinTrabajo >= 5 * 60_000) {
@@ -393,36 +653,50 @@ async function ciclo(sb, config, herramientas, estado) {
   }
 
   const enlazados = partidos.filter((p) => p.api_fixture_id);
-  if (enlazados.length === 0) return;
+  const porId = new Map();
+  const planes = new Map();
 
-  // 2) Una sola llamada al feed en vivo para todos.
-  const enVivo = await traerEnVivo(config.tsdbKey);
-  const porId = new Map(enVivo.map((f) => [f.providerId, f]));
+  if (enlazados.length > 0) {
+    // 2) Una sola llamada al feed en vivo para todos.
+    const enVivo = await traerEnVivo(config.tsdbKey);
+    for (const f of enVivo) porId.set(f.providerId, f);
 
-  // 3) Decidir y (salvo dry-run) escribir, partido por partido.
-  for (const partido of enlazados) {
-    const feed = porId.get(String(partido.api_fixture_id));
-    if (!feed) continue; // aún no aparece en el feed: nada que hacer
-    const plan = planEscritura(partido, feed, herramientas, ahoraMs);
-    if (plan.accion === 'nada') continue;
-    const antes =
-      `${partido.goles_local ?? '–'}-${partido.goles_visitante ?? '–'}` +
-      (partido.es_final ? ' (FINAL)' : '');
-    if (DRY_RUN) {
-      log(`ESCRIBIRÍA: ${plan.resumen} · antes ${antes} · final=${plan.esFinal ? 'sí' : 'no'}`);
-      continue;
+    // 3) Decidir y (salvo dry-run) escribir, partido por partido.
+    for (const partido of enlazados) {
+      const feed = porId.get(String(partido.api_fixture_id));
+      if (!feed) continue; // aún no aparece en el feed: nada que hacer
+      const plan = planEscritura(partido, feed, herramientas, ahoraMs);
+      if (plan.accion === 'nada') continue;
+      planes.set(partido.id, plan.cambios);
+      const antes =
+        `${partido.goles_local ?? '–'}-${partido.goles_visitante ?? '–'}` +
+        (partido.es_final ? ' (FINAL)' : '');
+      if (DRY_RUN) {
+        log(`ESCRIBIRÍA: ${plan.resumen} · antes ${antes} · final=${plan.esFinal ? 'sí' : 'no'}`);
+        continue;
+      }
+      const { error } = await sb
+        .from('partidos')
+        .update(plan.cambios)
+        .eq('id', partido.id)
+        .eq('es_final', false); // doble candado: jamás resucitar un final
+      if (error) {
+        log(`Error escribiendo ${plan.resumen}: ${error.message}`);
+      } else {
+        log(
+          `Marcador: ${plan.resumen} · antes ${antes} · final=${plan.esFinal ? 'sí' : 'no'}`
+        );
+      }
     }
-    const { error } = await sb
-      .from('partidos')
-      .update(plan.cambios)
-      .eq('id', partido.id)
-      .eq('es_final', false); // doble candado: jamás resucitar un final
-    if (error) {
-      log(`Error escribiendo ${plan.resumen}: ${error.message}`);
-    } else {
-      log(
-        `Marcador: ${plan.resumen} · antes ${antes} · final=${plan.esFinal ? 'sí' : 'no'}`
-      );
+  }
+
+  // 4) Notificaciones push: al final del ciclo y sin poder tumbarlo;
+  //    los marcadores ya quedaron escritos, que son lo primero.
+  if (config.pushSecret || DRY_RUN) {
+    try {
+      await procesarNotificaciones(sb, config, herramientas, estado, partidos, porId, planes);
+    } catch (e) {
+      log(`Aviso: las notificaciones fallaron este ciclo: ${e.message}`);
     }
   }
 }
@@ -472,7 +746,18 @@ async function main() {
     );
   }
 
-  const estado = { ultimoAvisoSinTrabajo: 0, fixturesTodas: null, fixturesTodasEn: 0 };
+  const estado = {
+    ultimoAvisoSinTrabajo: 0,
+    fixturesTodas: null,
+    fixturesTodasEn: 0,
+    ultimoChequeoCierre: 0,
+    notif: await cargarEstadoNotificaciones(),
+  };
+  log(
+    config.pushSecret
+      ? `Notificaciones push: activas (despacho a ${new URL(config.pushUrl).host}).`
+      : 'Notificaciones push: desactivadas (falta PUSH_DISPATCH_SECRET); los marcadores trabajan igual.'
+  );
 
   do {
     try {

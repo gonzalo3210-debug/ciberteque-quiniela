@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# estado local del programa de marcadores (dedupe de notificaciones)
+scripts/marcador-directo/estado-notificaciones.json

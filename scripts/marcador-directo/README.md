@@ -49,6 +49,8 @@ Las lee del `.env.local` del repo o del entorno (el entorno manda):
 | `SUPABASE_SERVICE_ROLE_KEY` | **La llave correcta a futuro.** Salta cualquier restricción de la base. Hoy el programa cae a la anónima si esta no existe (ver abajo). |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` (o `SUPABASE_ANON_KEY`) | Llave anónima, la que ya trae tu `.env.local`. |
 | `THESPORTSDB_API_KEY` | La llave premium de TheSportsDB, la misma de la app. Ya está en tu `.env.local`. |
+| `PUSH_DISPATCH_SECRET` | Secreto para despachar notificaciones push. Sin él, el programa no manda avisos (y trabaja igual). Se genera con `node scripts/generar-vapid.mjs` y debe ser EL MISMO en el `.env.local` y en Vercel. |
+| `PUSH_DISPATCH_URL` | (Opcional) Dirección del despachador; por defecto la de producción (`https://ciberteque-quiniela.vercel.app/api/push/despachar`). |
 
 > **Sobre la llave de Supabase:** mientras la base tenga RLS apagado, la
 > llave anónima puede escribir y el programa funciona con ella (al
@@ -91,6 +93,46 @@ Cada línea lleva la hora de Mazatlán. Lo importante se ve así:
 [17/11/2026, 13:58:40] Marcador: Portugal 1-4 Dinamarca · antes 1-0 · final=sí
 [17/11/2026, 12:00:03] Enlazado: Puebla vs San Luis → api_fixture_id=2487597
 ```
+
+## Notificaciones push
+
+Con la misma pasada que escribe los marcadores, el programa detecta
+**eventos de aviso** y los despacha a la app (`/api/push/despachar`),
+que es quien los manda a los celulares de los jugadores suscritos:
+
+- ⚽ **Gol** en un partido de quiniela abierta (a quienes siguen a ese
+  equipo ⭐ y a quienes tienen boleto en la quiniela).
+- 🚫 **Gol anulado**: si el VAR echa atrás un gol ya avisado, sale una
+  corrección; si el aviso original nunca salió, no sale nada.
+- 🏁 **Fin de partido** (solo a quienes prendieron ese aviso).
+- 👑 **Cambios de liderato**: tras cada marcador se recalcula el
+  ranking provisional igual que en la app; a quien entra al 1° le
+  llega "¡Vas en primer lugar!" y a quien sale, "Te rebasaron".
+- ⏰ **Recordatorio de cierre**: si una quiniela abierta cierra en
+  menos de 2 horas, avisa una sola vez a cada jugador sin boleto
+  (se revisa una vez por minuto, haya o no partidos en ventana).
+
+Reglas de la detección (lógica pura en `logica.mjs`, con pruebas en
+`pruebas-notificaciones.mjs`):
+
+- **Línea base silenciosa**: lo primero que el programa ve de un
+  partido o de un liderato se anota sin avisar; nada de spamear goles
+  viejos al arrancar a mitad de jornada.
+- **Sin duplicados**: cada evento tiene una clave (p. ej.
+  `gol:<partido>:2-0:boleto`); las despachadas se guardan en
+  `estado-notificaciones.json` junto al programa y la ruta además
+  dedupea en la base (`notificaciones_enviadas`). Ni un reinicio
+  repite un aviso.
+- **Los marcadores mandan**: si el despacho falla, el estado de
+  notificaciones no avanza y los eventos se regeneran al siguiente
+  ciclo; el programa nunca se cae por los avisos.
+- Con `--dry-run` el registro muestra `NOTIFICARÍA: …` por cada evento
+  que saldría, sin mandar nada ni guardar estado.
+
+Para activar los avisos hace falta (una sola vez): correr la migración
+`scripts/migraciones/2026-11-17-notificaciones-push.sql` en Supabase y
+tener las variables VAPID + `PUSH_DISPATCH_SECRET` en Vercel y en el
+`.env.local` (ver `scripts/generar-vapid.mjs`).
 
 ## El enlace (api_fixture_id)
 
