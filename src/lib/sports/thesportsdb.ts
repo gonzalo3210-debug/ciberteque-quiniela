@@ -10,6 +10,9 @@
 //
 // Endpoints usados (v1):
 //   fixtures de una ronda:  eventsround.php?id={liga}&r={ronda}&s={temporada}
+//                           (OJO: responde 404 con la llave vigente,
+//                           verificado 2026-11-17; getFixtures cae a
+//                           eventsseason.php y filtra por intRound)
 //   fixtures de temporada:  eventsseason.php?id={liga}&s={temporada}
 //   próximos partidos:      eventsnextleague.php?id={liga}
 //   tabla de posiciones:    lookuptable.php?l={liga}&s={temporada}
@@ -320,9 +323,28 @@ async function getFixtures(
         'getFixtures: para pedir una ronda hay que indicar la temporada (season).'
       );
     }
-    path =
-      `eventsround.php?id=${encodeURIComponent(leagueProviderId)}` +
-      `&r=${round}&s=${encodeURIComponent(season)}`;
+    try {
+      const data = await tsdbFetch<{ events: TsdbEvent[] | null }>(
+        `eventsround.php?id=${encodeURIComponent(leagueProviderId)}` +
+          `&r=${round}&s=${encodeURIComponent(season)}`,
+        revalidate
+      );
+      return (data?.events ?? []).map((e) => mapEvent(e, leagueProviderId));
+    } catch {
+      // Respaldo verificado (2026-11-17): eventsround.php responde 404
+      // con la llave vigente (probado con Liga MX y Premier League),
+      // pero eventsseason.php trae la temporada completa y cada evento
+      // lleva su intRound: la ronda se filtra aquí y el resultado es el
+      // mismo. Si el endpoint directo revive, se usa sin tocar nada.
+      const data = await tsdbFetch<{ events: TsdbEvent[] | null }>(
+        `eventsseason.php?id=${encodeURIComponent(leagueProviderId)}` +
+          `&s=${encodeURIComponent(season)}`,
+        3600
+      );
+      return (data?.events ?? [])
+        .map((e) => mapEvent(e, leagueProviderId))
+        .filter((f) => f.round === round);
+    }
   } else if (season) {
     path =
       `eventsseason.php?id=${encodeURIComponent(leagueProviderId)}` +

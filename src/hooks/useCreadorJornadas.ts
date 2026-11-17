@@ -7,6 +7,13 @@ export interface PartidoInput {
   local: string;
   visitante: string;
   fecha_hora: string;
+  /**
+   * ID del partido en el proveedor externo (TheSportsDB) cuando el
+   * partido se importó desde la API; null/undefined si se tecleó a mano.
+   * Se guarda en partidos.api_fixture_id para que el programa de
+   * marcadores enlace el partido de la base con el del API.
+   */
+  api_fixture_id?: string | null;
 }
 
 export type TipoPremiacion = 'unico' | 'top2' | 'top3' | 'promo_unico' | 'promo_top2';
@@ -69,7 +76,40 @@ export function useCreadorJornadas() {
   const actualizarPartidoInput = (index: number, campo: keyof PartidoInput, valor: string) => {
     const nuevos = [...partidosNuevos];
     nuevos[index] = { ...nuevos[index], [campo]: valor };
+    // OJO: editar nombre u hora de un partido importado NO suelta su
+    // api_fixture_id: el enlace es con el partido, no con el texto, y
+    // así el marcador en vivo sigue llegando aunque se ajuste el nombre
+    // a como lo conoce el catálogo del Club. Si un renglón importado se
+    // convierte en OTRO partido, lo correcto es borrarlo y agregarlo a
+    // mano (queda sin enlace, como los de siempre).
     setPartidosNuevos(nuevos);
+  };
+
+  /**
+   * Agrega partidos importados desde la API a la jornada en construcción.
+   * - Quita primero los renglones completamente vacíos (el renglón
+   *   inicial en blanco no debe sobrevivir a una importación).
+   * - Omite los que ya estén en la lista con el mismo api_fixture_id
+   *   (importar dos veces la misma liga/ronda no duplica).
+   * Devuelve cuántos se agregaron y cuántos se omitieron por duplicados.
+   */
+  const agregarPartidosImportados = (importados: PartidoInput[]) => {
+    const base = partidosNuevos.filter(p => p.local.trim() !== '' || p.visitante.trim() !== '' || p.fecha_hora !== '' || p.api_fixture_id);
+    const idsYa = new Set(base.map(p => p.api_fixture_id).filter(Boolean));
+    const nuevos = [...base];
+    let agregados = 0;
+    let omitidos = 0;
+    for (const p of importados) {
+      if (p.api_fixture_id && idsYa.has(p.api_fixture_id)) {
+        omitidos++;
+        continue;
+      }
+      if (p.api_fixture_id) idsYa.add(p.api_fixture_id);
+      nuevos.push(p);
+      agregados++;
+    }
+    setPartidosNuevos(nuevos.length > 0 ? nuevos : [{ local: '', visitante: '', fecha_hora: '' }]);
+    return { agregados, omitidos };
   };
 
   const moverPartido = (index: number, direccion: number) => {
@@ -171,11 +211,14 @@ export function useCreadorJornadas() {
           return 0;
         });
 
-        const partidosData = partidosOrdenados.map(p => ({ 
-          quiniela_id: q.id, 
-          equipo_local: p.local, 
-          equipo_visitante: p.visitante, 
-          fecha_hora_partido: p.fecha_hora ? new Date(p.fecha_hora).toISOString() : null 
+        const partidosData = partidosOrdenados.map(p => ({
+          quiniela_id: q.id,
+          equipo_local: p.local,
+          equipo_visitante: p.visitante,
+          fecha_hora_partido: p.fecha_hora ? new Date(p.fecha_hora).toISOString() : null,
+          // Solo los partidos importados desde la API traen enlace; los
+          // tecleados a mano quedan en null, como siempre.
+          api_fixture_id: p.api_fixture_id ?? null
         }));
         
         // 3. Insertar Partidos
@@ -229,7 +272,7 @@ export function useCreadorJornadas() {
   return {
     formulario: { nombreJornada, precioTicket, fechaCierre, tipoPremiacion, partidosNuevos, modalidad, soloAdmins, equiposSorteo },
     setters: { setNombreJornada, setPrecioTicket, setFechaCierre, setTipoPremiacion, setModalidad, setSoloAdmins },
-    acciones: { agregarPartidoInput, actualizarPartidoInput, moverPartido, eliminarPartido, crearJornadaCompleta, toggleEquipoSorteo, clonarUltimoSorteo },
+    acciones: { agregarPartidoInput, actualizarPartidoInput, moverPartido, eliminarPartido, agregarPartidosImportados, crearJornadaCompleta, toggleEquipoSorteo, clonarUltimoSorteo },
     estado: { creando }
   };
 }

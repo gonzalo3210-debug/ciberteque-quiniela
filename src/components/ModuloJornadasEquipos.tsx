@@ -1,8 +1,61 @@
 'use client'
 import { useState } from 'react'
 import { useEquipos } from '@/hooks/useEquipos'
-import { useCreadorJornadas } from '@/hooks/useCreadorJornadas'
-import toast from 'react-hot-toast' 
+import { useCreadorJornadas, type PartidoInput } from '@/hooks/useCreadorJornadas'
+import { SUPPORTED_LEAGUES } from '@/lib/sports/leagues'
+import toast from 'react-hot-toast'
+
+/** Partido tal como lo devuelve /api/importar-jornada. */
+interface FixtureImportable {
+  providerId: string;
+  homeTeam: string;
+  awayTeam: string;
+  homeTeamES: string;
+  awayTeamES: string;
+  kickoffUtc: string | null;
+  round: number | null;
+  venue: string | null;
+}
+
+/**
+ * Instante UTC (ISO) -> valor para un input datetime-local en hora de
+ * Mazatlán ("YYYY-MM-DDTHH:mm"). El guardado de la jornada interpreta el
+ * campo como hora local del navegador; como el Club opera en Mazatlán,
+ * así el instante que llega a la base es exactamente el del API.
+ */
+function utcADatetimeLocalMazatlan(isoUtc: string | null): string {
+  if (!isoUtc) return '';
+  const fecha = new Date(isoUtc);
+  if (isNaN(fecha.getTime())) return '';
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Mazatlan',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(fecha);
+  const p: Record<string, string> = {};
+  for (const parte of partes) p[parte.type] = parte.value;
+  const hora = p.hour === '24' ? '00' : p.hour;
+  return `${p.year}-${p.month}-${p.day}T${hora}:${p.minute}`;
+}
+
+/** Instante UTC (ISO) -> texto legible en hora de Mazatlán. */
+function textoFechaMazatlan(isoUtc: string | null): string {
+  if (!isoUtc) return 'Sin horario en el API';
+  const fecha = new Date(isoUtc);
+  if (isNaN(fecha.getTime())) return 'Sin horario en el API';
+  return new Intl.DateTimeFormat('es-MX', {
+    timeZone: 'America/Mazatlan',
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(fecha);
+}
 
 interface ModuloJornadasEquiposProps {
   vista: 'crear' | 'equipos';
@@ -33,6 +86,74 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
 
   // ⚡ NUEVO: Estado para el buscador en la vista de Sorteo
   const [busquedaEquipoSorteo, setBusquedaEquipoSorteo] = useState('');
+
+  // --- IMPORTAR PARTIDOS DESDE LA API ---
+  const [mostrarImportar, setMostrarImportar] = useState(false);
+  const [impLiga, setImpLiga] = useState('4350'); // Liga MX por defecto
+  const [impModo, setImpModo] = useState<'ronda' | 'fechas'>('ronda');
+  const [impRonda, setImpRonda] = useState('');
+  const [impDesde, setImpDesde] = useState('');
+  const [impHasta, setImpHasta] = useState('');
+  const [impResultados, setImpResultados] = useState<FixtureImportable[] | null>(null);
+  const [impSeleccionados, setImpSeleccionados] = useState<Set<string>>(new Set());
+  const [impBuscando, setImpBuscando] = useState(false);
+
+  const handleBuscarImportables = async () => {
+    const params = new URLSearchParams({ liga: impLiga });
+    if (impModo === 'ronda') {
+      if (!impRonda || parseInt(impRonda) < 1) return toast.error('Escribe el número de jornada (ronda) a importar.');
+      params.set('ronda', impRonda);
+    } else {
+      if (!impDesde || !impHasta) return toast.error('Elige la fecha inicial y la final.');
+      params.set('desde', impDesde);
+      params.set('hasta', impHasta);
+    }
+    setImpBuscando(true);
+    setImpResultados(null);
+    try {
+      const res = await fetch(`/api/importar-jornada?${params.toString()}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'No se pudieron cargar los partidos.');
+      const fixtures: FixtureImportable[] = data.fixtures || [];
+      setImpResultados(fixtures);
+      // Todos marcados por defecto: Gonzalo desmarca los que no quiera.
+      setImpSeleccionados(new Set(fixtures.map(fx => fx.providerId)));
+      if (fixtures.length === 0) toast('Esa liga no trae partidos para ese criterio.', { icon: 'ℹ️' });
+    } catch (error: any) {
+      toast.error(error.message || 'Error al consultar la API.');
+    } finally {
+      setImpBuscando(false);
+    }
+  };
+
+  const toggleImportable = (providerId: string) => {
+    setImpSeleccionados(prev => {
+      const nuevo = new Set(prev);
+      if (nuevo.has(providerId)) nuevo.delete(providerId); else nuevo.add(providerId);
+      return nuevo;
+    });
+  };
+
+  const handleAgregarImportados = () => {
+    if (!impResultados) return;
+    const elegidos = impResultados.filter(fx => impSeleccionados.has(fx.providerId));
+    if (elegidos.length === 0) return toast.error('No hay ningún partido marcado.');
+    const nuevos: PartidoInput[] = elegidos.map(fx => ({
+      local: fx.homeTeamES,
+      visitante: fx.awayTeamES,
+      fecha_hora: utcADatetimeLocalMazatlan(fx.kickoffUtc),
+      api_fixture_id: fx.providerId,
+    }));
+    const { agregados, omitidos } = a.agregarPartidosImportados(nuevos);
+    if (agregados > 0) {
+      toast.success(`Se agregaron ${agregados} partido(s) a la jornada.${omitidos > 0 ? ` (${omitidos} ya estaban, se omitieron.)` : ''}`);
+      setMostrarImportar(false);
+      setImpResultados(null);
+      setImpSeleccionados(new Set());
+    } else {
+      toast('Todos esos partidos ya están en la jornada.', { icon: 'ℹ️' });
+    }
+  };
 
   const ligasDinamicas = Array.from(new Set(equipos.map(eq => eq.liga || 'Sin Liga'))).sort();
 
@@ -217,6 +338,83 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
                 </select>
               </div>
 
+              {/* 🌐 IMPORTAR PARTIDOS DESDE LA API */}
+              <div className="bg-emerald-950/20 border border-emerald-900/50 rounded-xl shadow-inner overflow-hidden">
+                <button type="button" onClick={() => setMostrarImportar(v => !v)} className="w-full flex items-center justify-between px-4 py-3 hover:bg-emerald-900/20 transition-colors">
+                  <span className="text-emerald-400 font-black uppercase text-xs tracking-widest flex items-center gap-2"><span>🌐</span> Importar desde la API</span>
+                  <span className="text-emerald-500 text-[10px] font-black">{mostrarImportar ? '▲ Cerrar' : '▼ Abrir'}</span>
+                </button>
+
+                {mostrarImportar && (
+                  <div className="px-4 pb-4 space-y-3">
+                    <p className="text-slate-400 text-[10px] leading-relaxed">
+                      Trae los partidos de una liga sin teclearlos: eliges liga y jornada (o fechas), marcas los que quieras y se agregan a la lista de abajo <strong className="text-slate-200">ya enlazados</strong> (🔗), para que los marcadores se actualicen solos. Puedes importar de otra liga después para agregar, por ejemplo, un partido europeo.
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-[9px] md:text-[10px] text-slate-500 font-bold uppercase mb-1.5 block tracking-wider">Liga</label>
+                        <select value={impLiga} onChange={(e) => { setImpLiga(e.target.value); setImpResultados(null); }} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white outline-none focus:border-emerald-500 transition-all text-xs font-bold h-[34px]">
+                          {SUPPORTED_LEAGUES.map(l => <option key={l.providerId} value={l.providerId}>{l.name}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[9px] md:text-[10px] text-slate-500 font-bold uppercase mb-1.5 block tracking-wider">Buscar por</label>
+                        <select value={impModo} onChange={(e: any) => { setImpModo(e.target.value); setImpResultados(null); }} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white outline-none focus:border-emerald-500 transition-all text-xs font-bold h-[34px]">
+                          <option value="ronda">Número de jornada</option>
+                          <option value="fechas">Rango de fechas</option>
+                        </select>
+                      </div>
+                      {impModo === 'ronda' ? (
+                        <div>
+                          <label className="text-[9px] md:text-[10px] text-slate-500 font-bold uppercase mb-1.5 block tracking-wider">Jornada (ronda)</label>
+                          <input type="number" min="1" placeholder="Ej. 17" value={impRonda} onChange={(e) => setImpRonda(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white outline-none focus:border-emerald-500 transition-all text-xs font-bold text-center" />
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[9px] md:text-[10px] text-slate-500 font-bold uppercase mb-1.5 block tracking-wider">Desde</label>
+                            <input type="date" value={impDesde} onChange={(e) => setImpDesde(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-white outline-none focus:border-emerald-500 transition-all text-xs font-bold" />
+                          </div>
+                          <div>
+                            <label className="text-[9px] md:text-[10px] text-slate-500 font-bold uppercase mb-1.5 block tracking-wider">Hasta</label>
+                            <input type="date" value={impHasta} onChange={(e) => setImpHasta(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-white outline-none focus:border-emerald-500 transition-all text-xs font-bold" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <button type="button" onClick={handleBuscarImportables} disabled={impBuscando} className={`w-full py-2.5 rounded-lg font-black uppercase tracking-widest text-[10px] md:text-xs transition-all ${impBuscando ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md'}`}>
+                      {impBuscando ? 'Consultando la API...' : '🔎 Buscar partidos'}
+                    </button>
+
+                    {impResultados !== null && impResultados.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="max-h-[320px] overflow-y-auto pr-1 space-y-1.5 custom-scrollbar">
+                          {impResultados.map(fx => {
+                            const marcado = impSeleccionados.has(fx.providerId);
+                            return (
+                              <label key={fx.providerId} className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-all ${marcado ? 'bg-emerald-900/30 border-emerald-700/60' : 'bg-slate-950/60 border-slate-800 opacity-60'}`}>
+                                <input type="checkbox" checked={marcado} onChange={() => toggleImportable(fx.providerId)} className="w-4 h-4 accent-emerald-500 shrink-0 cursor-pointer" />
+                                <div className="flex-1 min-w-0">
+                                  <span className="block text-xs font-bold text-white truncate uppercase">{fx.homeTeamES} <span className="text-slate-500 italic normal-case">vs</span> {fx.awayTeamES}</span>
+                                  <span className="block text-[9px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">
+                                    {textoFechaMazatlan(fx.kickoffUtc)}{fx.round !== null ? ` · Jornada ${fx.round}` : ''}{fx.venue ? ` · ${fx.venue}` : ''}
+                                  </span>
+                                </div>
+                              </label>
+                            );
+                          })}
+                        </div>
+                        <button type="button" onClick={handleAgregarImportados} className="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-widest text-[10px] md:text-xs transition-all shadow-md">
+                          ➕ Agregar marcados ({impSeleccionados.size})
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <label className="text-[10px] text-slate-500 font-bold uppercase block tracking-widest px-1">Partidos de la Jornada</label>
               <datalist id="lista-equipos">
                 {equipos.filter(eq => ligaFiltroJornada === 'Todas' ? true : eq.liga === ligaFiltroJornada).map(eq => <option key={eq.id} value={eq.nombre} />)}
@@ -227,6 +425,9 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
                   
                   <div className="flex justify-between items-center w-full md:w-auto md:flex-col md:gap-1 border-b md:border-b-0 md:border-r border-slate-700/50 pb-2 md:pb-0 md:pr-3 shrink-0">
                      <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Partido {idx + 1}</span>
+                     {p.api_fixture_id && (
+                       <span title="Importado de la API: su marcador se actualiza solo. Puedes ajustar el nombre u la hora y el enlace se queda; si lo conviertes en otro partido, bórralo y agrégalo a mano." className="text-[8px] font-black uppercase tracking-wider text-emerald-400 bg-emerald-950/50 border border-emerald-900/60 px-1.5 py-0.5 rounded">🔗 API</span>
+                     )}
                      <div className="flex gap-1">
                        <button onClick={() => a.moverPartido(idx, -1)} disabled={idx === 0} className="w-6 h-6 flex items-center justify-center bg-slate-950 border border-slate-700 rounded text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 transition-all text-[10px]" title="Subir">▲</button>
                        <button onClick={() => a.moverPartido(idx, 1)} disabled={idx === f.partidosNuevos.length - 1} className="w-6 h-6 flex items-center justify-center bg-slate-950 border border-slate-700 rounded text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 transition-all text-[10px]" title="Bajar">▼</button>
