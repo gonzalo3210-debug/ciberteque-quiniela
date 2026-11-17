@@ -3,6 +3,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 // 🔥 Importamos nuestro nuevo proveedor de autenticación global (Modularidad Estricta)
 import { AuthProvider } from "@/contexts/AuthContext";
+// 🔔 Service worker de las notificaciones push (solo lo registra)
+import RegistroServiceWorker from "@/components/RegistroServiceWorker";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -44,10 +46,13 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col relative bg-[#020617] text-slate-200">
         {/* 🔥 Envolvemos la app para que cualquier componente pueda usar la sesión sin tocar el disco */}
         <AuthProvider>
-          
+
           {/* Contenido principal de la aplicación */}
           {children}
-          
+
+          {/* 🔔 Registro del service worker para notificaciones push */}
+          <RegistroServiceWorker />
+
         </AuthProvider>
       </body>
     </html>
