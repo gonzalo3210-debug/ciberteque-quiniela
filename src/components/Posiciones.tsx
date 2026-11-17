@@ -4,6 +4,7 @@ import { usePosiciones } from '@/hooks/usePosiciones'
 import { useInsigniasRanking } from '@/hooks/useInsignias'
 import IconosInsignias from '@/components/IconosInsignias'
 import { calcularProyeccion } from '@/lib/proyeccion'
+import { marcarEmpates } from '@/lib/empates'
 import { useReacciones } from '@/hooks/useReacciones'
 import { usePerfilUsuario } from '@/hooks/usePerfilUsuario'
 import { useAuth } from '@/contexts/AuthContext'
@@ -19,7 +20,7 @@ const getAvatarUrl = (nombre: string, url: string | null) => {
 }
 
 // 🧮 FUNCIÓN MAESTRA DE ORDENAMIENTO (Registros -> Competitivo -> Empates exactos)
-const aplicarReglasRanking = (rankingOriginal: any[], esFaseRegistro: boolean, esSorteo: boolean) => {
+const aplicarReglasRanking = (rankingOriginal: any[], esFaseRegistro: boolean, esSorteo: boolean, tipoPremiacion?: string | null) => {
   const rankingProcesado = [...rankingOriginal].sort((a: any, b: any) => {
     // Si es sorteo, los eliminados van al fondo
     if (esSorteo) {
@@ -73,16 +74,26 @@ const aplicarReglasRanking = (rankingOriginal: any[], esFaseRegistro: boolean, e
     jugador.posicion = jugador.posicion_real;
   });
 
-  // 🤝 MARCAR LUGARES COMPARTIDOS (solo visual: NO altera posiciones ni el orden)
-  // Un lugar es compartido si 2+ boletos tienen los mismos puntos Y la misma
-  // diferencia de goles real. Se ignora el centinela 999/9999 (aún sin goles reales).
+  // 🤝 MARCAR LUGARES COMPARTIDOS Y PREMIOS REPARTIDOS (solo visual:
+  // NO altera posiciones ni el orden). La verdad vive en
+  // src/lib/empates.ts, espejo de la liquidación (calcularPremios):
+  // comparten lugar 2+ boletos con los mismos puntos Y la misma
+  // diferencia de goles real (el centinela 999/9999 no es empate), y
+  // el premio se marca "repartido" solo si el grupo empatado ocupa
+  // lugares con premio en dinero según el tipo de premiación.
   if (!esSorteo && !esFaseRegistro) {
-    const diffDe = (j: any) => (j.golesDiff !== undefined ? j.golesDiff : 9999);
+    const marcas = marcarEmpates(
+      rankingProcesado.map((j: any) => ({
+        id: j.id,
+        puntos: j.puntos || 0,
+        golesDiff: j.golesDiff !== undefined ? j.golesDiff : 9999
+      })),
+      tipoPremiacion
+    );
     rankingProcesado.forEach((jugador: any) => {
-      const diff = diffDe(jugador);
-      jugador.lugar_compartido = diff < 999 && rankingProcesado.some((otro: any) =>
-        otro !== jugador && otro.puntos === jugador.puntos && diffDe(otro) === diff
-      );
+      const marca = marcas.get(jugador.id);
+      jugador.lugar_compartido = Boolean(marca?.compartido);
+      jugador.premio_repartido = Boolean(marca?.premioRepartido);
     });
   }
 
@@ -642,7 +653,7 @@ export default function Posiciones() {
   const esPromo = quinielaActiva.tipo_premiacion?.toLowerCase().includes('promo')
 
   // 🚀 APLICAR ORDENAMIENTO CORRECTO AL RANKING PRINCIPAL
-  const rankingProcesado = aplicarReglasRanking(quinielaActiva.ranking, esFaseRegistro, esSorteo);
+  const rankingProcesado = aplicarReglasRanking(quinielaActiva.ranking, esFaseRegistro, esSorteo, quinielaActiva.tipo_premiacion);
 
   const rankingFiltrado = rankingProcesado.filter((jugador: any) => 
     jugador.nombre.toLowerCase().includes(busqueda.toLowerCase())
@@ -652,7 +663,7 @@ export default function Posiciones() {
   // contra la tabla de solo finales. Si dejan de haber partidos en
   // vivo, la vista vuelve sola a la oficial.
   const vistaEnVivoActiva = vistaRanking === 'envivo' && Boolean(proyeccionActiva?.hayEnVivo);
-  const filasProyeccion = vistaEnVivoActiva && proyeccionActiva
+  const filasProyeccionBase = vistaEnVivoActiva && proyeccionActiva
     ? proyeccionActiva.tablaProyeccion
         .map((f: any) => {
           const datos = quinielaActiva.ranking.find((r: any) => r.id === f.ticketId);
@@ -665,8 +676,16 @@ export default function Posiciones() {
             puntosEnVivo: f.puntos - (detalle?.puntosSoloFinales ?? f.puntos)
           };
         })
-        .filter((f: any) => f.nombre.toLowerCase().includes(busqueda.toLowerCase()))
     : [];
+  // 🤝 La provisional también marca empates exactos en zona de
+  // premio (con su caveat de provisional en el chip). La diferencia
+  // sale de los goles reales capturados: sin goles reales vale el
+  // centinela y nadie se marca, igual que en la oficial.
+  const marcasProvisional = marcarEmpates(
+    filasProyeccionBase.map((f: any) => ({ id: f.ticketId, puntos: f.puntos, golesDiff: f.golesDiff })),
+    quinielaActiva.tipo_premiacion
+  );
+  const filasProyeccion = filasProyeccionBase.filter((f: any) => f.nombre.toLowerCase().includes(busqueda.toLowerCase()));
 
   const opcionesFecha: Intl.DateTimeFormatOptions = { day: '2-digit', month: 'short', hour: '2-digit', minute:'2-digit' };
   const fechaTextoVisible = fechaCierre.toLocaleDateString('es-MX', opcionesFecha).replace(',', ' a las');
@@ -848,7 +867,14 @@ export default function Posiciones() {
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-[10px] font-black text-slate-400 bg-slate-950 border border-slate-800 px-1.5 py-0.5 rounded w-8 text-center shrink-0">{f.posicion}°</span>
                     <img src={getAvatarUrl(f.nombre, f.avatar_url)} alt={f.nombre} className="w-6 h-6 md:w-7 md:h-7 rounded-full object-cover bg-slate-900 shrink-0" />
-                    <span className="font-black uppercase text-[10px] md:text-xs text-slate-200 truncate max-w-[120px] md:max-w-[200px]">{f.nombre}</span>
+                    <div className="min-w-0">
+                      <span className="font-black uppercase text-[10px] md:text-xs text-slate-200 truncate max-w-[120px] md:max-w-[200px] block">{f.nombre}</span>
+                      {marcasProvisional.get(f.ticketId)?.compartido && (
+                        <span className="block text-[8px] font-black uppercase tracking-widest text-sky-400 mt-0.5">
+                          🤝 Lugar compartido{marcasProvisional.get(f.ticketId)?.premioRepartido ? ' · Premio repartido (provisional)' : ''}
+                        </span>
+                      )}
+                    </div>
                     <IconosInsignias resultado={insigniasPorUsuario.get(f.usuarioId)} />
                     {f.movimiento > 0 && <span className="text-[9px] font-black text-green-400 shrink-0">▲{f.movimiento}</span>}
                     {f.movimiento < 0 && <span className="text-[9px] font-black text-red-400 shrink-0">▼{Math.abs(f.movimiento)}</span>}
@@ -1095,7 +1121,7 @@ export default function Posiciones() {
 
                                  {jugador.lugar_compartido && (
                                    <span className="block text-[8px] font-black uppercase tracking-widest text-sky-400 mt-0.5">
-                                     🤝 Lugar compartido{jugador.posicion === 1 ? ' · Premio repartido' : ''}
+                                     🤝 Lugar compartido{jugador.premio_repartido ? ' · Premio repartido' : ''}
                                    </span>
                                  )}
 
@@ -1282,7 +1308,7 @@ export default function Posiciones() {
               const esSorteo = quiniela.modalidad === 'sorteo';
               
               // Aplicamos también las reglas de desempate justas al Salón de la Fama
-              const rankingHistorialProcesado = aplicarReglasRanking(quiniela.ranking, false, esSorteo);
+              const rankingHistorialProcesado = aplicarReglasRanking(quiniela.ranking, false, esSorteo, quiniela.tipo_premiacion);
               const jugadoresAMostrar = estaExpandida ? rankingHistorialProcesado : rankingHistorialProcesado.slice(0, 5);
 
               return (
@@ -1357,7 +1383,7 @@ export default function Posiciones() {
 
                         {jugador.lugar_compartido && (
                           <span className="text-[8px] font-black uppercase tracking-widest text-sky-400 mt-1">
-                            🤝 Lugar compartido{jugador.posicion === 1 ? ' · Premio repartido' : ''}
+                            🤝 Lugar compartido{jugador.premio_repartido ? ' · Premio repartido' : ''}
                           </span>
                         )}
 

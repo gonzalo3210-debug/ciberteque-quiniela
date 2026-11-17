@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { marcarEmpates } from '@/lib/empates';
 
 export default function RankingPublico() {
   const [cargando, setCargando] = useState(true);
@@ -31,7 +32,7 @@ export default function RankingPublico() {
     try {
       const { data: quinielas, error } = await supabase
         .from('quinielas')
-        .select('id, nombre_jornada, modalidad, estado, goles_totales_real, fecha_cierre')
+        .select('id, nombre_jornada, modalidad, estado, goles_totales_real, fecha_cierre, tipo_premiacion')
         .order('fecha_cierre', { ascending: false })
         .limit(10);
 
@@ -151,7 +152,9 @@ export default function RankingPublico() {
             golesTotales: gt,
             golesDiff: diff,
             estaEliminado: pt < 0,
-            fechaCreacion: new Date(t.fecha_creacion || 0).getTime()
+            fechaCreacion: new Date(t.fecha_creacion || 0).getTime(),
+            lugar_compartido: false,
+            premio_repartido: false
           };
         }).sort((a, b) => {
           // 2️⃣ SEGUNDO: Reglas de Ordenamiento
@@ -195,6 +198,18 @@ export default function RankingPublico() {
             }
             rankingCalculado[i].posicion = posicionActual;
           }
+        }
+
+        // 4️⃣ CUARTO: Marcar lugares compartidos y premios repartidos
+        // con la misma verdad de la liquidación (src/lib/empates.ts).
+        // En fase de registro o en sorteo no aplica.
+        if (quiniela.modalidad !== 'sorteo' && !esFaseRegistro) {
+          const marcas = marcarEmpates(rankingCalculado, quiniela.tipo_premiacion);
+          rankingCalculado.forEach((j) => {
+            const marca = marcas.get(j.id);
+            j.lugar_compartido = Boolean(marca?.compartido);
+            j.premio_repartido = Boolean(marca?.premioRepartido);
+          });
         }
 
         setRanking(rankingCalculado);
@@ -381,6 +396,15 @@ export default function RankingPublico() {
         </div>
       </div>
 
+      {/* ⚖️ AVISO DE EMPATES (la regla que aplica la liquidación) */}
+      {quinielaActiva.modalidad !== 'sorteo' && (
+        <div className="max-w-2xl mx-auto px-3 mt-3">
+          <div className="text-center border border-slate-700/60 bg-slate-900/60 text-slate-400 text-[9px] md:text-[10px] px-3 py-2 rounded-lg font-bold uppercase tracking-widest leading-relaxed">
+            ⚖️ Si dos o más jugadores empatan en <span className="text-slate-200">puntos</span> y en el <span className="text-slate-200">desempate de goles</span>, comparten el lugar y el premio se reparte entre ellos 🤝
+          </div>
+        </div>
+      )}
+
       {/* 📊 TABLA DE POSICIONES */}
       <div className="max-w-2xl mx-auto px-3 mt-3 space-y-2">
         {rankingMostrado.length === 0 ? (
@@ -439,6 +463,12 @@ export default function RankingPublico() {
                       )}
                     </p>
                   ) : null}
+
+                  {jugador.lugar_compartido && (
+                    <p className="text-[8px] md:text-[9px] font-black text-sky-400 uppercase tracking-widest mt-0.5">
+                      🤝 Lugar compartido{jugador.premio_repartido ? ' · Premio repartido' : ''}
+                    </p>
+                  )}
 
                   {jugador.estaEliminado && (
                     <p className="text-[8px] font-black text-red-500 uppercase tracking-widest mt-0.5">💀 Eliminado</p>
