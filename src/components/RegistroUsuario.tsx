@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { extraerNacionalMX, telefonoCanonicoMX, formasGuardadasMX, esMismoNumeroMX } from '@/lib/telefono'
+import { leerCodigoReferido, limpiarCodigoReferido, esErrorColumnaInexistente, COLUMNA_REFERIDO } from '@/lib/invitaciones'
 
 export default function RegistroUsuario({ onVolverAlLogin }: { onVolverAlLogin?: () => void }) {
   const [nombre, setNombre] = useState('')
@@ -96,15 +97,32 @@ export default function RegistroUsuario({ onVolverAlLogin }: { onVolverAlLogin?:
       }
 
       const nipEncriptado = await encriptarNIP(nip, telefonoFinal)
-      const { error } = await supabase
+
+      // 📣 Atribución de invitación: si el visitante llegó con el
+      // enlace de un jugador, la landing dejó su código en
+      // localStorage. Se intenta guardar en usuarios.referido_por;
+      // si la migración aún no se corre (columna inexistente), el
+      // registro se reintenta SIN el campo: la atribución se pierde,
+      // pero el registro jamás se rompe por esto.
+      const nuevoUsuario: Record<string, unknown> = {
+        nombre: nombre.trim(),
+        telefono: telefonoFinal,
+        nip: nipEncriptado,
+        rol: 'jugador',
+        creditos_disponibles: 0
+      }
+      const codigoReferido = leerCodigoReferido()
+      if (codigoReferido) nuevoUsuario[COLUMNA_REFERIDO] = codigoReferido
+
+      let { error } = await supabase
         .from('usuarios')
-        .insert([{ 
-          nombre: nombre.trim(), 
-          telefono: telefonoFinal, 
-          nip: nipEncriptado, 
-          rol: 'jugador', 
-          creditos_disponibles: 0 
-        }])
+        .insert([nuevoUsuario])
+
+      if (error && codigoReferido && esErrorColumnaInexistente(error, COLUMNA_REFERIDO)) {
+        delete nuevoUsuario[COLUMNA_REFERIDO]
+        const reintento = await supabase.from('usuarios').insert([nuevoUsuario])
+        error = reintento.error
+      }
 
       if (error) {
         if (error.code === '23505') {
@@ -113,6 +131,7 @@ export default function RegistroUsuario({ onVolverAlLogin }: { onVolverAlLogin?:
           setMensaje('Error: ' + error.message)
         }
       } else {
+        limpiarCodigoReferido()
         setRegistroExitoso(true)
         setMensaje('¡Registro exitoso! Redirigiendo...')
         setTimeout(() => {

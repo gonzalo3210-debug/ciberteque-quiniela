@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { toPng } from 'html-to-image'
 import AjustesNotificaciones from '@/components/AjustesNotificaciones'
 import VitrinaInsignias from '@/components/VitrinaInsignias'
+import TarjetaInvitacion from '@/components/TarjetaInvitacion'
 
 const SelectorConLogo = ({ label, opciones, valorActual, onChange, placeholder }: any) => {
   const [abierto, setAbierto] = useState(false)
@@ -601,6 +602,9 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
 
       {/* 🏅 INSIGNIAS Y RACHA */}
       <VitrinaInsignias usuarioId={usuarioActivo?.id} />
+
+      {/* 📣 INVITA A TUS AMIGOS */}
+      <TarjetaInvitacion usuarioActivo={usuarioActivo} />
 
       {/* 🏷️ MODAL: DETALLE DEL TICKET */}
       {ticketModal && (
