@@ -146,3 +146,43 @@ export interface DeporteConLigas {
   nombreES: string;
   ligas: (LeagueCatalogEntry & { curada: boolean })[];
 }
+
+// ---------- Higiene y orden del catálogo (explorador 🌎 Ligas) ------
+
+/**
+ * El catálogo del proveedor trae pseudo-ligas INTERNAS cuyos nombres
+ * empiezan con "_" ("_Defunct Soccer Teams", "_No League",
+ * "_No League Soccer"...): no son ligas de verdad y ensucian la
+ * lista y los conteos por deporte del explorador. Se detectan por
+ * ese prefijo.
+ */
+export function esNombreLigaInterna(nombre: string): boolean {
+  return nombre.trimStart().startsWith('_');
+}
+
+/** Quita las pseudo-ligas internas de una lista del catálogo. */
+export function filtrarLigasVisibles<T extends { name: string }>(
+  ligas: T[]
+): T[] {
+  return ligas.filter((l) => !esNombreLigaInterna(l.name));
+}
+
+/**
+ * Orden del explorador con las ligas FAVORITAS del jugador primero:
+ * partición estable — las favoritas conservan su orden relativo de
+ * entrada (el del catálogo: curadas primero, luego A-Z) y el resto
+ * queda detrás, también en su orden de entrada.
+ */
+export function ordenarConFavoritas<T extends { providerId: string }>(
+  ligas: T[],
+  favoritas: readonly string[]
+): T[] {
+  if (favoritas.length === 0) return [...ligas];
+  const set = new Set(favoritas);
+  const primero: T[] = [];
+  const resto: T[] = [];
+  for (const l of ligas) {
+    (set.has(l.providerId) ? primero : resto).push(l);
+  }
+  return [...primero, ...resto];
+}

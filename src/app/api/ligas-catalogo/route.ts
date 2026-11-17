@@ -24,6 +24,7 @@ import { NextResponse } from 'next/server';
 import { getSportsProvider, SUPPORTED_LEAGUES } from '@/lib/sports';
 import {
   nombreDeporteES,
+  filtrarLigasVisibles,
   type DeporteConLigas,
   type LigaDinamica,
 } from '@/lib/sports/catalogo';
@@ -39,7 +40,10 @@ async function catalogoAgrupado(): Promise<DeporteConLigas[]> {
     return cacheCatalogo.sports;
   }
   const provider = getSportsProvider();
-  const entradas = await provider.getLeagueCatalog();
+  // Fuera las pseudo-ligas internas del proveedor ("_Defunct Soccer
+  // Teams", "_No League"...): no son ligas y ensucian la lista del
+  // explorador y sus conteos por deporte (v20).
+  const entradas = filtrarLigasVisibles(await provider.getLeagueCatalog());
   const curadas = new Set(SUPPORTED_LEAGUES.map((l) => l.providerId));
 
   const porDeporte = new Map<string, DeporteConLigas['ligas']>();
