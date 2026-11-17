@@ -1,6 +1,7 @@
 // src/hooks/useCreadorJornadas.ts
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { construirPayloadJornada } from '@/lib/crearJornadaPayload';
 import toast from 'react-hot-toast';
 
 export interface PartidoInput {
@@ -185,43 +186,25 @@ export function useCreadorJornadas() {
     
     setCreando(true);
     try {
-      // ⚡ INGENIERÍA: Conversión estricta de la hora local a UTC antes de tocar la BD
-      const fechaCierreUTC = new Date(fechaCierre).toISOString();
+      // El payload se arma con el constructor puro compartido
+      // (src/lib/crearJornadaPayload.ts): la conversión de la hora
+      // local a UTC, el orden de partidos y las reglas por modalidad
+      // viven ahí, idénticas para el formulario clásico y el
+      // asistente gráfico.
+      const payload = construirPayloadJornada({
+        nombreJornada, precioTicket, fechaCierre, tipoPremiacion,
+        modalidad, soloAdmins, equiposSorteo, partidosNuevos
+      });
 
       // 1. Insertar Quiniela
-      const { data: q, error: qErr } = await supabase.from('quinielas').insert([{ 
-        nombre_jornada: nombreJornada, 
-        precio_ticket: parseInt(precioTicket), 
-        fecha_cierre: fechaCierreUTC, 
-        tipo_premiacion: tipoPremiacion, 
-        estado: 'abierta',
-        modalidad: modalidad, 
-        solo_admins: soloAdmins,
-        equipos_sorteo: modalidad === 'sorteo' ? equiposSorteo : [] 
-      }]).select().single();
+      const { data: q, error: qErr } = await supabase.from('quinielas').insert([payload.quiniela]).select().single();
       
       if (qErr) throw qErr;
       
-      // 2. Ordenar y preparar partidos
+      // 2. Insertar Partidos (en sorteo el payload no trae partidos)
       if (modalidad !== 'sorteo') {
-        const partidosOrdenados = [...partidosNuevos].sort((a, b) => {
-          if (a.fecha_hora && b.fecha_hora) return new Date(a.fecha_hora).getTime() - new Date(b.fecha_hora).getTime();
-          if (a.fecha_hora && !b.fecha_hora) return -1;
-          if (!a.fecha_hora && b.fecha_hora) return 1;
-          return 0;
-        });
-
-        const partidosData = partidosOrdenados.map(p => ({
-          quiniela_id: q.id,
-          equipo_local: p.local,
-          equipo_visitante: p.visitante,
-          fecha_hora_partido: p.fecha_hora ? new Date(p.fecha_hora).toISOString() : null,
-          // Solo los partidos importados desde la API traen enlace; los
-          // tecleados a mano quedan en null, como siempre.
-          api_fixture_id: p.api_fixture_id ?? null
-        }));
+        const partidosData = payload.partidos.map(p => ({ quiniela_id: q.id, ...p }));
         
-        // 3. Insertar Partidos
         const { error: pErr } = await supabase.from('partidos').insert(partidosData);
         if (pErr) throw pErr;
       }
