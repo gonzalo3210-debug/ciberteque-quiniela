@@ -1823,6 +1823,9 @@ export default function SeccionPartidos() {
         <ExploradorLigas
           onVerLiga={verLigaUniversal}
           abriendoId={abriendoLigaId}
+          favoritos={favoritos}
+          onToggleLiga={toggleLiga}
+          onVerEquipo={verEquipo}
         />
       )}
 
