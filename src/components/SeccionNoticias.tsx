@@ -17,6 +17,10 @@
 // Todos · 🎯 Quiniela · ⚽ Equipos · 📰 Deportes. La clasificación la
 // hace el servidor (la ruta marca cada titular con su categoría), así
 // que cambiar de chip filtra al momento, sin volver a pedir nada.
+// El chip ⚡ Minuto a minuto (2026-11-17) es aparte: no mezcla
+// titulares, lista los eventos importantes (goles, penales y
+// expulsiones) de los partidos de la quiniela activa, del más
+// reciente al más viejo, desde la línea de tiempo del proveedor.
 //
 // Si la fuente externa falla, el feed muestra solo las del club.
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
@@ -30,6 +34,11 @@ import {
 } from '@/lib/noticiasClub'
 import { useJornadaActual } from '@/hooks/useJornadaActual'
 import { leerFavoritos } from '@/lib/favoritos'
+import {
+  emparejarPartidosJornada,
+  ventanaDeJornada,
+} from '@/lib/emparejar'
+import type { SportsFixture } from '@/lib/sports/types'
 import { nombreEquipoES } from '@/lib/sports/nombresES'
 import {
   fechaCortaEnMazatlan,
@@ -46,14 +55,121 @@ interface NoticiaExterna {
   categoria: 'equipos' | 'deportes'
 }
 
-type ChipNoticias = 'todos' | 'quiniela' | 'equipos' | 'deportes'
+type ChipNoticias = 'todos' | 'quiniela' | 'equipos' | 'deportes' | 'minuto'
 
 const CHIPS: { id: ChipNoticias; etiqueta: string }[] = [
   { id: 'todos', etiqueta: 'Todos' },
   { id: 'quiniela', etiqueta: '🎯 Quiniela' },
   { id: 'equipos', etiqueta: '⚽ Equipos' },
   { id: 'deportes', etiqueta: '📰 Deportes' },
+  { id: 'minuto', etiqueta: '⚡ Minuto a minuto' },
 ]
+
+// ── ⚡ Minuto a minuto ──────────────────────────────────────────────
+// Eventos importantes de los partidos de la quiniela activa, desde la
+// línea de tiempo del proveedor (/api/eventos-partido). Solo entran
+// goles, penales y expulsiones: las amarillas y los cambios se quedan
+// fuera a propósito (demasiado ruido para un feed de noticias). La
+// línea se lee fresca en cada carga, así que un gol anulado por el
+// VAR desaparece solo, igual que el marcador se corrige solo.
+
+/** Evento ya clasificado, tal como lo devuelve /api/eventos-partido. */
+interface EventoPartido {
+  minute: number | null
+  minuteLabel: string
+  type: string
+  player: string | null
+  assist: string | null
+  teamName: string | null
+  side: 'home' | 'away' | null
+  comment: string | null
+  marcadorTrasGol: { local: number; visita: number } | null
+}
+
+const TIPOS_MINUTO = new Set([
+  'gol',
+  'gol_penal',
+  'autogol',
+  'penal_fallado',
+  'roja',
+  'gol_anulado',
+])
+
+const ICONO_MINUTO: Record<string, string> = {
+  gol: '⚽',
+  gol_penal: '🥅',
+  autogol: '⚽',
+  penal_fallado: '🧤',
+  roja: '🟥',
+  gol_anulado: '🚫',
+}
+
+/** Un evento importante listo para pintarse como tarjeta del feed. */
+interface EventoMinuto {
+  id: string
+  icono: string
+  titulo: string
+  detalle: string
+  minutoLabel: string
+  /** Instante aproximado (inicio del partido + minuto) para ordenar. */
+  orden: number
+}
+
+/** Convierte la respuesta de la ruta en tarjetas, de la más reciente
+ *  a la más vieja. */
+function eventosMinutoDesdeRespuesta(matches: any[]): EventoMinuto[] {
+  const items: EventoMinuto[] = []
+  for (const m of matches || []) {
+    const f: SportsFixture = m.fixture
+    if (!f) continue
+    const localES = nombreEquipoES(f.homeTeam, f.homeTeamProviderId)
+    const visitaES = nombreEquipoES(f.awayTeam, f.awayTeamProviderId)
+    const marcadorActual =
+      f.homeScore !== null && f.awayScore !== null
+        ? `${f.homeScore} - ${f.awayScore}`
+        : 'vs'
+    const lineaPartido = `${localES} ${marcadorActual} ${visitaES}`
+    const inicio = f.kickoffUtc ? Date.parse(f.kickoffUtc) : 0
+    ;(m.eventos || []).forEach((e: EventoPartido, idx: number) => {
+      if (!TIPOS_MINUTO.has(e.type)) return
+      const jugador = e.player || 'Un jugador'
+      const trasGol = e.marcadorTrasGol
+        ? `${localES} ${e.marcadorTrasGol.local} - ${e.marcadorTrasGol.visita} ${visitaES} tras el gol`
+        : lineaPartido
+      let titulo = ''
+      let detalle = lineaPartido
+      if (e.type === 'gol') {
+        titulo = `¡Gol de ${jugador}!`
+        detalle = e.assist
+          ? `${trasGol} · Asistencia de ${e.assist}`
+          : trasGol
+      } else if (e.type === 'gol_penal') {
+        titulo = `¡Gol de penal de ${jugador}!`
+        detalle = trasGol
+      } else if (e.type === 'autogol') {
+        titulo = `Autogol de ${jugador}`
+        detalle = trasGol
+      } else if (e.type === 'penal_fallado') {
+        titulo = `Penal fallado por ${jugador}`
+      } else if (e.type === 'roja') {
+        titulo = `Expulsión de ${jugador}`
+        if (e.comment) detalle = `${lineaPartido} · Motivo: ${e.comment}`
+      } else if (e.type === 'gol_anulado') {
+        titulo = `Gol anulado por el VAR a ${jugador}`
+      }
+      items.push({
+        id: `${f.providerId}-${idx}-${e.type}-${e.minuteLabel}-${e.player || ''}`,
+        icono: ICONO_MINUTO[e.type] || '⚡',
+        titulo,
+        detalle,
+        minutoLabel: e.minuteLabel || (e.minute !== null ? `${e.minute}` : ''),
+        orden: inicio + (e.minute ?? 0) * 60_000,
+      })
+    })
+  }
+  items.sort((a, b) => b.orden - a.orden)
+  return items
+}
 
 type ItemFeed =
   | { tipo: 'club'; fechaISO: string; club: NoticiaClub }
@@ -86,6 +202,7 @@ export default function SeccionNoticias() {
   const [externas, setExternas] = useState<NoticiaExterna[] | null>(null)
   const [externasFallaron, setExternasFallaron] = useState(false)
   const [chip, setChip] = useState<ChipNoticias>('todos')
+  const [minuto, setMinuto] = useState<EventoMinuto[] | null>(null)
 
   const { seleccionada } = useJornadaActual()
 
@@ -152,6 +269,85 @@ export default function SeccionNoticias() {
     return () => clearInterval(id)
   }, [cargarExternas])
 
+  // ⚡ Minuto a minuto: los partidos de la quiniela activa se enlazan
+  // por su api_fixture_id; los que no lo traen (jornadas hechas a
+  // mano) se emparejan con los fixtures de la API por equipos y fecha,
+  // como hace la pestaña 🎯 Quiniela. Sin enlace no hay eventos: ese
+  // partido simplemente no aporta al feed.
+  const partidosJornada = useMemo(
+    () => seleccionada?.partidos || [],
+    [seleccionada]
+  )
+  const firmaPartidos = useMemo(
+    () =>
+      partidosJornada
+        .map((p: any) => `${p.id}:${p.api_fixture_id || ''}`)
+        .join(';'),
+    [partidosJornada]
+  )
+
+  const cargarMinuto = useCallback(async () => {
+    try {
+      if (partidosJornada.length === 0) {
+        setMinuto([])
+        return
+      }
+      const idsPorPartido = new Map<string, string>()
+      for (const p of partidosJornada as any[]) {
+        if (p.api_fixture_id) idsPorPartido.set(p.id, String(p.api_fixture_id))
+      }
+      if (idsPorPartido.size < partidosJornada.length) {
+        const ventana = ventanaDeJornada(partidosJornada)
+        if (ventana) {
+          try {
+            const res = await fetch(
+              `/api/partidos?desde=${ventana.desde}&hasta=${ventana.hasta}`
+            )
+            const data = await res.json()
+            if (res.ok) {
+              const todos: SportsFixture[] = []
+              for (const g of data.groups || []) {
+                todos.push(...(g.fixtures || []))
+              }
+              const parejas = emparejarPartidosJornada(partidosJornada, todos)
+              for (const [partidoId, fixture] of parejas) {
+                if (!idsPorPartido.has(partidoId)) {
+                  idsPorPartido.set(partidoId, fixture.providerId)
+                }
+              }
+            }
+          } catch {
+            // Sin emparejar: van solo los que traen enlace directo.
+          }
+        }
+      }
+      const fixtureIds = [...new Set(idsPorPartido.values())].slice(0, 12)
+      if (fixtureIds.length === 0) {
+        setMinuto([])
+        return
+      }
+      const res = await fetch(
+        `/api/eventos-partido?fixtures=${fixtureIds.join(',')}`
+      )
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error || 'Error')
+      setMinuto(eventosMinutoDesdeRespuesta(data.matches || []))
+    } catch {
+      // Sin eventos por ahora: se conserva lo último que se vio.
+      setMinuto((prev) => prev ?? [])
+    }
+    // firmaPartidos resume los partidos y sus enlaces; partidosJornada
+    // cambia de identidad en cada refresco del hook y no debe
+    // disparar cargas extra por sí solo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firmaPartidos])
+
+  useEffect(() => {
+    cargarMinuto()
+    const id = setInterval(cargarMinuto, REFRESCO_MS)
+    return () => clearInterval(id)
+  }, [cargarMinuto])
+
   const feed = useMemo<ItemFeed[]>(() => {
     const items: ItemFeed[] = []
     // Chip 🎯 Quiniela: SOLO las del club. Chip Todos: todo mezclado.
@@ -216,7 +412,57 @@ export default function SeccionNoticias() {
         ))}
       </div>
 
-      {!delClub && !errorClub ? (
+      {chip === 'minuto' ? (
+        minuto === null ? (
+          <div className="text-cyan-400 font-bold animate-pulse py-20">
+            Cargando el minuto a minuto...
+          </div>
+        ) : minuto.length === 0 ? (
+          <div className="w-full bg-slate-900/80 border border-slate-800 rounded-2xl p-8 text-center">
+            <p className="text-4xl mb-3">⚡</p>
+            <p className="text-slate-300 font-bold">
+              Todavía no hay eventos importantes de los partidos de la
+              quiniela. Cuando caiga un gol, un penal o una expulsión,
+              aquí aparecen conforme pasan.
+            </p>
+          </div>
+        ) : (
+          <div className="w-full flex flex-col gap-3">
+            {minuto.map((ev) => (
+              <article
+                key={ev.id}
+                className="w-full bg-slate-900/80 border border-slate-800/60 border-l-4 border-l-amber-500 rounded-2xl px-4 py-3.5 flex gap-3"
+              >
+                <span className="text-2xl leading-none shrink-0">
+                  {ev.icono}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2 py-0.5 rounded-full bg-amber-600/20 border border-amber-500/40 text-amber-300 text-[9px] font-black uppercase tracking-widest">
+                      ⚡ Minuto a minuto
+                    </span>
+                    {ev.minutoLabel && (
+                      <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-200 text-[10px] font-black">
+                        {ev.minutoLabel}&prime;
+                      </span>
+                    )}
+                  </div>
+                  <p className="font-bold text-white text-sm mt-1.5 leading-snug">
+                    {ev.titulo}
+                  </p>
+                  <p className="text-slate-400 text-xs font-medium mt-0.5">
+                    {ev.detalle}
+                  </p>
+                </div>
+              </article>
+            ))}
+            <p className="text-center text-slate-500 text-xs font-medium pt-1">
+              Solo goles, penales y expulsiones de los partidos de la
+              quiniela, conforme los registra el proveedor.
+            </p>
+          </div>
+        )
+      ) : !delClub && !errorClub ? (
         <div className="text-cyan-400 font-bold animate-pulse py-20">
           Cargando noticias...
         </div>

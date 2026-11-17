@@ -88,6 +88,69 @@ export interface GetFixturesOptions {
 export type TeamLogoMap = Record<string, string>;
 
 /**
+ * Tipo de evento de la línea de tiempo de un partido, YA clasificado
+ * por el adaptador desde los códigos crudos del proveedor (en
+ * TheSportsDB: strTimeline + strTimelineDetail, verificado contra la
+ * API real el 2026-11-17 con partidos de Liga MX y Premier League):
+ *   Goal / Normal Goal    -> 'gol'
+ *   Goal / Penalty        -> 'gol_penal'   (penal cobrado)
+ *   Goal / Own Goal       -> 'autogol'     (se acredita al equipo que
+ *                                           RECIBE el gol: el evento
+ *                                           trae el equipo beneficiado,
+ *                                           no el del jugador)
+ *   Goal / Missed Penalty -> 'penal_fallado'
+ *   Card / Red Card       -> 'roja'
+ *   Card / Yellow Card    -> 'amarilla'
+ *   subst                 -> 'cambio'
+ *   Var / Goal cancelled  -> 'gol_anulado' (el gol ya NO aparece como
+ *                                           Goal en la línea: por eso
+ *                                           el marcador derivado y el
+ *                                           feed se corrigen solos)
+ *   Var / otros, resto    -> 'otro'
+ */
+export type FixtureEventType =
+  | 'gol'
+  | 'gol_penal'
+  | 'autogol'
+  | 'penal_fallado'
+  | 'roja'
+  | 'amarilla'
+  | 'cambio'
+  | 'gol_anulado'
+  | 'otro';
+
+/** Un evento de la línea de tiempo de un partido, ya normalizado. */
+export interface FixtureEvent {
+  /** Minuto numérico (de "45+2" se toma 45); null si no se pudo leer. */
+  minute: number | null;
+  /** Minuto tal como lo da el proveedor ("45+2"), para mostrar. */
+  minuteLabel: string;
+  type: FixtureEventType;
+  /** Jugador del evento (autor del gol, expulsado...), si viene. */
+  player: string | null;
+  /** Asistencia en los goles, si el proveedor la trae. */
+  assist: string | null;
+  /**
+   * Equipo al que se ACREDITA el evento (en goles y autogoles, el que
+   * suma el tanto), con el nombre del proveedor.
+   */
+  teamName: string | null;
+  /** Lado del equipo acreditado: local o visita. */
+  side: 'home' | 'away' | null;
+  /** Motivo textual (p. ej. en tarjetas), limpio; null si no hay. */
+  comment: string | null;
+  /** Detalle crudo del proveedor (strTimelineDetail), por si acaso. */
+  detailRaw: string | null;
+}
+
+/** Línea de tiempo completa de un partido: su ficha + sus eventos. */
+export interface FixtureEventsResult {
+  fixture: SportsFixture;
+  /** Eventos en orden cronológico ascendente. */
+  events: FixtureEvent[];
+}
+
+/**
  * Detalle de UN equipo (para el Resumen de su página): lo que el
  * proveedor trae en la ficha del club además del escudo.
  */

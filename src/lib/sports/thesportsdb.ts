@@ -18,6 +18,8 @@
 //   tabla de posiciones:    lookuptable.php?l={liga}&s={temporada}
 //   equipos de la liga:     search_all_teams.php?l={nombre oficial}
 //   en vivo (v2, premium):  api/v2/json/livescore/soccer (llave en header)
+//   línea de tiempo:        lookupevent.php?id={evento} +
+//                           lookuptimeline.php?id={evento}
 // OJO: lookuptable devuelve el cuerpo VACÍO (200, 0 bytes) para torneos de
 // grupos/copa (Champions, Nations League, Libertadores): getStandings lo
 // trata como "sin tabla" y devuelve []. La cuenta es PREMIUM (Single
@@ -27,6 +29,9 @@ import type { SportsProvider } from './provider';
 import { getSupportedLeague, CHAMPIONS_PROVIDER_ID } from './leagues';
 import { getFootballDataChampionsStandings } from './footballData';
 import type {
+  FixtureEvent,
+  FixtureEventType,
+  FixtureEventsResult,
   GetFixturesOptions,
   SportsFixture,
   SportsTeam,
@@ -161,6 +166,29 @@ interface TsdbTeamDetail extends TsdbTeam {
   // v1 y v2, la llave ni siquiera viene en la respuesta). Se declara
   // por si el proveedor lo empieza a publicar: se lee defensivo.
   strManager?: string;
+}
+
+/**
+ * Evento crudo de la línea de tiempo (lookuptimeline.php). Forma
+ * verificada contra la API real (2026-11-17, Liga MX y Premier):
+ * strTimeline ∈ {Goal, Card, subst, Var}; strTimelineDetail precisa
+ * (Normal Goal, Penalty, Missed Penalty, Own Goal, Yellow Card,
+ * Red Card, Goal cancelled, ...); strHome = "Yes"/"No" dice de qué
+ * lado es el equipo ACREDITADO (strTeam); en los autogoles el equipo
+ * acreditado es el que RECIBE el gol, no el del jugador (verificado:
+ * el autogol de Daniel Parra, jugador de Querétaro, vino acreditado
+ * a Atlético de San Luis y sumó para San Luis).
+ */
+interface TsdbTimelineEvent {
+  intTime?: string;
+  strTimeline?: string;
+  strTimelineDetail?: string;
+  strPlayer?: string;
+  strAssist?: string;
+  strComment?: string;
+  strHome?: string;
+  strTeam?: string;
+  idTeam?: string;
 }
 
 interface TsdbStanding {
@@ -305,6 +333,66 @@ function mapTeam(raw: TsdbTeam): SportsTeam {
     name: raw.strTeam,
     shortName: raw.strTeamShort || null,
     badgeUrl: raw.strBadge || raw.strTeamBadge || null,
+  };
+}
+
+/** Texto del proveedor que en realidad significa "sin dato". */
+function textoUtil(v: string | undefined): string | null {
+  const t = (v || '').trim();
+  if (!t || t.toUpperCase() === 'NULL') return null;
+  return t;
+}
+
+/**
+ * Clasifica un evento crudo de la línea de tiempo. La tabla de
+ * equivalencias está en types.ts (FixtureEventType) y salió de
+ * payloads reales, no de adivinar: ojo que el penal FALLADO también
+ * viene con strTimeline "Goal" (su detalle es "Missed Penalty") y
+ * que el gol anulado por el VAR no trae entrada "Goal": solo la
+ * entrada Var/"Goal cancelled".
+ */
+function clasificarEventoTimeline(raw: TsdbTimelineEvent): FixtureEventType {
+  const tipo = (raw.strTimeline || '').trim();
+  const detalle = (raw.strTimelineDetail || '').trim();
+  if (tipo === 'Goal') {
+    if (detalle === 'Penalty') return 'gol_penal';
+    if (detalle === 'Missed Penalty') return 'penal_fallado';
+    if (detalle === 'Own Goal') return 'autogol';
+    return 'gol';
+  }
+  if (tipo === 'Card') {
+    return detalle.toLowerCase().includes('red') ? 'roja' : 'amarilla';
+  }
+  if (tipo === 'subst') return 'cambio';
+  if (tipo === 'Var') {
+    return detalle === 'Goal cancelled' ? 'gol_anulado' : 'otro';
+  }
+  return 'otro';
+}
+
+function mapTimelineEvent(
+  raw: TsdbTimelineEvent,
+  evento: TsdbEvent
+): FixtureEvent {
+  const etiqueta = (raw.intTime || '').trim();
+  const minutoNum = Number.parseInt(etiqueta, 10);
+  // Lado del equipo acreditado: strHome manda; si no viniera, se
+  // deduce comparando idTeam contra los equipos del partido.
+  let side: 'home' | 'away' | null = null;
+  if (raw.strHome === 'Yes') side = 'home';
+  else if (raw.strHome === 'No') side = 'away';
+  else if (raw.idTeam && raw.idTeam === evento.idHomeTeam) side = 'home';
+  else if (raw.idTeam && raw.idTeam === evento.idAwayTeam) side = 'away';
+  return {
+    minute: Number.isFinite(minutoNum) ? minutoNum : null,
+    minuteLabel: etiqueta,
+    type: clasificarEventoTimeline(raw),
+    player: textoUtil(raw.strPlayer),
+    assist: textoUtil(raw.strAssist),
+    teamName: textoUtil(raw.strTeam),
+    side,
+    comment: textoUtil(raw.strComment),
+    detailRaw: textoUtil(raw.strTimelineDetail),
   };
 }
 
@@ -467,6 +555,38 @@ async function getLiveScores(): Promise<SportsFixture[]> {
   return (data?.livescore ?? []).map(mapLiveScore);
 }
 
+/**
+ * Línea de tiempo de un partido (lookupevent + lookuptimeline en
+ * paralelo). La ficha se cachea 2 min y la línea solo 60 s: el feed
+ * "minuto a minuto" se refresca con la vista (cada 2 min) y así un
+ * gol anulado por el VAR deja de aparecer en cuanto el proveedor
+ * corrige su línea, igual que pasa con el marcador.
+ * Si el partido no existe en el proveedor, null; si existe pero su
+ * línea viene vacía (pasa en partidos viejos o de ligas chicas), se
+ * devuelve la ficha con events: [].
+ */
+async function getFixtureEvents(
+  fixtureProviderId: string
+): Promise<FixtureEventsResult | null> {
+  const id = encodeURIComponent(fixtureProviderId);
+  const [eventoData, timelineData] = await Promise.all([
+    tsdbFetch<{ events: TsdbEvent[] | null }>(`lookupevent.php?id=${id}`, 120),
+    tsdbFetch<{ timeline: TsdbTimelineEvent[] | null }>(
+      `lookuptimeline.php?id=${id}`,
+      60
+    ),
+  ]);
+  const raw = eventoData?.events?.[0];
+  if (!raw) return null;
+  const fixture = mapEvent(raw, raw.idLeague || '');
+  const events = (timelineData?.timeline ?? [])
+    .map((t) => mapTimelineEvent(t, raw))
+    // Cronológico ascendente; el sort es estable, así que los eventos
+    // del mismo minuto conservan el orden en que los da el proveedor.
+    .sort((a, b) => (a.minute ?? 0) - (b.minute ?? 0));
+  return { fixture, events };
+}
+
 export const theSportsDbProvider: SportsProvider = {
   name: 'thesportsdb',
   getFixtures,
@@ -476,4 +596,5 @@ export const theSportsDbProvider: SportsProvider = {
   getTeamDetail,
   getLeagueBadge,
   getLiveScores,
+  getFixtureEvents,
 };

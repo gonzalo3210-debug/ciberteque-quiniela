@@ -34,7 +34,7 @@ function rolDesdeSesion(): string | undefined {
 }
 
 const CAMPOS_PARTIDOS =
-  'id, equipo_local, equipo_visitante, fecha_hora_partido, resultado_real, goles_local, goles_visitante, es_final, canal'
+  'id, equipo_local, equipo_visitante, fecha_hora_partido, resultado_real, goles_local, goles_visitante, es_final, canal, api_fixture_id'
 
 function acomodar(quiniela: any): JornadaConPartidos {
   const partidos = [...(quiniela.partidos || [])].sort((a: any, b: any) => {

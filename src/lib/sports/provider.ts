@@ -11,6 +11,7 @@
 // Nada más se toca.
 
 import type {
+  FixtureEventsResult,
   GetFixturesOptions,
   SportsFixture,
   SportsTeam,
@@ -66,6 +67,18 @@ export interface SportsProvider {
    * equipo exista: TheSportsDB hoy no lo publica (ver types.ts).
    */
   getTeamDetail(teamProviderId: string): Promise<SportsTeamDetail | null>;
+
+  /**
+   * Línea de tiempo de UN partido (goles, tarjetas, cambios...), con
+   * los eventos YA clasificados a los tipos neutros de types.ts, más
+   * la ficha del partido (equipos, marcador y estado al momento).
+   * null si el proveedor no conoce el partido. Como la línea se lee
+   * tal cual en cada consulta, un gol anulado por el VAR desaparece
+   * solo del feed que la consume.
+   */
+  getFixtureEvents(
+    fixtureProviderId: string
+  ): Promise<FixtureEventsResult | null>;
 }
 
 import { theSportsDbProvider } from './thesportsdb';
