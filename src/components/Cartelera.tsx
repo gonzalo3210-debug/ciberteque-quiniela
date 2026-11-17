@@ -4,7 +4,11 @@ import { useCartelera } from '@/hooks/useCartelera'
 import { useCuentaRegresiva } from '@/hooks/useCuentaRegresiva' 
 import { useCeremoniaSorteo } from '@/hooks/useCeremoniaSorteo'
 import CeremoniaSorteo from '@/components/CeremoniaSorteo'
-import ModalReglas from '@/components/ModalReglas' 
+import ModalReglas from '@/components/ModalReglas'
+import {
+  segmentosProbabilidades,
+  type ProbabilidadesLEV,
+} from '@/lib/encuestaFormato'
 
 export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioActivo: any, actualizarSaldo: (nuevoSaldo: number) => void }) {
   const {
@@ -20,6 +24,48 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
   const ceremonia = useCeremoniaSorteo(quinielaActual)
 
   const { textoCuenta, esUrgente, yaCerro } = useCuentaRegresiva(quinielaActual?.fecha_cierre)
+
+  // 📊 Probabilidades de las casas por partido (v20): UNA sola
+  // llamada en lote para toda la jornada visible (POST /api/encuesta);
+  // el servidor pide cada deporte una vez y cachea 45 min, así que
+  // los créditos de The Odds API no se queman por partido. Partido
+  // sin cotización = sin línea: no se pinta nada en su renglón.
+  const [probs, setProbs] = useState<Record<string, ProbabilidadesLEV | null>>({})
+  const clavePartidos = partidos.map((p: any) => String(p.id)).join(',')
+  useEffect(() => {
+    if (esSorteo || partidos.length === 0) {
+      setProbs({})
+      return
+    }
+    let vivo = true
+    fetch('/api/encuesta', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        partidos: partidos.map((p: any) => ({
+          id: String(p.id),
+          local: p.equipo_local,
+          visitante: p.equipo_visitante,
+          fecha: p.fecha_hora_partido ?? null,
+        })),
+      }),
+    })
+      .then((r) => r.json())
+      .then((j) => {
+        if (!vivo) return
+        const mapa: Record<string, ProbabilidadesLEV | null> = {}
+        for (const [id, v] of Object.entries(j?.resultados || {})) {
+          mapa[id] = (v as { porcentajes?: ProbabilidadesLEV } | null)?.porcentajes ?? null
+        }
+        setProbs(mapa)
+      })
+      .catch(() => {})
+    return () => {
+      vivo = false
+    }
+    // Solo depende de la jornada visible y de su lista de partidos.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quinielaActual?.id, clavePartidos, esSorteo])
 
   const [mensajeUI, setMensajeUI] = useState({ tipo: '', texto: '' })
   const procesandoRef = useRef(false)
@@ -190,6 +236,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
             <div className="space-y-2 md:space-y-3">
               {partidos.map((partido) => {
                 const seleccion = selecciones[partido.id] || '';
+                const prob = probs[String(partido.id)] ?? null;
                 const logoL = obtenerLogo(partido.equipo_local);
                 const logoV = obtenerLogo(partido.equipo_visitante);
                 const fechaObj = formatearFechaObj(partido.fecha_hora_partido);
@@ -226,7 +273,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
                       </div>
                     </div>
 
-                    <div className="w-full md:w-[130px] shrink-0 mt-1 md:mt-0 flex justify-center">
+                    <div className="w-full md:w-[130px] shrink-0 mt-1 md:mt-0 flex flex-col items-center justify-center">
                       {esMarcadorExacto ? (
                         <div className="flex items-center justify-center gap-1.5 w-full relative">
                           <input
@@ -285,6 +332,23 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
                             >
                               {opc}
                             </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {prob && (
+                        <div
+                          className="mt-1.5 flex items-center justify-center gap-1 text-[10px] font-bold text-slate-400 whitespace-nowrap"
+                          title="Probabilidades según las casas de apuestas"
+                        >
+                          <span aria-hidden="true">📊</span>
+                          {segmentosProbabilidades(prob).map((s, i) => (
+                            <span key={s.clave} className="flex items-center gap-1">
+                              {i > 0 && <span className="text-slate-600">·</span>}
+                              <span className={s.esMayor ? 'text-cyan-300' : undefined}>
+                                {s.clave} {s.pct}%
+                              </span>
+                            </span>
                           ))}
                         </div>
                       )}

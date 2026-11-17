@@ -40,6 +40,30 @@ const DEPORTES_SIN_LIGA = [
   'soccer_uefa_champs_league',
 ];
 
+/**
+ * Deportes extra que SOLO se intentan en la consulta por jornada
+ * (encuestaJornada, la de la cartelera al JUGAR): el partido europeo
+ * atractivo de la fórmula del Club suele ser de Premier o de La Liga.
+ * Van AL FINAL de la lista: solo se pide un deporte si ningún partido
+ * se resolvió en los anteriores, y eventosDeporte cachea 45 minutos,
+ * así que el costo en créditos es el de siempre por deporte y ventana.
+ */
+const DEPORTES_EXTRA_LOTE = ['soccer_epl', 'soccer_spain_la_liga'];
+
+/** Deportes candidatos de un partido, en orden de intento. */
+function deportesCandidatos(
+  ligaProviderId: string | null,
+  conExtraLote: boolean
+): string[] {
+  if (ligaProviderId) {
+    const d = DEPORTE_POR_LIGA[ligaProviderId];
+    return d ? [d] : [];
+  }
+  return conExtraLote
+    ? [...DEPORTES_SIN_LIGA, ...DEPORTES_EXTRA_LOTE]
+    : DEPORTES_SIN_LIGA;
+}
+
 const CACHE_MS = 45 * 60 * 1000;
 const CACHE_ERROR_MS = 5 * 60 * 1000;
 const VENTANA_FECHA_MS = 2 * 24 * 60 * 60 * 1000;
@@ -126,6 +150,37 @@ export interface EncuestaPartido {
 }
 
 /**
+ * Busca el partido (local/visitante, cualquier orientación) entre los
+ * eventos YA traídos de un deporte. La ventana de fecha, si se pasa,
+ * descarta eventos pero no detiene la búsqueda en los demás.
+ */
+function buscarEnEventos(
+  local: string,
+  visitante: string,
+  eventos: OddsEvento[],
+  fechaMs: number
+): EncuestaPartido | null {
+  for (const ev of eventos) {
+    const directo =
+      mismoEquipoOdds(local, ev.home_team) &&
+      mismoEquipoOdds(visitante, ev.away_team);
+    const invertido =
+      !directo &&
+      mismoEquipoOdds(local, ev.away_team) &&
+      mismoEquipoOdds(visitante, ev.home_team);
+    if (!directo && !invertido) continue;
+    if (!isNaN(fechaMs)) {
+      const inicio = new Date(ev.commence_time).getTime();
+      if (!isNaN(inicio) && Math.abs(inicio - fechaMs) > VENTANA_FECHA_MS)
+        continue;
+    }
+    const p = porcentajesDeEvento(ev, invertido);
+    if (p) return { ...p, inicioUtc: ev.commence_time };
+  }
+  return null;
+}
+
+/**
  * Busca el partido (local/visitante, cualquier orientación) en las
  * cuotas de su liga y devuelve los porcentajes 1-X-2, o null si
  * ninguna casa lo cotiza (la vista simplemente no muestra encuesta).
@@ -136,34 +191,63 @@ export async function encuestaPartido(
   ligaProviderId: string | null,
   fechaIso: string | null
 ): Promise<EncuestaPartido | null> {
-  const deportes = ligaProviderId
-    ? DEPORTE_POR_LIGA[ligaProviderId]
-      ? [DEPORTE_POR_LIGA[ligaProviderId]]
-      : []
-    : DEPORTES_SIN_LIGA;
   const fechaMs = fechaIso ? new Date(fechaIso).getTime() : NaN;
 
-  for (const sportKey of deportes) {
+  for (const sportKey of deportesCandidatos(ligaProviderId, false)) {
     const eventos = await eventosDeporte(sportKey);
-    for (const ev of eventos) {
-      const directo =
-        mismoEquipoOdds(local, ev.home_team) &&
-        mismoEquipoOdds(visitante, ev.away_team);
-      const invertido =
-        !directo &&
-        mismoEquipoOdds(local, ev.away_team) &&
-        mismoEquipoOdds(visitante, ev.home_team);
-      if (!directo && !invertido) continue;
-      if (!isNaN(fechaMs)) {
-        const inicio = new Date(ev.commence_time).getTime();
-        if (!isNaN(inicio) && Math.abs(inicio - fechaMs) > VENTANA_FECHA_MS)
-          continue;
-      }
-      const p = porcentajesDeEvento(ev, invertido);
-      if (p) return { ...p, inicioUtc: ev.commence_time };
-    }
+    const r = buscarEnEventos(local, visitante, eventos, fechaMs);
+    if (r) return r;
   }
   return null;
+}
+
+/** Un partido de la jornada para resolver en lote. */
+export interface PartidoParaEncuesta {
+  local: string;
+  visitante: string;
+  ligaProviderId: string | null;
+  fechaIso: string | null;
+}
+
+/**
+ * Resuelve los porcentajes de TODA una jornada de una sola vez (la
+ * usa la cartelera al JUGAR para pintar la línea de % por partido).
+ * Cada deporte candidato se pide UNA vez para todos los partidos —
+ * y eventosDeporte además cachea 45 min — así que el costo en
+ * créditos de The Odds API es por deporte y ventana, no por partido.
+ * Devuelve un arreglo paralelo a la entrada (null = sin cotización).
+ */
+export async function encuestaJornada(
+  partidos: PartidoParaEncuesta[]
+): Promise<(EncuestaPartido | null)[]> {
+  const porDeporte = new Map<string, Promise<OddsEvento[]>>();
+  const eventosDe = (sportKey: string): Promise<OddsEvento[]> => {
+    let p = porDeporte.get(sportKey);
+    if (!p) {
+      p = eventosDeporte(sportKey);
+      porDeporte.set(sportKey, p);
+    }
+    return p;
+  };
+
+  return Promise.all(
+    partidos.map(async (partido) => {
+      const fechaMs = partido.fechaIso
+        ? new Date(partido.fechaIso).getTime()
+        : NaN;
+      for (const sportKey of deportesCandidatos(partido.ligaProviderId, true)) {
+        const eventos = await eventosDe(sportKey);
+        const r = buscarEnEventos(
+          partido.local,
+          partido.visitante,
+          eventos,
+          fechaMs
+        );
+        if (r) return r;
+      }
+      return null;
+    })
+  );
 }
 
 function porcentajesDeEvento(
