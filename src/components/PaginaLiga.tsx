@@ -25,6 +25,7 @@ import {
 } from '@/components/partidosUI'
 import { nombreEquipoES, normalizarNombreEquipo } from '@/lib/sports/nombresES'
 import { datosDeLiga } from '@/lib/sports/ligasDatos'
+import { deporteTieneEquipos } from '@/lib/sports/catalogo'
 import type { Favoritos } from '@/lib/favoritos'
 
 type SubVista = 'resumen' | 'partidos' | 'posiciones'
@@ -58,6 +59,7 @@ function escudoPorNombre(
 
 export default function PaginaLiga({
   liga,
+  sport,
   badgeUrl,
   favoritos,
   onToggleLiga,
@@ -66,6 +68,10 @@ export default function PaginaLiga({
   onVolver,
 }: {
   liga: SupportedLeague
+  /** Deporte de la liga (del proveedor). Las curadas son de fútbol;
+   *  en deportes sin equipos (Automovilismo, Tenis, MMA...) los
+   *  nombres de las filas NO se enlazan a páginas de equipo. */
+  sport?: string | null
   badgeUrl?: string | null
   favoritos: Favoritos
   onToggleLiga: (leagueProviderId: string) => void
@@ -80,6 +86,15 @@ export default function PaginaLiga({
 
   const seguida = favoritos.ligas.includes(liga.providerId)
   const datos = datosDeLiga(liga.providerId)
+  // ¿La liga maneja posiciones? Tabla oficial o calculada. Si el
+  // proveedor no trae tabla y no se puede calcular (p. ej. la NBA,
+  // cuyo lookuptable viene vacío), la pestaña Posiciones se OCULTA
+  // y la página queda en Resumen · Partidos.
+  const hayPosiciones = liga.hasStandings || !!liga.computedTable
+  // En deportes sin equipos no hay páginas de equipo que abrir.
+  const verEquipo: EquipoTocable | undefined = deporteTieneEquipos(sport)
+    ? onVerEquipo
+    : undefined
 
   const cargar = useCallback(async () => {
     try {
@@ -164,7 +179,7 @@ export default function PaginaLiga({
       ) : (
         <div>
           {(limite ? filas.slice(0, limite) : filas).map((f) => (
-            <FilaPartido key={f.providerId} f={f} onVerEquipo={onVerEquipo} onVerPartido={onVerPartido} />
+            <FilaPartido key={f.providerId} f={f} onVerEquipo={verEquipo} onVerPartido={onVerPartido} />
           ))}
         </div>
       )}
@@ -187,9 +202,11 @@ export default function PaginaLiga({
             <p className="font-black text-white text-base leading-tight truncate">
               {liga.name}
             </p>
-            <p className="text-slate-500 text-[11px] font-bold uppercase tracking-widest truncate">
-              Temporada {liga.season}
-            </p>
+            {liga.season && (
+              <p className="text-slate-500 text-[11px] font-bold uppercase tracking-widest truncate">
+                Temporada {liga.season}
+              </p>
+            )}
           </div>
         </div>
         <button
@@ -213,13 +230,15 @@ export default function PaginaLiga({
         <button onClick={() => setSub('partidos')} className={claseSub('partidos')}>
           Partidos
         </button>
-        <button onClick={() => setSub('posiciones')} className={claseSub('posiciones')}>
-          Posiciones
-        </button>
+        {hayPosiciones && (
+          <button onClick={() => setSub('posiciones')} className={claseSub('posiciones')}>
+            Posiciones
+          </button>
+        )}
       </div>
 
-      {sub === 'posiciones' ? (
-        <TablaLiga key={liga.providerId} liga={liga} onVerEquipo={onVerEquipo} />
+      {sub === 'posiciones' && hayPosiciones ? (
+        <TablaLiga key={liga.providerId} liga={liga} onVerEquipo={verEquipo} />
       ) : !fixtures && !error ? (
         <div className="text-cyan-400 font-bold animate-pulse py-20">
           Cargando {liga.name}...
@@ -296,7 +315,7 @@ export default function PaginaLiga({
                   ? '🔴 Partido en vivo'
                   : 'Partido destacado'}
               </div>
-              <FilaPartido f={destacado} onVerEquipo={onVerEquipo} onVerPartido={onVerPartido} />
+              <FilaPartido f={destacado} onVerEquipo={verEquipo} onVerPartido={onVerPartido} />
             </div>
           ) : (
             <div className="w-full bg-slate-900/80 border border-slate-800 rounded-2xl p-6 text-center">
@@ -306,15 +325,17 @@ export default function PaginaLiga({
             </div>
           )}
 
-          <div className="w-full flex flex-col items-center gap-3">
-            <TablaLiga
-              key={`resumen-${liga.providerId}`}
-              liga={liga}
-              filasMax={6}
-              alVerCompleta={() => setSub('posiciones')}
-              onVerEquipo={onVerEquipo}
-            />
-          </div>
+          {hayPosiciones && (
+            <div className="w-full flex flex-col items-center gap-3">
+              <TablaLiga
+                key={`resumen-${liga.providerId}`}
+                liga={liga}
+                filasMax={6}
+                alVerCompleta={() => setSub('posiciones')}
+                onVerEquipo={verEquipo}
+              />
+            </div>
+          )}
         </div>
       )}
     </div>

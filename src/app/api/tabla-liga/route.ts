@@ -3,8 +3,10 @@
 // Tabla de posiciones DE UNA LIGA (no confundir con el ranking del Club
 // entre jugadores, que vive en Supabase y no se toca aquí).
 //
-// Ruta de servidor generalizada por liga: ?liga={providerId} — debe ser una
-// de las SOPORTADAS (src/lib/sports/leagues.ts); sin parámetro = Liga MX.
+// Ruta de servidor generalizada por liga: ?liga={providerId} — una de
+// las SOPORTADAS (src/lib/sports/leagues.ts) o cualquiera del catálogo
+// del proveedor (el resolvedor verifica su tabla); sin parámetro =
+// Liga MX.
 // Pide la tabla al proveedor vía el adaptador único (cacheada 10 min) y, si
 // la liga tiene partidos EN CURSO, devuelve también la tabla recalculada
 // AL CAER GOL con computeLiveStandings (regla de Gonzalo 2026-11-13) en
@@ -29,7 +31,6 @@
 import { NextResponse } from 'next/server';
 import {
   getSportsProvider,
-  getSupportedLeague,
   computeLiveStandings,
   computeStandingsFromResults,
   LIGA_MX_PROVIDER_ID,
@@ -39,6 +40,7 @@ import {
   type StandingRow,
   type SupportedLeague,
 } from '@/lib/sports';
+import { resolverLigaConTabla } from '@/lib/sports/ligaDinamica';
 
 export const dynamic = 'force-dynamic';
 
@@ -172,7 +174,11 @@ async function respuestaTablaCalculada(
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const ligaId = searchParams.get('liga') || LIGA_MX_PROVIDER_ID;
-  const liga = getSupportedLeague(ligaId);
+  // Liga curada o cualquiera del catálogo: el resolvedor, además de
+  // armar el descriptor, verifica si la tabla oficial trae filas
+  // (las dinámicas de fútbol sin tabla oficial caen a la calculada;
+  // las de otros deportes quedan sin Posiciones).
+  const liga = await resolverLigaConTabla(ligaId);
 
   if (!liga) {
     return NextResponse.json(

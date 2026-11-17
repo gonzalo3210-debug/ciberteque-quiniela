@@ -1,6 +1,7 @@
 // src/app/api/importar-jornada/route.ts
 //
-// Partidos de una liga SOPORTADA para IMPORTAR al crear una jornada
+// Partidos de una liga de FÚTBOL del proveedor (curada del Club o
+// del catálogo dinámico) para IMPORTAR al crear una jornada
 // (panel admin -> Crear Jornada -> "Importar desde la API").
 //
 // Ruta de servidor: la llave del proveedor nunca sale al navegador; aquí
@@ -28,9 +29,9 @@
 import { NextResponse } from 'next/server';
 import {
   getSportsProvider,
-  getSupportedLeague,
   type SportsFixture,
 } from '@/lib/sports';
+import { resolverLiga } from '@/lib/sports/ligaDinamica';
 import { nombreEquipoES } from '@/lib/sports/nombresES';
 
 export const dynamic = 'force-dynamic';
@@ -122,9 +123,18 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
 
   const ligaId = searchParams.get('liga') || '';
-  const liga = getSupportedLeague(ligaId);
+  // Cualquiera de las ligas de FÚTBOL del proveedor (las curadas del
+  // Club o las del catálogo dinámico): el panel solo ofrece ligas de
+  // fútbol porque la quiniela es de fútbol.
+  const liga = await resolverLiga(ligaId);
   if (!liga) {
     return NextResponse.json({ error: 'Liga no soportada.' }, { status: 400 });
+  }
+  if (liga.sport !== 'Soccer') {
+    return NextResponse.json(
+      { error: 'La quiniela es de fútbol: elige una liga de fútbol.' },
+      { status: 400 }
+    );
   }
 
   const rondaParam = searchParams.get('ronda');

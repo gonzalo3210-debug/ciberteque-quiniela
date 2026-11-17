@@ -16,9 +16,9 @@
 import { NextResponse } from 'next/server';
 import {
   getSportsProvider,
-  getSupportedLeague,
   type SportsTeam,
 } from '@/lib/sports';
+import { resolverLiga } from '@/lib/sports/ligaDinamica';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,7 +45,8 @@ export async function GET(request: Request) {
   }
 
   const ligaId = searchParams.get('liga') || '';
-  const liga = getSupportedLeague(ligaId);
+  // Liga curada o cualquiera del catálogo del proveedor.
+  const liga = await resolverLiga(ligaId);
 
   if (!liga) {
     return NextResponse.json(

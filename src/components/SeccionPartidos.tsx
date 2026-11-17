@@ -20,6 +20,9 @@
 //                   datos de la app.
 //   ⭐ Favoritos  — partidos de las ligas/equipos que sigue el usuario
 //                   (estrellas, guardadas en localStorage).
+//   🌎 Ligas      — explorador con TODAS las ligas del proveedor por
+//                   deporte (components/ExploradorLigas.tsx); elegir
+//                   una abre su página igual que las curadas.
 // Correcciones de Gonzalo (2026-11-14, tras probar la Fase 2):
 //   · 📊 Posiciones SALIÓ de este menú: la tabla vive dentro de la
 //     página de cada liga y de la página de cada equipo.
@@ -50,6 +53,11 @@ import TablaLiga, {
   marcadoresDesdeFixtures,
 } from '@/components/TablaLiga'
 import PaginaLiga from '@/components/PaginaLiga'
+import ExploradorLigas from '@/components/ExploradorLigas'
+import {
+  ligaDinamicaASoportada,
+  type LigaDinamica,
+} from '@/lib/sports/catalogo'
 import VistaPartido, {
   datosDesdeFixture,
   type PartidoVistaDatos,
@@ -93,6 +101,7 @@ type Vista =
   | 'favoritos'
   | 'resultados'
   | 'envivo'
+  | 'ligas'
 
 interface LigaGrupo {
   providerId: string
@@ -1621,6 +1630,11 @@ export default function SeccionPartidos() {
   const [favoritos, setFavoritos] = useState<Favoritos>(favoritosPorDefecto())
   const [favListos, setFavListos] = useState(false)
   const [ligaVista, setLigaVista] = useState<SupportedLeague | null>(null)
+  // Deporte de la liga abierta (para la página de liga: Posiciones y
+  // enlaces a equipos dependen del deporte). Las curadas son fútbol.
+  const [ligaVistaSport, setLigaVistaSport] = useState<string | null>(null)
+  // Liga del catálogo cuyo detalle se está cargando para abrirla.
+  const [abriendoLigaId, setAbriendoLigaId] = useState<string | null>(null)
   const [equipoVista, setEquipoVista] = useState<EquipoSeguido | null>(null)
   const [partidoVista, setPartidoVista] = useState<PartidoVistaDatos | null>(null)
   const [fechaResultados, setFechaResultados] = useState<string>(() =>
@@ -1761,11 +1775,50 @@ export default function SeccionPartidos() {
       const liga = getSupportedLeague(leagueProviderId)
       if (!liga) return
       setLigaVista(liga)
+      setLigaVistaSport('Soccer')
       setBuscarAbierto(false)
       setEquipoVista(null)
       setPartidoVista(null)
     },
     []
+  )
+
+  /**
+   * Abrir la página de una liga CUALQUIERA del catálogo del
+   * proveedor (explorador 🌎 Ligas): las curadas van por verLiga; las
+   * demás piden su detalle a /api/ligas-catalogo (temporada y tabla
+   * ya verificados en el servidor) y arman el descriptor al momento.
+   */
+  const verLigaUniversal = useCallback(
+    async (leagueProviderId: string) => {
+      if (getSupportedLeague(leagueProviderId)) {
+        verLiga(leagueProviderId)
+        return
+      }
+      setAbriendoLigaId(leagueProviderId)
+      try {
+        const res = await fetch(`/api/ligas-catalogo?liga=${leagueProviderId}`)
+        const data = await res.json()
+        if (!res.ok) throw new Error(data?.error || 'Error al abrir la liga')
+        const dinamica = data.league as LigaDinamica
+        setLigaVista(ligaDinamicaASoportada(dinamica))
+        setLigaVistaSport(dinamica.sport)
+        if (dinamica.badgeUrl) {
+          setLogosLiga((prev) => ({
+            ...prev,
+            [dinamica.providerId]: dinamica.badgeUrl,
+          }))
+        }
+        setBuscarAbierto(false)
+        setEquipoVista(null)
+        setPartidoVista(null)
+      } catch (e) {
+        console.error('No se pudo abrir la liga del catálogo:', e)
+      } finally {
+        setAbriendoLigaId(null)
+      }
+    },
+    [verLiga]
   )
 
   return (
@@ -1799,6 +1852,7 @@ export default function SeccionPartidos() {
         <PaginaLiga
           key={ligaVista.providerId}
           liga={ligaVista}
+          sport={ligaVistaSport}
           badgeUrl={logosLiga[ligaVista.providerId] ?? null}
           favoritos={favoritos}
           onToggleLiga={toggleLiga}
@@ -1862,6 +1916,9 @@ export default function SeccionPartidos() {
         </button>
         <button onClick={() => { setBuscarAbierto(false); setVista('favoritos') }} className={claseSubVista('favoritos')}>
           ⭐ Favoritos
+        </button>
+        <button onClick={() => { setBuscarAbierto(false); setVista('ligas') }} className={claseSubVista('ligas')}>
+          🌎 Ligas
         </button>
       </div>
 
@@ -1962,6 +2019,13 @@ export default function SeccionPartidos() {
             Cargando tus favoritos...
           </div>
         ))}
+
+      {vista === 'ligas' && (
+        <ExploradorLigas
+          onVerLiga={verLigaUniversal}
+          abriendoId={abriendoLigaId}
+        />
+      )}
 
       </>
       )}

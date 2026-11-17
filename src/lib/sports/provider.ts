@@ -13,6 +13,8 @@
 import type {
   FixtureEventsResult,
   GetFixturesOptions,
+  LeagueCatalogEntry,
+  LeagueInfo,
   SportsFixture,
   SportsTeam,
   SportsTeamDetail,
@@ -79,6 +81,20 @@ export interface SportsProvider {
   getFixtureEvents(
     fixtureProviderId: string
   ): Promise<FixtureEventsResult | null>;
+
+  /**
+   * Catálogo COMPLETO de ligas del proveedor (todas, no solo las
+   * curadas del Club), con su deporte. Dato casi fijo: el adaptador
+   * lo cachea 24 h.
+   */
+  getLeagueCatalog(): Promise<LeagueCatalogEntry[]>;
+
+  /**
+   * Ficha de UNA liga cualquiera del proveedor (nombre oficial,
+   * deporte, temporada vigente y logo). null si no existe. Es la
+   * pieza que permite abrir ligas fuera del catálogo curado.
+   */
+  getLeagueInfo(leagueProviderId: string): Promise<LeagueInfo | null>;
 }
 
 import { theSportsDbProvider } from './thesportsdb';

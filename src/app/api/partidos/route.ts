@@ -31,11 +31,11 @@
 import { NextResponse } from 'next/server';
 import {
   getSportsProvider,
-  getSupportedLeague,
   SUPPORTED_LEAGUES,
   type SportsFixture,
   type SupportedLeague,
 } from '@/lib/sports';
+import { resolverLiga } from '@/lib/sports/ligaDinamica';
 import {
   fechaEnMazatlan,
   hoyEnMazatlan,
@@ -226,7 +226,9 @@ export async function GET(request: Request) {
     const ligaParam = searchParams.get('liga');
     const equipoParam = searchParams.get('equipo');
     if (ligaParam && equipoParam) {
-      const liga = getSupportedLeague(ligaParam);
+      // Liga curada o cualquiera del catálogo del proveedor: el
+      // resolvedor arma su descriptor (temporada incluida).
+      const liga = await resolverLiga(ligaParam);
       if (!liga) {
         return NextResponse.json(
           { error: 'Liga no soportada.' },
@@ -280,7 +282,7 @@ export async function GET(request: Request) {
       );
 
       return NextResponse.json({
-        league: ligaPublica(liga, logosLiga.get(liga.providerId) ?? null),
+        league: ligaPublica(liga, logosLiga.get(liga.providerId) ?? liga.badgeUrl ?? null),
         teamProviderId: equipoParam,
         fixtures: delEquipo,
         fetchedAt: new Date().toISOString(),
@@ -290,7 +292,7 @@ export async function GET(request: Request) {
     // ----- Modo liga (?liga= sin equipo): su temporada completa -----
     // Para la página de la liga (Resumen con destacado + Partidos).
     if (ligaParam) {
-      const liga = getSupportedLeague(ligaParam);
+      const liga = await resolverLiga(ligaParam);
       if (!liga) {
         return NextResponse.json(
           { error: 'Liga no soportada.' },
@@ -339,7 +341,7 @@ export async function GET(request: Request) {
       );
 
       return NextResponse.json({
-        league: ligaPublica(liga, logosLiga.get(liga.providerId) ?? null),
+        league: ligaPublica(liga, logosLiga.get(liga.providerId) ?? liga.badgeUrl ?? null),
         fixtures: deLaLiga,
         fetchedAt: new Date().toISOString(),
       });

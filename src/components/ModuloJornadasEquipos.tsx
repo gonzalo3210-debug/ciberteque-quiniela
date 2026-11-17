@@ -105,6 +105,28 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
   // búsqueda manual por jornada/fechas, y su encabezado.
   const [impOrigen, setImpOrigen] = useState<'proximos' | 'manual' | null>(null);
   const [impTitulo, setImpTitulo] = useState('');
+  // TODAS las ligas de fútbol del catálogo dinámico (además de las
+  // curadas del Club, que van como favoritas): se piden una vez a
+  // /api/ligas-catalogo cuando se abre el panel. Si la pedida falla,
+  // el selector se queda solo con las del Club.
+  const [impLigasFutbol, setImpLigasFutbol] = useState<{ providerId: string; name: string }[]>([]);
+
+  const cargarCatalogoFutbol = async () => {
+    if (impLigasFutbol.length > 0) return;
+    try {
+      const res = await fetch('/api/ligas-catalogo');
+      const data = await res.json();
+      if (!res.ok) return;
+      const soccer = (data.sports || []).find((d: any) => d.sport === 'Soccer');
+      if (soccer) {
+        setImpLigasFutbol(
+          (soccer.ligas || []).map((l: any) => ({ providerId: l.providerId, name: l.name }))
+        );
+      }
+    } catch {
+      // Sin catálogo dinámico: el selector conserva las del Club.
+    }
+  };
 
   /** Aplica una respuesta de la ruta: pendientes marcados, jugados no. */
   const aplicarResultadosImportables = (fixtures: FixtureImportable[]) => {
@@ -144,7 +166,10 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
   const togglePanelImportar = () => {
     const abre = !mostrarImportar;
     setMostrarImportar(abre);
-    if (abre && impResultados === null && !impBuscando) cargarProximos(impLiga);
+    if (abre) {
+      cargarCatalogoFutbol();
+      if (impResultados === null && !impBuscando) cargarProximos(impLiga);
+    }
   };
 
   const handleBuscarImportables = async () => {
@@ -406,7 +431,16 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
                       <div>
                         <label className="text-[9px] md:text-[10px] text-slate-500 font-bold uppercase mb-1.5 block tracking-wider">Liga</label>
                         <select value={impLiga} onChange={(e) => { setImpLiga(e.target.value); cargarProximos(e.target.value); }} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white outline-none focus:border-emerald-500 transition-all text-xs font-bold h-[34px]">
-                          {SUPPORTED_LEAGUES.map(l => <option key={l.providerId} value={l.providerId}>{l.name}</option>)}
+                          <optgroup label="⭐ Ligas del club">
+                            {SUPPORTED_LEAGUES.map(l => <option key={l.providerId} value={l.providerId}>{l.name}</option>)}
+                          </optgroup>
+                          {impLigasFutbol.length > 0 && (
+                            <optgroup label="🌎 Todas las ligas de fútbol">
+                              {impLigasFutbol
+                                .filter(l => !SUPPORTED_LEAGUES.some(c => c.providerId === l.providerId))
+                                .map(l => <option key={l.providerId} value={l.providerId}>{l.name}</option>)}
+                            </optgroup>
+                          )}
                         </select>
                       </div>
                       <div>

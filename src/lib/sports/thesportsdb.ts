@@ -20,6 +20,8 @@
 //   en vivo (v2, premium):  api/v2/json/livescore/soccer (llave en header)
 //   línea de tiempo:        lookupevent.php?id={evento} +
 //                           lookuptimeline.php?id={evento}
+//   catálogo de ligas:      all_leagues.php (todas, con su deporte)
+//   ficha de una liga:      lookupleague.php?id={liga}
 // OJO: lookuptable devuelve el cuerpo VACÍO (200, 0 bytes) para torneos de
 // grupos/copa (Champions, Nations League, Libertadores): getStandings lo
 // trata como "sin tabla" y devuelve []. La cuenta es PREMIUM (Single
@@ -33,6 +35,8 @@ import type {
   FixtureEventType,
   FixtureEventsResult,
   GetFixturesOptions,
+  LeagueCatalogEntry,
+  LeagueInfo,
   SportsFixture,
   SportsTeam,
   SportsTeamDetail,
@@ -114,6 +118,9 @@ interface TsdbEvent {
   dateEvent?: string;
   strTime?: string;
   strTimestamp?: string;
+  /** Nombre del evento: en deportes individuales (F1, tenis) es lo
+   *  único que identifica la carrera/partido, porque no hay equipos. */
+  strEvent?: string;
   strHomeTeam?: string;
   strAwayTeam?: string;
   idHomeTeam?: string;
@@ -268,12 +275,19 @@ function toUtcIso(ts: string | undefined): string | null {
 }
 
 function mapEvent(raw: TsdbEvent, leagueIdFallback: string): SportsFixture {
+  // Deportes individuales (Automovilismo, Tenis...): el evento no
+  // trae equipos (strHomeTeam/strAwayTeam vienen nulos) y lo que
+  // identifica la carrera o el partido es strEvent ("Bahrain
+  // Testing 1 Day 1", "...Tiafoe vs Vukic"). Va como nombre a
+  // mostrar del lado local para que la fila no salga en blanco;
+  // sin IDs de equipo, nada se enlaza a páginas de equipo.
+  const sinEquipos = !raw.strHomeTeam && !raw.strAwayTeam;
   return {
     providerId: raw.idEvent,
     leagueProviderId: raw.idLeague || leagueIdFallback,
     season: raw.strSeason || null,
     round: numOrNull(raw.intRound),
-    homeTeam: raw.strHomeTeam || '',
+    homeTeam: raw.strHomeTeam || (sinEquipos ? raw.strEvent || '' : ''),
     awayTeam: raw.strAwayTeam || '',
     homeTeamProviderId: raw.idHomeTeam || null,
     awayTeamProviderId: raw.idAwayTeam || null,
@@ -481,15 +495,20 @@ async function getStandings(
 async function getTeams(leagueProviderId: string): Promise<SportsTeam[]> {
   // OJO: lookup_all_teams.php YA NO EXISTE en TheSportsDB (404 "endpoint
   // not found"); el endpoint vigente es search_all_teams.php y busca por
-  // el NOMBRE oficial de la liga, no por su ID. El nombre vive en el
-  // catálogo de ligas soportadas (leagues.ts -> providerName).
+  // el NOMBRE oficial de la liga, no por su ID. El nombre sale del
+  // catálogo de ligas soportadas (leagues.ts -> providerName) o, para
+  // ligas fuera de ese catálogo, de la ficha de la liga (lookupleague).
   const liga = getSupportedLeague(leagueProviderId);
-  if (!liga) {
+  let nombre = liga?.providerName;
+  if (!nombre) {
+    nombre = (await getLeagueInfo(leagueProviderId))?.name;
+  }
+  if (!nombre) {
     throw new Error(
-      `getTeams: la liga ${leagueProviderId} no está en el catálogo de ligas soportadas.`
+      `getTeams: no se conoce el nombre oficial de la liga ${leagueProviderId}.`
     );
   }
-  const path = `search_all_teams.php?l=${encodeURIComponent(liga.providerName)}`;
+  const path = `search_all_teams.php?l=${encodeURIComponent(nombre)}`;
   const data = await tsdbFetch<{ teams: TsdbTeam[] | null }>(path, 86400);
   return (data?.teams ?? []).map(mapTeam);
 }
@@ -587,6 +606,64 @@ async function getFixtureEvents(
   return { fixture, events };
 }
 
+/**
+ * Catálogo COMPLETO de ligas del proveedor (all_leagues.php: más de
+ * 1,500 ligas de todos los deportes). Dato casi fijo: se cachea 24 h.
+ * Se descartan entradas sin ID o sin nombre (el catálogo trae ligas
+ * extintas con datos incompletos).
+ */
+async function getLeagueCatalog(): Promise<LeagueCatalogEntry[]> {
+  const data = await tsdbFetch<{
+    leagues:
+      | { idLeague?: string; strLeague?: string; strSport?: string }[]
+      | null;
+  }>('all_leagues.php', 86400);
+  const entradas: LeagueCatalogEntry[] = [];
+  for (const l of data?.leagues ?? []) {
+    const providerId = (l.idLeague || '').trim();
+    const name = (l.strLeague || '').trim();
+    if (!providerId || !name) continue;
+    entradas.push({
+      providerId,
+      name,
+      sport: (l.strSport || '').trim() || 'Soccer',
+    });
+  }
+  return entradas;
+}
+
+/**
+ * Ficha de una liga cualquiera (lookupleague.php): nombre oficial,
+ * deporte, temporada vigente (strCurrentSeason) y logo. Se cachea
+ * 24 h. null si el proveedor no conoce la liga.
+ */
+async function getLeagueInfo(
+  leagueProviderId: string
+): Promise<LeagueInfo | null> {
+  const path = `lookupleague.php?id=${encodeURIComponent(leagueProviderId)}`;
+  const data = await tsdbFetch<{
+    leagues:
+      | {
+          idLeague?: string;
+          strLeague?: string;
+          strSport?: string;
+          strCurrentSeason?: string;
+          strBadge?: string;
+          strLogo?: string;
+        }[]
+      | null;
+  }>(path, 86400);
+  const raw = data?.leagues?.[0];
+  if (!raw) return null;
+  return {
+    providerId: raw.idLeague || leagueProviderId,
+    name: (raw.strLeague || '').trim(),
+    sport: (raw.strSport || '').trim() || 'Soccer',
+    season: (raw.strCurrentSeason || '').trim(),
+    badgeUrl: raw.strBadge || raw.strLogo || null,
+  };
+}
+
 export const theSportsDbProvider: SportsProvider = {
   name: 'thesportsdb',
   getFixtures,
@@ -597,4 +674,6 @@ export const theSportsDbProvider: SportsProvider = {
   getLeagueBadge,
   getLiveScores,
   getFixtureEvents,
+  getLeagueCatalog,
+  getLeagueInfo,
 };

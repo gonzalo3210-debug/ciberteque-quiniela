@@ -150,6 +150,35 @@ export interface FixtureEventsResult {
   events: FixtureEvent[];
 }
 
+/** Una liga del catálogo COMPLETO del proveedor (all_leagues). */
+export interface LeagueCatalogEntry {
+  /** ID de la liga en el proveedor. */
+  providerId: string;
+  /** Nombre oficial de la liga en el proveedor (p. ej. "NBA"). */
+  name: string;
+  /** Deporte tal como lo nombra el proveedor (p. ej. "Soccer",
+   *  "Basketball", "Motorsport", "Fighting"...). */
+  sport: string;
+}
+
+/** Ficha de UNA liga del proveedor (lookupleague). */
+export interface LeagueInfo {
+  providerId: string;
+  /** Nombre oficial de la liga en el proveedor. */
+  name: string;
+  /** Deporte tal como lo nombra el proveedor. */
+  sport: string;
+  /**
+   * Temporada vigente en el formato del proveedor (strCurrentSeason:
+   * "2026-2027", "2026"...). Es la fuente genérica de temporada para
+   * ligas fuera del catálogo curado; si el proveedor no la trae,
+   * cadena vacía.
+   */
+  season: string;
+  /** URL del logo/escudo de la liga, si lo trae. */
+  badgeUrl: string | null;
+}
+
 /**
  * Detalle de UN equipo (para el Resumen de su página): lo que el
  * proveedor trae en la ficha del club además del escudo.
