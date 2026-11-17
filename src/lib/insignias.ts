@@ -54,6 +54,14 @@ export interface BoletoHistorial {
   puntos: number;
   /** Pronósticos con marcador exacto acertado en el boleto. */
   exactos: number;
+  /**
+   * Aciertos de SOLO tendencia en el boleto, según la modalidad:
+   * en marcador exacto son los de estado 'acierto_lev' (1 pt); en
+   * clásica TODOS los aciertos son de tendencia L/E/V. Lo llena el
+   * armado (useInsignias.ts); las insignias no lo usan, es la base
+   * del desglose de precisión de src/lib/estadisticas.ts.
+   */
+  tendencias: number;
   /** Pronósticos con puntos (exacto o solo tendencia). */
   aciertos: number;
   /** Total de pronósticos del boleto. */

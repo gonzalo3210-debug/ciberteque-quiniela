@@ -41,15 +41,18 @@ function esPorPuntos(quiniela: any): boolean {
 }
 
 /**
- * Arma el mapa usuario_id → insignias desde las filas crudas de
- * quinielas cerradas, sus boletos (con pronósticos) y sus partidos.
- * Función pura de armado: la calificación es la tabla oficial.
+ * Arma el mapa usuario_id → su historial de boletos calificados
+ * desde las filas crudas de quinielas cerradas, sus boletos (con
+ * pronósticos) y sus partidos. Función pura de armado: la
+ * calificación es la tabla oficial. Es LA fuente del historial:
+ * la usan las insignias (armarMapaInsignias) y las estadísticas
+ * personales (src/lib/estadisticas.ts vía useHistorialUsuario).
  */
-export function armarMapaInsignias(
+export function armarHistorialPorUsuario(
   quinielas: any[],
   tickets: any[],
   partidos: any[]
-): Map<string, ResultadoInsignias> {
+): Map<string, BoletoHistorial[]> {
   const boletosPorUsuario = new Map<string, BoletoHistorial[]>()
 
   for (const q of quinielas) {
@@ -60,6 +63,7 @@ export function armarMapaInsignias(
 
     const tabla = calcularTabla(q, ticketsQ, partidosQ)
     const tamanoGrupo1 = tabla.filter((f) => f.posicion === 1).length
+    const esExacto = (q.modalidad || '').toLowerCase() === 'marcador_exacto'
 
     // Nivel = ordinal del grupo de empate (las filas ya vienen
     // ordenadas y con la posición compartida asignada).
@@ -83,6 +87,11 @@ export function armarMapaInsignias(
         puntos: fila.puntos,
         exactos: fila.detalle.filter((d) => d.estado === 'acierto_exacto')
           .length,
+        // Solo tendencia: en marcador exacto, los 'acierto_lev'; en
+        // clásica, todos los aciertos son tendencia L/E/V.
+        tendencias: esExacto
+          ? fila.detalle.filter((d) => d.estado === 'acierto_lev').length
+          : fila.detalle.filter((d) => d.puntos > 0).length,
         aciertos: fila.detalle.filter((d) => d.puntos > 0).length,
         totalPronosticos: fila.detalle.length,
       }
@@ -92,10 +101,25 @@ export function armarMapaInsignias(
     }
   }
 
+  return boletosPorUsuario
+}
+
+/**
+ * Arma el mapa usuario_id → insignias desde las filas crudas de
+ * quinielas cerradas, sus boletos (con pronósticos) y sus partidos.
+ * Función pura de armado: la calificación es la tabla oficial.
+ */
+export function armarMapaInsignias(
+  quinielas: any[],
+  tickets: any[],
+  partidos: any[]
+): Map<string, ResultadoInsignias> {
   const mapa = new Map<string, ResultadoInsignias>()
-  boletosPorUsuario.forEach((boletos, usuarioId) => {
-    mapa.set(usuarioId, calcularInsignias(boletos))
-  })
+  armarHistorialPorUsuario(quinielas, tickets, partidos).forEach(
+    (boletos, usuarioId) => {
+      mapa.set(usuarioId, calcularInsignias(boletos))
+    }
+  )
   return mapa
 }
 
@@ -180,6 +204,70 @@ export function useInsigniasUsuario(usuarioId?: string | null) {
   }, [usuarioId])
 
   return { resultado, cargando }
+}
+
+/**
+ * Historial calificado del usuario actual (boletos de quinielas
+ * cerradas por puntos, con la tabla oficial). Mismo flujo acotado
+ * que useInsigniasUsuario; lo consumen las estadísticas personales
+ * (src/hooks/useEstadisticas.ts).
+ */
+export function useHistorialUsuario(usuarioId?: string | null) {
+  const [historial, setHistorial] = useState<BoletoHistorial[]>([])
+  const [cargando, setCargando] = useState(true)
+
+  useEffect(() => {
+    let activo = true
+    async function cargar() {
+      if (!usuarioId) {
+        if (activo) {
+          setHistorial([])
+          setCargando(false)
+        }
+        return
+      }
+      setCargando(true)
+      try {
+        const { data: misTickets } = await supabase
+          .from('tickets')
+          .select('quiniela_id')
+          .eq('usuario_id', usuarioId)
+        const idsJugadas = [
+          ...new Set((misTickets || []).map((t: any) => t.quiniela_id)),
+        ]
+        if (idsJugadas.length === 0) {
+          if (activo) setHistorial([])
+          return
+        }
+        const { data: quinielas } = await supabase
+          .from('quinielas')
+          .select(CAMPOS_QUINIELA)
+          .in('id', idsJugadas)
+          .eq('estado', 'cerrada')
+        const cerradas = (quinielas || []).filter(esPorPuntos)
+        if (cerradas.length === 0) {
+          if (activo) setHistorial([])
+          return
+        }
+        const { tickets, partidos } = await cargarBoletosYPartidos(
+          cerradas.map((q: any) => q.id)
+        )
+        const porUsuario = armarHistorialPorUsuario(cerradas, tickets, partidos)
+        if (activo) setHistorial(porUsuario.get(usuarioId) || [])
+      } catch (error) {
+        console.error('Error cargando historial del usuario:', error)
+        if (activo) setHistorial([])
+      } finally {
+        if (activo) setCargando(false)
+      }
+    }
+    cargar()
+    return () => {
+      activo = false
+    }
+  }, [usuarioId])
+
+  return { historial, cargando }
 }
 
 /** Insignias de TODOS los jugadores (iconos en Posiciones). */
