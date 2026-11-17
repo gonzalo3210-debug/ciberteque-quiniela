@@ -3,16 +3,17 @@
 //
 // Sección "⚽ Partidos" (decisión de Gonzalo 2026-11-13; reorganizada
 // 2026-11-14 a su diseño tipo 365Scores): UNA sola sección en vez de un
-// botón por liga. Arriba, tres FILTROS (debajo de la barra de la app):
+// botón por liga. Arriba, dos FILTROS (debajo de la barra de la app):
 //   🔴 Live       — partidos en vivo AHORA, por prioridad: primero los
 //                   de la quiniela del Club, luego los de favoritos y al
 //                   final el resto de ligas soportadas (vista EnVivo).
 //   📅 Calendario — partidos por DÍA (selector ‹ › y botón Hoy) de
 //                   TODAS las ligas soportadas, agrupados por liga;
 //                   tocar el encabezado de una liga filtra a solo esa.
-//   🔎 Buscar     — por nombre de equipo o de liga (con nombres en
-//                   español); un equipo abre su vista, una liga sus
-//                   posiciones.
+// El tercer filtro, 🔎 Buscar, SALIÓ en el paquete v20 (2026-11-17,
+// decisión de Gonzalo): solo filtraba contenido de las ligas
+// soportadas y el explorador 🌎 Ligas ya trae su propio buscador,
+// que además encuentra equipos.
 // Y las PESTAÑAS de la sección:
 //   🎯 Quiniela   — los partidos de la jornada activa o abierta del
 //                   Club (Supabase) emparejados con los de la API para
@@ -1450,223 +1451,10 @@ function VistaEnVivo({
   )
 }
 
-// ---------- Filtro 🔎 Buscar ---------------------------------------------------
-
-interface ResultadoBusqueda {
-  ligas: {
-    providerId: string
-    name: string
-    season: string
-    badgeUrl: string | null
-  }[]
-  equipos: {
-    leagueProviderId: string
-    leagueName: string
-    teamProviderId: string
-    teamName: string
-    badgeUrl: string | null
-  }[]
-}
-
-function BuscadorPartidos({
-  onVerEquipo,
-  onVerLiga,
-  favoritos,
-  onToggleLiga,
-  onCerrar,
-}: {
-  onVerEquipo: EquipoTocable
-  onVerLiga: (leagueProviderId: string) => void
-  favoritos: Favoritos
-  onToggleLiga: (leagueProviderId: string) => void
-  onCerrar: () => void
-}) {
-  const [texto, setTexto] = useState('')
-  const [resultados, setResultados] = useState<ResultadoBusqueda | null>(null)
-  const [buscando, setBuscando] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    const q = texto.trim()
-    if (q.length < 2) {
-      setResultados(null)
-      setBuscando(false)
-      setError(null)
-      return
-    }
-    setBuscando(true)
-    const id = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/buscar?q=${encodeURIComponent(q)}`)
-        const data = await res.json()
-        if (!res.ok) throw new Error(data?.error || 'Error al buscar')
-        setResultados({ ligas: data.ligas || [], equipos: data.equipos || [] })
-        setError(null)
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'No se pudo buscar.')
-        setResultados(null)
-      } finally {
-        setBuscando(false)
-      }
-    }, 350)
-    return () => clearTimeout(id)
-  }, [texto])
-
-  const sinResultados =
-    resultados !== null &&
-    resultados.ligas.length === 0 &&
-    resultados.equipos.length === 0
-
-  return (
-    <div className="w-full max-w-3xl flex flex-col gap-4 animate-in fade-in duration-500">
-      <div className="flex items-center gap-2">
-        <div className="flex-1 flex items-center gap-2 px-4 py-3 rounded-2xl bg-slate-900/80 border border-cyan-500/40">
-          <span className="text-lg">🔎</span>
-          <input
-            autoFocus
-            value={texto}
-            onChange={(e) => setTexto(e.target.value)}
-            placeholder="Busca un equipo o una liga… (p. ej. Dinamarca, Cruz Azul)"
-            className="flex-1 bg-transparent outline-none text-white font-bold text-sm placeholder:text-slate-500 min-w-0"
-          />
-          {buscando && (
-            <span className="text-cyan-400 text-xs font-bold animate-pulse shrink-0">
-              Buscando…
-            </span>
-          )}
-        </div>
-        <button
-          onClick={onCerrar}
-          className="shrink-0 w-11 h-11 rounded-2xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white font-black transition-all"
-          title="Cerrar buscador"
-        >
-          ✕
-        </button>
-      </div>
-
-      {error && (
-        <div className="w-full bg-slate-900/80 border border-slate-800 rounded-2xl p-6 text-center">
-          <p className="text-red-400 font-bold">⚠️ {error}</p>
-        </div>
-      )}
-
-      {sinResultados && !error && (
-        <div className="w-full bg-slate-900/80 border border-slate-800 rounded-2xl p-6 text-center">
-          <p className="text-slate-300 font-bold text-sm">
-            Sin resultados para “{texto.trim()}” en las ligas de la
-            sección. Prueba con otro nombre.
-          </p>
-        </div>
-      )}
-
-      {resultados && resultados.ligas.length > 0 && (
-        <div className="bg-slate-900/80 border border-slate-800/50 rounded-2xl shadow-2xl overflow-hidden">
-          <div className="px-4 py-2.5 bg-slate-800/60 border-b border-slate-800 font-black text-xs uppercase tracking-widest text-white">
-            Ligas
-          </div>
-          <div>
-            {resultados.ligas.map((l) => {
-              const seguida = favoritos.ligas.includes(l.providerId)
-              return (
-              <div
-                key={l.providerId}
-                className="w-full flex items-center gap-2 px-4 py-3 border-b border-slate-800/60 last:border-b-0 hover:bg-slate-800/40 transition-colors"
-              >
-                <button
-                  onClick={() => onVerLiga(l.providerId)}
-                  className="flex-1 flex items-center gap-3 min-w-0 text-left"
-                >
-                  <LogoLiga url={l.badgeUrl} nombre={l.name} className="w-7 h-7" />
-                  <span className="flex-1 min-w-0">
-                    <span className="block font-bold text-white text-sm truncate">
-                      {l.name}
-                    </span>
-                    <span className="block text-slate-500 text-[11px] font-bold uppercase tracking-widest">
-                      Ver liga · Temporada {l.season}
-                    </span>
-                  </span>
-                </button>
-                <button
-                  onClick={() => onToggleLiga(l.providerId)}
-                  title={
-                    seguida
-                      ? 'Dejar de seguir esta liga'
-                      : 'Agregar a favoritos'
-                  }
-                  aria-label={
-                    seguida
-                      ? 'Dejar de seguir esta liga'
-                      : 'Agregar a favoritos'
-                  }
-                  className={`shrink-0 px-3 py-2 rounded-xl font-black text-base leading-none transition-all ${
-                    seguida
-                      ? 'text-amber-400 bg-amber-500/10'
-                      : 'text-slate-400 hover:text-amber-400 bg-slate-800/60'
-                  }`}
-                >
-                  {seguida ? '★' : '☆'}
-                </button>
-                <span className="text-slate-500">→</span>
-              </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      {resultados && resultados.equipos.length > 0 && (
-        <div className="bg-slate-900/80 border border-slate-800/50 rounded-2xl shadow-2xl overflow-hidden">
-          <div className="px-4 py-2.5 bg-slate-800/60 border-b border-slate-800 font-black text-xs uppercase tracking-widest text-white">
-            Equipos
-          </div>
-          <div>
-            {resultados.equipos.map((e) => (
-              <button
-                key={`${e.leagueProviderId}-${e.teamProviderId}`}
-                onClick={() =>
-                  onVerEquipo({
-                    leagueProviderId: e.leagueProviderId,
-                    teamProviderId: e.teamProviderId,
-                    teamName: e.teamName,
-                    badgeUrl: e.badgeUrl,
-                  })
-                }
-                className="w-full flex items-center gap-3 px-4 py-3 border-b border-slate-800/60 last:border-b-0 text-left hover:bg-slate-800/40 transition-colors"
-              >
-                <Escudo
-                  url={e.badgeUrl}
-                  nombre={nombreEquipoES(e.teamName, e.teamProviderId)}
-                />
-                <span className="flex-1 min-w-0">
-                  <span className="block font-bold text-white text-sm truncate">
-                    {nombreEquipoES(e.teamName, e.teamProviderId)}
-                  </span>
-                  <span className="block text-slate-500 text-[11px] font-bold uppercase tracking-widest">
-                    {e.leagueName}
-                  </span>
-                </span>
-                <span className="text-slate-500">→</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {texto.trim().length < 2 && (
-        <p className="text-center text-slate-500 text-xs font-medium">
-          Escribe al menos 2 letras. Encuentra equipos aunque los busques
-          en español.
-        </p>
-      )}
-    </div>
-  )
-}
-
 // ---------- Sección completa --------------------------------------------------
 
 export default function SeccionPartidos() {
   const [vista, setVista] = useState<Vista>('quiniela')
-  const [buscarAbierto, setBuscarAbierto] = useState(false)
   const [favoritos, setFavoritos] = useState<Favoritos>(favoritosPorDefecto())
   const [favListos, setFavListos] = useState(false)
   const [ligaVista, setLigaVista] = useState<SupportedLeague | null>(null)
@@ -1795,12 +1583,12 @@ export default function SeccionPartidos() {
 
   const claseSubVista = (v: Vista) =>
     `flex-1 min-w-[110px] py-2.5 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
-      vista === v && !buscarAbierto
+      vista === v
         ? 'bg-cyan-600 text-white shadow-[0_0_18px_rgba(8,145,178,0.4)]'
         : 'text-slate-400 hover:text-white'
     }`
 
-  // Estilo de los tres FILTROS superiores (Live / Calendario / Buscar).
+  // Estilo de los FILTROS superiores (Live / Calendario).
   const claseFiltro = (activo: boolean, activoClases: string) =>
     `flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl border font-black text-xs uppercase tracking-widest transition-all ${
       activo
@@ -1816,7 +1604,6 @@ export default function SeccionPartidos() {
       if (!liga) return
       setLigaVista(liga)
       setLigaVistaSport('Soccer')
-      setBuscarAbierto(false)
       setEquipoVista(null)
       setPartidoVista(null)
     },
@@ -1849,7 +1636,6 @@ export default function SeccionPartidos() {
             [dinamica.providerId]: dinamica.badgeUrl,
           }))
         }
-        setBuscarAbierto(false)
         setEquipoVista(null)
         setPartidoVista(null)
       } catch (e) {
@@ -1902,47 +1688,32 @@ export default function SeccionPartidos() {
         />
       ) : (
       <>
-      {/* ── FILTROS superiores: Live · Calendario · Buscar ── */}
+      {/* ── FILTROS superiores: Live · Calendario. El 🔎 Buscar
+          viejo salió (v20): el explorador 🌎 Ligas ya trae su propio
+          buscador, que además encuentra equipos. ── */}
       <div className="flex items-center gap-1.5 w-full mb-3">
         <button
-          onClick={() => {
-            setBuscarAbierto(false)
-            setVista('envivo')
-          }}
+          onClick={() => setVista('envivo')}
           className={claseFiltro(
-            vista === 'envivo' && !buscarAbierto,
+            vista === 'envivo',
             'bg-red-600 border-red-500 text-white shadow-[0_0_18px_rgba(220,38,38,0.45)]'
           )}
         >
           <span
             className={`inline-block w-2 h-2 rounded-full ${
-              vista === 'envivo' && !buscarAbierto
-                ? 'bg-white animate-pulse'
-                : 'bg-red-500'
+              vista === 'envivo' ? 'bg-white animate-pulse' : 'bg-red-500'
             }`}
           />
           Live
         </button>
         <button
-          onClick={() => {
-            setBuscarAbierto(false)
-            setVista('resultados')
-          }}
+          onClick={() => setVista('resultados')}
           className={claseFiltro(
-            vista === 'resultados' && !buscarAbierto,
+            vista === 'resultados',
             'bg-cyan-600 border-cyan-500 text-white shadow-[0_0_18px_rgba(8,145,178,0.4)]'
           )}
         >
           📅 Calendario
-        </button>
-        <button
-          onClick={() => setBuscarAbierto((v) => !v)}
-          className={claseFiltro(
-            buscarAbierto,
-            'bg-cyan-600 border-cyan-500 text-white shadow-[0_0_18px_rgba(8,145,178,0.4)]'
-          )}
-        >
-          🔎 Buscar
         </button>
       </div>
 
@@ -1951,29 +1722,17 @@ export default function SeccionPartidos() {
           equipo) y Siguiendo es sección propia de la barra inferior
           (correcciones de Gonzalo, 2026-11-14). ── */}
       <div className="flex flex-wrap gap-1 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800/50 w-full mb-4">
-        <button onClick={() => { setBuscarAbierto(false); setVista('quiniela') }} className={claseSubVista('quiniela')}>
+        <button onClick={() => setVista('quiniela')} className={claseSubVista('quiniela')}>
           🎯 Quiniela
         </button>
-        <button onClick={() => { setBuscarAbierto(false); setVista('favoritos') }} className={claseSubVista('favoritos')}>
+        <button onClick={() => setVista('favoritos')} className={claseSubVista('favoritos')}>
           ⭐ Favoritos
         </button>
-        <button onClick={() => { setBuscarAbierto(false); setVista('ligas') }} className={claseSubVista('ligas')}>
+        <button onClick={() => setVista('ligas')} className={claseSubVista('ligas')}>
           🌎 Ligas
         </button>
       </div>
 
-      {buscarAbierto ? (
-        <BuscadorPartidos
-          onVerEquipo={(e) => {
-            setBuscarAbierto(false)
-            verEquipo(e)
-          }}
-          onVerLiga={verLiga}
-          favoritos={favoritos}
-          onToggleLiga={toggleLiga}
-          onCerrar={() => setBuscarAbierto(false)}
-        />
-      ) : (
       <>
       {vista === 'envivo' && (
         <VistaEnVivo
@@ -2068,7 +1827,6 @@ export default function SeccionPartidos() {
       )}
 
       </>
-      )}
       </>
       )}
     </div>
