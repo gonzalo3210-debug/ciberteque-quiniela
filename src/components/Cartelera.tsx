@@ -2,6 +2,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { useCartelera } from '@/hooks/useCartelera'
 import { useCuentaRegresiva } from '@/hooks/useCuentaRegresiva' 
+import { useCeremoniaSorteo } from '@/hooks/useCeremoniaSorteo'
+import CeremoniaSorteo from '@/components/CeremoniaSorteo'
 import ModalReglas from '@/components/ModalReglas' 
 
 export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioActivo: any, actualizarSaldo: (nuevoSaldo: number) => void }) {
@@ -11,6 +13,11 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
     lugaresDisponibles, cantidadBoletos, golesAutomaticos, setCantidadBoletos, setGolesTotales, setMostrarReglas,
     setAceptoReglas, cambiarQuinielaVisible, seleccionarOpcion, guardarQuiniela, obtenerLogo
   } = useCartelera(usuarioActivo, actualizarSaldo)
+
+  // 🎲 Ceremonia pública del sorteo: solo trabaja si la quiniela
+  // visible es de sorteo; "realizado" llega cuando el admin ya
+  // ejecutó el sorteo y las asignaciones están guardadas.
+  const ceremonia = useCeremoniaSorteo(quinielaActual)
 
   const { textoCuenta, esUrgente, yaCerro } = useCuentaRegresiva(quinielaActual?.fecha_cierre)
 
@@ -150,7 +157,15 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
           </div>
         </div>
 
-        {esSorteo ? (
+        {esSorteo && ceremonia.realizado ? (
+          <CeremoniaSorteo
+            quinielaId={quinielaActual.id}
+            nombreJornada={quinielaActual.nombre_jornada}
+            usuarioActivoId={usuarioActivo?.id}
+            asignaciones={ceremonia.asignaciones}
+            equiposBombo={ceremonia.equiposBombo}
+          />
+        ) : esSorteo ? (
           <div className="flex flex-col items-center justify-center py-6 px-4 bg-blue-950/20 rounded-xl border border-blue-900/40 mb-6">
             <span className="text-6xl mb-4 opacity-90 drop-shadow-[0_0_15px_rgba(59,130,246,0.6)]">🎟️</span>
             <h3 className="text-xl font-black text-white uppercase tracking-widest mb-2 text-center">Boleto de Acceso Virtual</h3>

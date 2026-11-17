@@ -168,3 +168,78 @@ export function vibrarGol(): void {
     // Sin vibración disponible: no pasa nada.
   }
 }
+
+// ---------- Sonidos de la ceremonia del sorteo -----------------------------
+
+function golpeTambor(
+  c: AudioContext,
+  inicio: number,
+  duracion: number,
+  volumen = 0.16
+): OscillatorNode | null {
+  // Un tom grave cuya frecuencia cae: lo más parecido a un golpe de
+  // tambor que sale de un oscilador senoidal.
+  const osc = c.createOscillator();
+  const ganancia = c.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(190, inicio);
+  osc.frequency.exponentialRampToValueAtTime(70, inicio + duracion);
+  ganancia.gain.setValueAtTime(0.0001, inicio);
+  ganancia.gain.exponentialRampToValueAtTime(volumen, inicio + 0.015);
+  ganancia.gain.exponentialRampToValueAtTime(0.0001, inicio + duracion);
+  osc.connect(ganancia).connect(c.destination);
+  osc.start(inicio);
+  osc.stop(inicio + duracion + 0.05);
+  return osc;
+}
+
+/**
+ * 🥁 Redoble del bombo: golpes de tambor que se aceleran durante
+ * `duracionMs`. Devuelve la función para detenerlo (si la ceremonia
+ * se salta a la mitad, los golpes ya programados se cancelan).
+ */
+export function iniciarRedoble(duracionMs: number): () => void {
+  const c = contexto();
+  if (!c) return () => {};
+  const t0 = c.currentTime + 0.03;
+  const fuentes: OscillatorNode[] = [];
+  let desplazamiento = 0;
+  let paso = 0.15;
+  while (desplazamiento < duracionMs / 1000) {
+    const osc = golpeTambor(c, t0 + desplazamiento, 0.09, 0.1);
+    if (osc) fuentes.push(osc);
+    desplazamiento += paso;
+    paso = Math.max(0.055, paso * 0.93);
+  }
+  return () => {
+    for (const f of fuentes) {
+      try {
+        f.stop();
+      } catch {
+        // Ya sonó o ya se detuvo: no pasa nada.
+      }
+    }
+  };
+}
+
+/** 🎯 Golpe de revelación: un tom seco y una nota brillante encima. */
+export function sonarGolpe(): void {
+  const c = contexto();
+  if (!c) return;
+  const t = c.currentTime;
+  golpeTambor(c, t, 0.22, 0.22);
+  tono(c, 1318.5, t + 0.02, 0.16, 0.08);
+}
+
+/** 🎉 Fanfarria de cierre de la ceremonia: arpegio largo y brillante. */
+export function sonarFanfarria(): void {
+  const c = contexto();
+  if (!c) return;
+  const t = c.currentTime;
+  tono(c, 523.25, t, 0.14);
+  tono(c, 659.25, t + 0.11, 0.14);
+  tono(c, 783.99, t + 0.22, 0.14);
+  tono(c, 1046.5, t + 0.33, 0.3);
+  tono(c, 783.99, t + 0.55, 0.12, 0.09);
+  tono(c, 1046.5, t + 0.66, 0.42, 0.13);
+}
