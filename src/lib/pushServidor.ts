@@ -8,7 +8,9 @@
 // SOLO se importa desde rutas /api/* — jamás desde un componente.
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import webpush from 'web-push';
+// web-push v4 es ESM con exports nombrados (sin default): así lo
+// aceptan tanto tsc como el bundler de Next 16.
+import { sendNotification, setVapidDetails } from 'web-push';
 
 let cliente: SupabaseClient | null = null;
 
@@ -42,7 +44,7 @@ function asegurarVapid(): void {
       'Faltan las llaves VAPID en el servidor (NEXT_PUBLIC_VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY).'
     );
   }
-  webpush.setVapidDetails(sujeto, publica, privada);
+  setVapidDetails(sujeto, publica, privada);
   vapidListo = true;
 }
 
@@ -70,7 +72,7 @@ export async function enviarPush(
 ): Promise<ResultadoEnvio> {
   asegurarVapid();
   try {
-    await webpush.sendNotification(
+    await sendNotification(
       {
         endpoint: suscripcion.endpoint,
         keys: { p256dh: suscripcion.p256dh, auth: suscripcion.auth },
