@@ -3,6 +3,7 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import { usePerfilUsuario } from '@/hooks/usePerfilUsuario'
 import { supabase } from '@/lib/supabase'
 import { toPng } from 'html-to-image'
+import AjustesNotificaciones from '@/components/AjustesNotificaciones'
 
 const SelectorConLogo = ({ label, opciones, valorActual, onChange, placeholder }: any) => {
   const [abierto, setAbierto] = useState(false)
@@ -483,6 +484,9 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
           </div>
         </div>
       </div>
+
+      {/* 🔔 NOTIFICACIONES PUSH Y SONIDOS EN VIVO */}
+      <AjustesNotificaciones usuarioActivo={usuarioActivo} />
 
       {/* 📡 ACTIVIDAD RECIENTE */}
       <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-5 shadow-lg relative overflow-hidden">

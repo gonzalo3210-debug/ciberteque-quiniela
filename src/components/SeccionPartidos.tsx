@@ -36,7 +36,15 @@
 // Los datos vienen de NUESTRAS rutas de servidor (/api/partidos,
 // /api/equipos-liga, /api/en-vivo, /api/buscar); la vista se refresca
 // sola cada 2 minutos y la llave del proveedor nunca llega al navegador.
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import {
+  detectarEventosSonoros,
+  leerPreferenciaSonidos,
+  sonarGol,
+  sonarSilbatazo,
+  vibrarGol,
+  type MarcadorSimple,
+} from '@/lib/sonidos'
 import type {
   SportsFixture,
   SportsTeamDetail,
@@ -1315,6 +1323,38 @@ function VistaEnVivo({
       { clave: 'resto', titulo: '🔴 En vivo ahora', fixtures: resto },
     ].filter((b) => b.fixtures.length > 0)
   }, [fixtures, seleccionada, favoritos])
+
+  // 🔊 Sonidos en vivo: entre un refresco y otro, si sube el marcador
+  // de un partido de la quiniela o de favoritos suena el gol (y vibra),
+  // y al terminar suena el silbatazo. Solo si el jugador prendió el
+  // toggle en Mi Perfil; la primera foto es la línea base (no suena).
+  const fotoSonoraPrevia = useRef<Map<string, MarcadorSimple> | null>(null)
+  useEffect(() => {
+    if (!bloques) return
+    const actuales: MarcadorSimple[] = []
+    for (const bloque of bloques) {
+      if (bloque.clave === 'resto') continue
+      for (const f of bloque.fixtures) {
+        actuales.push({
+          id: f.providerId,
+          homeScore: f.homeScore,
+          awayScore: f.awayScore,
+          status: f.status,
+        })
+      }
+    }
+    const eventos = detectarEventosSonoros(fotoSonoraPrevia.current, actuales)
+    fotoSonoraPrevia.current = new Map(actuales.map((m) => [m.id, m]))
+    if (eventos.length === 0 || !leerPreferenciaSonidos()) return
+    for (const evento of eventos) {
+      if (evento.tipo === 'gol') {
+        sonarGol()
+        vibrarGol()
+      } else {
+        sonarSilbatazo()
+      }
+    }
+  }, [bloques])
 
   if (!fixtures && !error) {
     return (
