@@ -3,6 +3,60 @@ import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import { extraerNacionalMX, telefonoCanonicoMX, formasGuardadasMX, esMismoNumeroMX } from '@/lib/telefono'
+import {
+  COLUMNA_PALABRA_SECRETA,
+  COLUMNA_INTENTOS_RECUPERACION,
+  COLUMNA_BLOQUEO_RECUPERACION,
+  palabraSecretaValida,
+  palabraSecretaCoincide,
+  usuarioTienePalabraSecreta,
+  estadoIntentosDesdeUsuario,
+  evaluarBloqueoRecuperacion,
+  registrarFalloRecuperacion
+} from '@/lib/recuperacion'
+
+// 🔎 Busca las cuentas de un número en TODOS los formatos en que pudo
+// quedar guardado: canónico (+52...), 10 dígitos, 52/521 pegados y
+// formatos viejos con espacios o paréntesis. Lo usan el login y la
+// recuperación con palabra secreta.
+const buscarCandidatosPorTelefono = async (nacional: string | null, telefonoInternacional: string) => {
+  let candidatos: any[] = []
+
+  if (nacional) {
+    const { data: exactos } = await supabase
+      .from('usuarios')
+      .select('*')
+      .in('telefono', formasGuardadasMX(nacional))
+
+    if (exactos && exactos.length > 0) {
+      candidatos = exactos
+    } else {
+      const { data: todos } = await supabase.from('usuarios').select('id, telefono')
+      const ids = (todos || [])
+        .filter((u: any) => esMismoNumeroMX(u.telefono || '', nacional))
+        .map((u: any) => u.id)
+
+      if (ids.length > 0) {
+        const { data: porId } = await supabase.from('usuarios').select('*').in('id', ids)
+        if (porId) candidatos = porId
+      }
+    }
+  } else {
+    const { data: unico } = await supabase
+      .from('usuarios')
+      .select('*')
+      .eq('telefono', telefonoInternacional)
+      .single()
+    if (unico) candidatos = [unico]
+  }
+
+  return candidatos
+}
+
+// 🛡️ Mensaje ÚNICO de fallo en la recuperación: no revela si el
+// número existe, si la cuenta no tiene palabra secreta o si la
+// palabra no coincidió. La salida de WhatsApp siempre acompaña.
+const ERROR_RECUPERACION_GENERICO = 'No pudimos recuperar tu acceso con esos datos. Revisa tu número y tu palabra secreta. Si aún no creas tu palabra secreta en Mi Perfil, pide ayuda por WhatsApp.'
 
 export default function Login({ onLogin, onSwitchToRegister }: { onLogin?: (usuario: any) => void, onSwitchToRegister?: () => void }) {
   const [codigoPais, setCodigoPais] = useState('+52') 
@@ -13,6 +67,14 @@ export default function Login({ onLogin, onSwitchToRegister }: { onLogin?: (usua
   
   const [mostrarNip, setMostrarNip] = useState(false)
   const [intentosFallidos, setIntentosFallidos] = useState(0)
+
+  // 🔐 Recuperación con palabra secreta
+  const [modoRecuperacion, setModoRecuperacion] = useState(false)
+  const [palabraSecreta, setPalabraSecreta] = useState('')
+  const [nuevoNip, setNuevoNip] = useState('')
+  const [nuevoNipConfirm, setNuevoNipConfirm] = useState('')
+  const [cargandoRecuperacion, setCargandoRecuperacion] = useState(false)
+  const [errorRecuperacion, setErrorRecuperacion] = useState('')
   const [captcha, setCaptcha] = useState({ num1: 0, num2: 0, res: 0 })
   const [respuestaCaptcha, setRespuestaCaptcha] = useState('')
 
@@ -56,6 +118,111 @@ export default function Login({ onLogin, onSwitchToRegister }: { onLogin?: (usua
     window.open(`https://wa.me/523118776263?text=${encodeURIComponent(mensaje)}`, '_blank')
   }
 
+  // 🔐 RECUPERACIÓN CON PALABRA SECRETA: número + palabra secreta →
+  // NIP nuevo y entra. Cambia SOLO el NIP (el anterior es hash y
+  // nunca se muestra). Todos los fallos —número inexistente, cuenta
+  // sin palabra, palabra incorrecta o bloqueo temporal— responden
+  // con el MISMO mensaje genérico.
+  const handleRecuperacion = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    // Validaciones del NIP NUEVO: hablan solo de lo que él escribió,
+    // no revelan nada de la cuenta.
+    if (nuevoNip.length !== 4 || !/^\d+$/.test(nuevoNip)) {
+      setErrorRecuperacion('Tu NIP nuevo debe ser de exactamente 4 números.')
+      return
+    }
+    if (nuevoNip !== nuevoNipConfirm) {
+      setErrorRecuperacion('Los NIP nuevos no coinciden. Escríbelo igual en los dos campos.')
+      return
+    }
+    if (!palabraSecretaValida(palabraSecreta)) {
+      setErrorRecuperacion(ERROR_RECUPERACION_GENERICO)
+      return
+    }
+
+    setCargandoRecuperacion(true)
+    setErrorRecuperacion('')
+
+    try {
+      const codigoLimpio = codigoPais.trim() === '+' ? '+52' : codigoPais.trim()
+      const nacional = codigoLimpio === '+52' ? extraerNacionalMX(telefono) : null
+      const telLimpio = telefono.replace(/\D/g, '')
+      const telefonoInternacional = nacional ? telefonoCanonicoMX(nacional) : `${codigoLimpio}${telLimpio}`
+
+      const candidatos = await buscarCandidatosPorTelefono(nacional, telefonoInternacional)
+      const conPalabra = candidatos.filter((c: any) => usuarioTienePalabraSecreta(c))
+
+      let recuperado: any = null
+      let primerConPalabra: any = null
+      for (const cand of conPalabra) {
+        if (!primerConPalabra) primerConPalabra = cand
+        const estado = estadoIntentosDesdeUsuario(cand)
+        if (evaluarBloqueoRecuperacion(estado).bloqueado) continue
+        if (await palabraSecretaCoincide(palabraSecreta, cand.id, cand[COLUMNA_PALABRA_SECRETA])) {
+          recuperado = cand
+          break
+        }
+      }
+
+      if (!recuperado) {
+        // El fallo se cuenta contra la primera cuenta con palabra
+        // (si hay); registrarFalloRecuperacion no cambia el estado
+        // si el bloqueo sigue vigente.
+        if (primerConPalabra) {
+          const estado = estadoIntentosDesdeUsuario(primerConPalabra)
+          const nuevoEstado = registrarFalloRecuperacion(estado)
+          if (nuevoEstado !== estado) {
+            await supabase
+              .from('usuarios')
+              .update({
+                [COLUMNA_INTENTOS_RECUPERACION]: nuevoEstado.intentos,
+                [COLUMNA_BLOQUEO_RECUPERACION]: nuevoEstado.bloqueadoHasta
+              })
+              .eq('id', primerConPalabra.id)
+          }
+        }
+        setErrorRecuperacion(ERROR_RECUPERACION_GENERICO)
+        setCargandoRecuperacion(false)
+        return
+      }
+
+      // Éxito: el NIP nuevo se cifra sobre el formato canónico (igual
+      // que la migración silenciosa del login) y el contador de
+      // intentos queda limpio.
+      const nipNuevoHash = await encriptarNIP(nuevoNip, telefonoInternacional)
+      const { error: errorUpdate } = await supabase
+        .from('usuarios')
+        .update({
+          telefono: telefonoInternacional,
+          nip: nipNuevoHash,
+          [COLUMNA_INTENTOS_RECUPERACION]: 0,
+          [COLUMNA_BLOQUEO_RECUPERACION]: null
+        })
+        .eq('id', recuperado.id)
+
+      if (errorUpdate) {
+        setErrorRecuperacion(ERROR_RECUPERACION_GENERICO)
+        setCargandoRecuperacion(false)
+        return
+      }
+
+      // La sesión no carga el hash de la palabra ni el contador: eso
+      // vive solo en la base (Mi Perfil lo consulta por su cuenta).
+      const usuarioSesion = { ...recuperado, telefono: telefonoInternacional, nip: nipNuevoHash }
+      delete usuarioSesion[COLUMNA_PALABRA_SECRETA]
+      delete usuarioSesion[COLUMNA_INTENTOS_RECUPERACION]
+      delete usuarioSesion[COLUMNA_BLOQUEO_RECUPERACION]
+
+      login(usuarioSesion)
+      if (onLogin) onLogin(usuarioSesion)
+    } catch (err) {
+      setErrorRecuperacion(ERROR_RECUPERACION_GENERICO)
+    } finally {
+      setCargandoRecuperacion(false)
+    }
+  }
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     
@@ -76,38 +243,10 @@ export default function Login({ onLogin, onSwitchToRegister }: { onLogin?: (usua
       const telLimpio = telefono.replace(/\D/g, '')
       const telefonoInternacional = nacional ? telefonoCanonicoMX(nacional) : `${codigoLimpio}${telLimpio}`
 
-      // Buscar la cuenta en TODOS los formatos en que pudo quedar guardada:
-      // canónico (+52...), 10 dígitos, 52/521 pegados y formatos viejos con
-      // espacios o paréntesis. Así nadie se queda fuera por un formato viejo.
-      let candidatos: any[] = []
-
-      if (nacional) {
-        const { data: exactos } = await supabase
-          .from('usuarios')
-          .select('*')
-          .in('telefono', formasGuardadasMX(nacional))
-
-        if (exactos && exactos.length > 0) {
-          candidatos = exactos
-        } else {
-          const { data: todos } = await supabase.from('usuarios').select('id, telefono')
-          const ids = (todos || [])
-            .filter((u: any) => esMismoNumeroMX(u.telefono || '', nacional))
-            .map((u: any) => u.id)
-
-          if (ids.length > 0) {
-            const { data: porId } = await supabase.from('usuarios').select('*').in('id', ids)
-            if (porId) candidatos = porId
-          }
-        }
-      } else {
-        const { data: unico } = await supabase
-          .from('usuarios')
-          .select('*')
-          .eq('telefono', telefonoInternacional)
-          .single()
-        if (unico) candidatos = [unico]
-      }
+      // Buscar la cuenta en TODOS los formatos en que pudo quedar guardada
+      // (helper compartido con la recuperación con palabra secreta).
+      // Así nadie se queda fuera por un formato viejo.
+      const candidatos = await buscarCandidatosPorTelefono(nacional, telefonoInternacional)
 
       if (candidatos.length === 0) {
         setError('No existe una cuenta con este número.')
@@ -185,9 +324,122 @@ export default function Login({ onLogin, onSwitchToRegister }: { onLogin?: (usua
   return (
     <div className="bg-slate-900/60 backdrop-blur-md p-5 md:p-6 rounded-2xl border border-slate-800/60 shadow-2xl w-full max-w-sm mx-auto animate-in zoom-in-95 duration-300">
       <h2 className="text-xl md:text-2xl font-black text-white mb-5 text-center uppercase tracking-tight italic">
-        Inicia Sesión
+        {modoRecuperacion ? 'Recupera tu acceso' : 'Inicia Sesión'}
       </h2>
-      
+
+      {modoRecuperacion ? (
+      <form onSubmit={handleRecuperacion} className="space-y-4">
+        <div>
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+            Tu número de WhatsApp
+          </label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={codigoPais}
+              maxLength={4}
+              onChange={(e) => {
+                const lada = e.target.value.replace(/\D/g, '')
+                setCodigoPais('+' + lada)
+              }}
+              className="bg-slate-950 border border-slate-800 rounded-xl px-1 py-2.5 text-xs text-slate-300 outline-none focus:border-blue-500 w-[60px] text-center shrink-0 font-mono tracking-wider"
+              placeholder="+52"
+              required
+            />
+            <input
+              type="tel"
+              required
+              maxLength={13}
+              value={telefono}
+              onChange={(e) => setTelefono(e.target.value.replace(/\D/g, ''))}
+              className="w-full flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-center font-mono tracking-wider"
+              placeholder="Ej. 3110000000"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+            Tu palabra secreta
+          </label>
+          <input
+            type="password"
+            required
+            value={palabraSecreta}
+            onChange={(e) => setPalabraSecreta(e.target.value)}
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-center"
+            placeholder="La que creaste en Mi Perfil"
+          />
+          <p className="text-[8px] text-slate-500 mt-1 text-center font-bold uppercase">Se compara sin acentos y sin mayúsculas: escríbela como sea.</p>
+        </div>
+
+        <div>
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+            NIP nuevo (4 dígitos)
+          </label>
+          <input
+            type="password"
+            inputMode="numeric"
+            maxLength={4}
+            required
+            value={nuevoNip}
+            onChange={(e) => setNuevoNip(e.target.value.replace(/\D/g, ''))}
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 tracking-[0.6em] text-center text-sm font-black transition-all"
+            placeholder="••••"
+          />
+        </div>
+
+        <div>
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+            Confirma tu NIP nuevo
+          </label>
+          <input
+            type="password"
+            inputMode="numeric"
+            maxLength={4}
+            required
+            value={nuevoNipConfirm}
+            onChange={(e) => setNuevoNipConfirm(e.target.value.replace(/\D/g, ''))}
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 tracking-[0.6em] text-center text-sm font-black transition-all"
+            placeholder="••••"
+          />
+        </div>
+
+        {errorRecuperacion && (
+          <p className="text-red-400 text-[10px] font-bold uppercase tracking-tight text-center bg-red-950/20 border border-red-900/30 py-1.5 rounded-lg">
+            {errorRecuperacion}
+          </p>
+        )}
+
+        <button
+          type="submit"
+          disabled={cargandoRecuperacion}
+          className={`w-full font-black uppercase text-xs tracking-widest py-3 px-4 rounded-xl transition-all ${
+            cargandoRecuperacion
+              ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+              : 'bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_15px_rgba(37,99,235,0.3)] hover:scale-[1.01] active:scale-95'
+          }`}
+        >
+          {cargandoRecuperacion ? 'Verificando...' : 'Crear mi NIP nuevo y entrar'}
+        </button>
+
+        <button
+          type="button"
+          onClick={solicitarRecuperacionNip}
+          className="w-full bg-green-950/30 hover:bg-green-950/50 border border-green-900/40 hover:border-green-500/50 text-green-400 hover:text-green-300 font-black uppercase text-[10px] tracking-widest py-2.5 px-4 rounded-xl transition-all transform active:scale-95"
+        >
+          💬 Pedir ayuda por WhatsApp
+        </button>
+
+        <button
+          type="button"
+          onClick={() => { setModoRecuperacion(false); setErrorRecuperacion('') }}
+          className="w-full text-[9px] font-bold text-slate-500 uppercase tracking-widest hover:text-slate-300 transition-all"
+        >
+          ← Volver a iniciar sesión
+        </button>
+      </form>
+      ) : (
       <form onSubmit={handleLogin} className="space-y-4">
         <div>
           <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
@@ -296,6 +548,15 @@ export default function Login({ onLogin, onSwitchToRegister }: { onLogin?: (usua
           💬 ¿Olvidaste tu NIP? Pide ayuda por WhatsApp
         </button>
 
+        {/* 🔐 RECUPERACIÓN CON PALABRA SECRETA — autoservicio */}
+        <button
+          type="button"
+          onClick={() => { setModoRecuperacion(true); setErrorRecuperacion('') }}
+          className="w-full bg-blue-950/30 hover:bg-blue-950/50 border border-blue-900/40 hover:border-blue-500/50 text-blue-400 hover:text-blue-300 font-black uppercase text-[10px] tracking-widest py-2.5 px-4 rounded-xl transition-all transform active:scale-95"
+        >
+          🔐 ¿Olvidaste tu NIP? Recupéralo con tu palabra secreta
+        </button>
+
         {onSwitchToRegister && (
           <div className="border-t border-slate-800/60 pt-4 mt-2 text-center space-y-2">
             <p className="text-[9px] md:text-[10px] text-slate-500 font-bold uppercase tracking-wider">
@@ -311,6 +572,7 @@ export default function Login({ onLogin, onSwitchToRegister }: { onLogin?: (usua
           </div>
         )}
       </form>
+      )}
     </div>
   )
 }

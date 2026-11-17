@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { extraerNacionalMX, telefonoCanonicoMX, formasGuardadasMX, esMismoNumeroMX } from '@/lib/telefono'
 import { leerCodigoReferido, limpiarCodigoReferido, esErrorColumnaInexistente, COLUMNA_REFERIDO } from '@/lib/invitaciones'
+import { COLUMNA_PALABRA_SECRETA, hashPalabraSecreta, normalizarPalabraSecreta, palabraSecretaValida } from '@/lib/recuperacion'
 
 export default function RegistroUsuario({ onVolverAlLogin }: { onVolverAlLogin?: () => void }) {
   const [nombre, setNombre] = useState('')
@@ -10,6 +11,8 @@ export default function RegistroUsuario({ onVolverAlLogin }: { onVolverAlLogin?:
   const [telefono, setTelefono] = useState('')
   const [nip, setNip] = useState('')
   const [nipConfirm, setNipConfirm] = useState('')
+  const [palabraSecreta, setPalabraSecreta] = useState('')
+  const [palabraConfirm, setPalabraConfirm] = useState('')
   const [mensaje, setMensaje] = useState('')
   const [registroExitoso, setRegistroExitoso] = useState(false)
   
@@ -44,6 +47,20 @@ export default function RegistroUsuario({ onVolverAlLogin }: { onVolverAlLogin?:
     if (nip !== nipConfirm) {
       setMensaje('Error: Los NIP no coinciden. Escríbelo igual en los dos campos.')
       return
+    }
+
+    // 🔐 Palabra secreta OPCIONAL: solo se valida si escribió algo.
+    // Se compara ya normalizada (sin acentos ni mayúsculas) para que
+    // un acento de más no la deje inservible.
+    if (palabraSecreta.trim() || palabraConfirm.trim()) {
+      if (!palabraSecretaValida(palabraSecreta)) {
+        setMensaje('Error: Tu palabra secreta debe tener al menos 4 letras o números.')
+        return
+      }
+      if (normalizarPalabraSecreta(palabraSecreta) !== normalizarPalabraSecreta(palabraConfirm)) {
+        setMensaje('Error: Tu palabra secreta no coincide en los dos campos.')
+        return
+      }
     }
 
     // Normalización: un solo formato oficial de guardado, venga como venga el número.
@@ -114,14 +131,17 @@ export default function RegistroUsuario({ onVolverAlLogin }: { onVolverAlLogin?:
       const codigoReferido = leerCodigoReferido()
       if (codigoReferido) nuevoUsuario[COLUMNA_REFERIDO] = codigoReferido
 
-      let { error } = await supabase
+      let { data: creado, error } = await supabase
         .from('usuarios')
         .insert([nuevoUsuario])
+        .select('id')
+        .single()
 
       if (error && codigoReferido && esErrorColumnaInexistente(error, COLUMNA_REFERIDO)) {
         delete nuevoUsuario[COLUMNA_REFERIDO]
-        const reintento = await supabase.from('usuarios').insert([nuevoUsuario])
+        const reintento = await supabase.from('usuarios').insert([nuevoUsuario]).select('id').single()
         error = reintento.error
+        creado = reintento.data
       }
 
       if (error) {
@@ -131,6 +151,21 @@ export default function RegistroUsuario({ onVolverAlLogin }: { onVolverAlLogin?:
           setMensaje('Error: ' + error.message)
         }
       } else {
+        // 🔐 Palabra secreta: se guarda con hash ligado al id recién
+        // creado (el hash necesita el id, por eso va DESPUÉS del
+        // insert). Si la migración aún no se corre, la actualización
+        // falla en silencio: el registro jamás depende de esto.
+        if (creado?.id && palabraSecreta.trim()) {
+          try {
+            const hashPalabra = await hashPalabraSecreta(palabraSecreta, creado.id)
+            await supabase
+              .from('usuarios')
+              .update({ [COLUMNA_PALABRA_SECRETA]: hashPalabra })
+              .eq('id', creado.id)
+          } catch {
+            // Silencio a propósito: la cuenta ya quedó creada.
+          }
+        }
         limpiarCodigoReferido()
         setRegistroExitoso(true)
         setMensaje('¡Registro exitoso! Redirigiendo...')
@@ -243,6 +278,35 @@ export default function RegistroUsuario({ onVolverAlLogin }: { onVolverAlLogin?:
                 required
               />
               <p className="text-[8px] text-slate-500 mt-1 text-center font-bold uppercase">Tu NIP se guarda cifrado: nadie puede verlo, ni el administrador. Si lo olvidas, te ayudamos a restablecerlo por WhatsApp.</p>
+            </div>
+
+            <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl px-3 py-2.5">
+              <p className="text-[9px] text-emerald-300 font-bold uppercase tracking-wider text-center leading-relaxed">
+                🔐 Palabra secreta (opcional): si un día olvidas tu NIP, con ella creas uno nuevo tú solo, sin pedir ayuda.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Palabra secreta (opcional)</label>
+              <input
+                type="password"
+                value={palabraSecreta}
+                onChange={(e) => setPalabraSecreta(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all text-center"
+                placeholder="Ej. el nombre de tu mascota"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Confirma tu palabra secreta</label>
+              <input
+                type="password"
+                value={palabraConfirm}
+                onChange={(e) => setPalabraConfirm(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all text-center"
+                placeholder="Escríbela otra vez"
+              />
+              <p className="text-[8px] text-slate-500 mt-1 text-center font-bold uppercase">Se guarda cifrada y se compara sin acentos ni mayúsculas. Elige algo que solo tú sepas y no olvides.</p>
             </div>
 
             <button type="submit" className="w-full bg-green-600 hover:bg-green-500 text-white font-black py-3 rounded-xl uppercase text-xs tracking-widest transition-all shadow-[0_0_15px_rgba(22,163,74,0.3)] hover:scale-[1.01] active:scale-95">

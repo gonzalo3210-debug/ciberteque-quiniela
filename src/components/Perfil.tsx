@@ -7,6 +7,7 @@ import AjustesNotificaciones from '@/components/AjustesNotificaciones'
 import VitrinaInsignias from '@/components/VitrinaInsignias'
 import TarjetaEstadisticas from '@/components/TarjetaEstadisticas'
 import TarjetaInvitacion from '@/components/TarjetaInvitacion'
+import TarjetaPalabraSecreta from '@/components/TarjetaPalabraSecreta'
 
 const SelectorConLogo = ({ label, opciones, valorActual, onChange, placeholder }: any) => {
   const [abierto, setAbierto] = useState(false)
@@ -490,6 +491,9 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
 
       {/* 🔔 NOTIFICACIONES PUSH Y SONIDOS EN VIVO */}
       <AjustesNotificaciones usuarioActivo={usuarioActivo} />
+
+      {/* 🔐 PALABRA SECRETA PARA RECUPERAR EL ACCESO */}
+      <TarjetaPalabraSecreta usuarioActivo={usuarioActivo} />
 
       {/* 📡 ACTIVIDAD RECIENTE */}
       <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-5 shadow-lg relative overflow-hidden">
