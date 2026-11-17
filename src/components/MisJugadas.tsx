@@ -2,6 +2,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useSincronizacionRealtime } from '@/hooks/useSincronizacionRealtime'
+import { calcularTabla, calcularProyeccion, partidoTieneResultado, partidoEnVivo, puntosDePronostico } from '@/lib/proyeccion'
 
 // ⏱️ Un partido solo se considera "en vivo" durante una ventana razonable
 // tras su inicio (un partido dura ~2 h; 3 h cubre tiempos extra y retrasos).
@@ -200,61 +201,43 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
           if (todosGrupos.length > 0) {
             const { data: qData } = await supabase
               .from('quinielas')
-              .select('id, modalidad, goles_totales_real, partidos (id, resultado_real, goles_local, goles_visitante), tickets (id, usuario_id, prediccion_goles_total, pronosticos (eleccion_usuario, partido_id))')
+              .select('id, modalidad, goles_totales_real, partidos (id, resultado_real, goles_local, goles_visitante, es_final), tickets (id, usuario_id, prediccion_goles_total, pronosticos (eleccion_usuario, partido_id))')
               .in('id', todosGrupos.map(g => g.quiniela_id))
 
             if (qData) {
               qData.forEach((q: any) => {
                 const partidosQ = q.partidos || []
-                const hayResultados = partidosQ.some((p: any) => p.resultado_real !== null || (p.goles_local !== null && p.goles_visitante !== null))
+                const hayResultados = partidosQ.some((p: any) => partidoTieneResultado(p))
                 if (!hayResultados) return
 
-                const golesReales = q.goles_totales_real !== null ? q.goles_totales_real : -1
-                const ranking = (q.tickets || []).map((ticket: any) => {
-                  let puntos = 0
-                  ;(ticket.pronosticos || []).forEach((pron: any) => {
-                    const partido = partidosQ.find((p: any) => p.id === pron.partido_id)
-                    if (!partido) return
-                    const tieneResultado = partido.resultado_real !== null || (partido.goles_local !== null && partido.goles_visitante !== null)
-                    if (!tieneResultado) return
-                    const pickStr = pron.eleccion_usuario?.replace(/\s+/g, '') || ''
-                    let realStr = ''
-                    if (partido.goles_local !== null && partido.goles_visitante !== null) {
-                      realStr = `${partido.goles_local}-${partido.goles_visitante}`
-                    } else {
-                      realStr = partido.resultado_real?.replace(/\s+/g, '') || ''
-                    }
-                    if (pickStr === realStr) {
-                      puntos += (q.modalidad === 'marcador_exacto' ? 3 : 1)
-                    } else {
-                      const pickLEV = getLEV(pickStr)
-                      const realLEV = getLEV(realStr) || getLEV(partido.resultado_real)
-                      if (pickLEV && realLEV && pickLEV === realLEV) puntos += 1
-                    }
-                  })
-                  return {
-                    id: ticket.id,
-                    puntos,
-                    golesDiff: golesReales !== -1 ? Math.abs((ticket.prediccion_goles_total || 0) - golesReales) : 999
-                  }
-                })
-
-                ranking.sort((a: any, b: any) => (b.puntos - a.puntos) || (a.golesDiff - b.golesDiff))
-                ranking.forEach((item: any, idx: number) => {
-                  if (idx === 0) {
-                    item.posicion = 1
-                  } else {
-                    const anterior = ranking[idx - 1]
-                    item.posicion = (item.puntos === anterior.puntos && item.golesDiff === anterior.golesDiff) ? anterior.posicion : idx + 1
-                  }
-                })
+                // 🧮 Implementación compartida (src/lib/proyeccion.ts),
+                // idéntica a la del ranking oficial.
+                const ranking = calcularTabla(q, q.tickets || [], partidosQ, { soloFinales: false })
 
                 const grupo = todosGrupos.find(g => g.quiniela_id === q.id)
                 if (grupo) {
-                  const misEntradas = ranking.filter((r: any) => grupo.tickets.some((t: any) => t.id === r.id))
+                  const misEntradas = ranking.filter((r: any) => grupo.tickets.some((t: any) => t.id === r.ticketId))
                   if (misEntradas.length > 0) {
                     grupo.miPosicion = Math.min(...misEntradas.map((r: any) => r.posicion))
                     grupo.totalBoletos = ranking.length
+                  }
+
+                  // 📊 Proyección en vivo ("si terminara ahorita"): solo
+                  // cuando hay partidos en juego en esta quiniela; se
+                  // guarda la mejor entrada del jugador.
+                  const proy = calcularProyeccion(q, q.tickets || [], partidosQ)
+                  if (proy && proy.hayEnVivo) {
+                    const miasProy = proy.tablaProyeccion.filter((f: any) => grupo.tickets.some((t: any) => t.id === f.ticketId))
+                    if (miasProy.length > 0) {
+                      const mejor = [...miasProy].sort((a: any, b: any) => (a.posicion - b.posicion) || (b.puntos - a.puntos))[0]
+                      grupo.proyeccion = {
+                        ticketId: mejor.ticketId,
+                        posicion: mejor.posicion,
+                        puntos: mejor.puntos,
+                        movimiento: proy.porTicket[mejor.ticketId]?.movimiento ?? 0,
+                        totalBoletos: proy.tablaProyeccion.length
+                      }
+                    }
                   }
                 }
               })
@@ -479,7 +462,48 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
             </div>
           )}
         </div>
-        
+
+        {grupo.proyeccion && esActivo && !esSorteo && (() => {
+          const ticketProy = grupo.tickets.find((t: any) => t.id === grupo.proyeccion.ticketId)
+          const partidosEnVivo = grupo.partidos.filter((p: any) => partidoEnVivo({ id: p.id, goles_local: p.goles_local, goles_visitante: p.goles_visitante, resultado_real: p.real, es_final: p.es_final }))
+          return (
+            <div className="mx-3 mt-3 md:mx-4 rounded-xl border border-red-500/40 bg-gradient-to-r from-red-950/40 to-slate-900 px-3 py-2.5 shadow-[0_0_15px_rgba(239,68,68,0.12)]">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[10px] md:text-xs font-black uppercase tracking-widest text-red-400 flex items-center gap-1.5">
+                  <span className="animate-pulse">📊</span> Si terminara ahorita
+                </span>
+                <span className="text-[10px] md:text-xs font-black uppercase tracking-widest text-white">
+                  Irías en <span className="text-amber-400 text-sm md:text-base">{grupo.proyeccion.posicion}° lugar</span> con <span className="text-amber-400 text-sm md:text-base">{grupo.proyeccion.puntos} pts</span>
+                </span>
+                {grupo.proyeccion.movimiento > 0 && (
+                  <span className="text-[9px] font-black text-green-400 bg-green-950/60 border border-green-900/60 px-1.5 py-0.5 rounded">▲ {grupo.proyeccion.movimiento}</span>
+                )}
+                {grupo.proyeccion.movimiento < 0 && (
+                  <span className="text-[9px] font-black text-red-400 bg-red-950/60 border border-red-900/60 px-1.5 py-0.5 rounded">▼ {Math.abs(grupo.proyeccion.movimiento)}</span>
+                )}
+                {grupo.proyeccion.movimiento === 0 && (
+                  <span className="text-[9px] font-black text-slate-400 bg-slate-900 border border-slate-700 px-1.5 py-0.5 rounded">— Sin cambio</span>
+                )}
+              </div>
+              {ticketProy && partidosEnVivo.length > 0 && (
+                <div className="mt-2 flex flex-col gap-1">
+                  {partidosEnVivo.map((p: any) => {
+                    const r = puntosDePronostico(grupo.modalidad, ticketProy.selecciones[p.id], { id: p.id, goles_local: p.goles_local, goles_visitante: p.goles_visitante, resultado_real: p.real, es_final: p.es_final })
+                    return (
+                      <div key={p.id} className="flex items-center justify-between gap-2 text-[9px] md:text-[10px] font-bold uppercase tracking-wide bg-slate-950/60 border border-slate-800 rounded-lg px-2 py-1">
+                        <span className="text-slate-300 truncate">{p.local} <span className="text-white font-black">{p.goles_local}-{p.goles_visitante}</span> {p.visitante}</span>
+                        <span className="text-slate-500 shrink-0">Tu pick: <span className="text-slate-300">{ticketProy.selecciones[p.id] || '—'}</span></span>
+                        <span className={`shrink-0 font-black ${r.estado === 'acierto_exacto' ? 'text-green-400' : r.estado === 'acierto_lev' ? 'text-amber-400' : 'text-red-400'}`}>{r.puntos > 0 ? `+${r.puntos}` : '0'} pts</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              <p className="mt-1.5 text-[8px] md:text-[9px] text-slate-500 font-bold uppercase tracking-widest">Proyección con marcadores parciales — no es el resultado oficial</p>
+            </div>
+          )
+        })()}
+
         {esSorteo ? (
           <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 bg-blue-950/10">
             {grupo.tickets.map((t: any, idx: number) => {

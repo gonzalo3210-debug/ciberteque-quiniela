@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { obtenerDatosAnidadosPosiciones, obtenerCatalogoUsuarios, obtenerCatalogoEquipos } from '@/lib/queries'
+import { calcularTabla, diferenciaGoles } from '@/lib/proyeccion'
 import { useAuth } from '@/contexts/AuthContext' 
 
 export function usePosiciones(rolUsuario?: string) {
@@ -79,21 +80,6 @@ export function usePosiciones(rolUsuario?: string) {
         });
       }
 
-      const getLEV = (marcador: string) => {
-        if (!marcador) return null;
-        const limpio = marcador.replace(/\s+/g, '').toUpperCase();
-        if (['L', 'E', 'V'].includes(limpio)) return limpio;
-        if (limpio.includes('-')) {
-          const [l, v] = limpio.split('-').map(Number);
-          if (!isNaN(l) && !isNaN(v)) {
-            if (l > v) return 'L';
-            if (l < v) return 'V';
-            return 'E';
-          }
-        }
-        return null;
-      }
-
       const quinielasProcesadas = qData.map(q => {
         const partidosQ = [...(q.partidos || [])].sort((a: any, b: any) => {
           const tiempoA = new Date(a.fecha_hora_partido || a.fecha_hora || 0).getTime();
@@ -103,98 +89,56 @@ export function usePosiciones(rolUsuario?: string) {
 
         const ticketsQ = q.tickets || []
 
+        // 🧮 Puntos, orden y posiciones con la implementación compartida
+        // (src/lib/proyeccion.ts): soloFinales: false conserva el
+        // comportamiento histórico del ranking — cuentan todos los
+        // resultados capturados, finales o parciales en vivo. El
+        // sorteo no pasa por la tabla: su orden sale de puntos_totales.
+        const tablaOficial = q.modalidad !== 'sorteo'
+          ? calcularTabla(q, ticketsQ, partidosQ, { soloFinales: false })
+          : []
+        const filaPorTicket = new Map(tablaOficial.map((f: any) => [f.ticketId, f]))
+        const ordenPorTicket = new Map(tablaOficial.map((f: any, i: number) => [f.ticketId, i]))
+
         const ranking = ticketsQ.map((ticket: any) => {
-          let puntos = 0
-          const aciertos: Record<string, string> = {}
-          const pronosticosTicket = ticket.pronosticos || [] 
-
-          if (q.modalidad !== 'sorteo') {
-            pronosticosTicket.forEach((pron: any) => {
-              const partido = partidosQ.find((p: any) => p.id === pron.partido_id)
-              if (partido) {
-                const tieneResultado = partido.resultado_real !== null || (partido.goles_local !== null && partido.goles_visitante !== null);
-                
-                if (tieneResultado) {
-                  const pickStr = pron.eleccion_usuario?.replace(/\s+/g, '') || '';
-                  let realStr = '';
-                  
-                  if (partido.goles_local !== null && partido.goles_visitante !== null) {
-                    realStr = `${partido.goles_local}-${partido.goles_visitante}`;
-                  } else {
-                    realStr = partido.resultado_real?.replace(/\s+/g, '') || '';
-                  }
-
-                  if (pickStr === realStr) {
-                    puntos += (q.modalidad === 'marcador_exacto' ? 3 : 1);
-                    aciertos[pron.partido_id] = 'acierto_exacto';
-                  } else {
-                    const pickLEV = getLEV(pickStr);
-                    const realLEV = getLEV(realStr) || getLEV(partido.resultado_real);
-                    
-                    if (pickLEV && realLEV && pickLEV === realLEV) {
-                      puntos += 1;
-                      aciertos[pron.partido_id] = 'acierto_lev';
-                    } else {
-                      aciertos[pron.partido_id] = 'fallo';
-                    }
-                  }
-                } else {
-                  aciertos[pron.partido_id] = 'pendiente';
-                }
-              }
-            })
-          }
-
-          const golesReales = q.goles_totales_real !== null ? q.goles_totales_real : -1
-          const golesDiff = golesReales !== -1 ? Math.abs((ticket.prediccion_goles_total || 0) - golesReales) : 999
+          const fila = filaPorTicket.get(ticket.id)
+          const golesDiff = fila ? fila.golesDiff : diferenciaGoles(ticket.prediccion_goles_total, q.goles_totales_real)
 
           const userData = mapaUsuarios[ticket.usuario_id] || { nombre: 'Jugador de Mostrador', avatar_url: null }
           const equipoAsignado = ticket.equipo_asignado_id ? mapaEquipos[ticket.equipo_asignado_id] : null
 
           return {
             id: ticket.id,
-            usuario_id: ticket.usuario_id, 
+            usuario_id: ticket.usuario_id,
             nombre: userData.nombre,
             avatar_url: userData.avatar_url,
             prediccionGoles: ticket.prediccion_goles_total || 0,
-            puntos: q.modalidad === 'sorteo' ? ticket.puntos_totales : puntos,
-            aciertos,
+            puntos: q.modalidad === 'sorteo' ? ticket.puntos_totales : (fila ? fila.puntos : 0),
+            aciertos: fila ? fila.aciertos : {},
             golesDiff,
-            pronosticos: pronosticosTicket,
+            pronosticos: ticket.pronosticos || [],
             equipoAsignado,
-            conteoReacciones: mapaReacciones[ticket.id] || {}, 
-            estaEliminado: q.modalidad === 'sorteo' && ticket.puntos_totales < 0
+            conteoReacciones: mapaReacciones[ticket.id] || {},
+            estaEliminado: q.modalidad === 'sorteo' && ticket.puntos_totales < 0,
+            posicion: 0
           }
         })
 
         if (q.modalidad === 'sorteo') {
-           ranking.sort((a, b) => {
+           ranking.sort((a: any, b: any) => {
               if (a.estaEliminado === b.estaEliminado) return 0;
               return a.estaEliminado ? 1 : -1;
            });
+           ranking.forEach((item: any, idx: number) => {
+             item.posicion = idx + 1;
+           });
         } else {
-           ranking.sort((a, b) => {
-             if (b.puntos !== a.puntos) return b.puntos - a.puntos
-             return a.golesDiff - b.golesDiff
-           })
+           ranking.sort((a: any, b: any) => (ordenPorTicket.get(a.id) ?? 0) - (ordenPorTicket.get(b.id) ?? 0))
+           ranking.forEach((item: any) => {
+             const fila = filaPorTicket.get(item.id)
+             item.posicion = fila ? fila.posicion : 1
+           });
         }
-
-        ranking.forEach((item: any, idx) => {
-          if (q.modalidad === 'sorteo') {
-             item.posicion = idx + 1; 
-          } else {
-             if (idx > 0) {
-               const anterior = ranking[idx - 1];
-               if (item.puntos === anterior.puntos && item.golesDiff === anterior.golesDiff) {
-                 item.posicion = anterior.posicion; 
-               } else {
-                 item.posicion = idx + 1; 
-               }
-             } else {
-               item.posicion = 1;
-             }
-          }
-        });
 
         const precioTicketMXN = q.precio_ticket ?? 30 
         const totalBoletos = ranking.length
