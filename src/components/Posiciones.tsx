@@ -1,6 +1,8 @@
 'use client'
 import React, { useState, useEffect, useMemo, Fragment } from 'react'
 import { usePosiciones } from '@/hooks/usePosiciones'
+import { useInsigniasRanking } from '@/hooks/useInsignias'
+import IconosInsignias from '@/components/IconosInsignias'
 import { calcularProyeccion } from '@/lib/proyeccion'
 import { useReacciones } from '@/hooks/useReacciones'
 import { usePerfilUsuario } from '@/hooks/usePerfilUsuario'
@@ -102,7 +104,7 @@ const ModalPerfilPublico = ({
 }) => {
   const { perfil, estadisticas, equiposInfo, niveles = [], cargando } = usePerfilUsuario({ id: usuarioId });
   const { enviarReaccion, enviando } = useReacciones();
-  
+
   const { usuario: miUsuario } = useAuth();
   
   const [conteoReacciones, setConteoReacciones] = useState<Record<string, {count: number, me: boolean, usuarios: any[]}>>({});
@@ -425,6 +427,10 @@ export default function Posiciones() {
   } = usePosiciones()
 
   const { enviarReaccion, enviando } = useReacciones();
+
+  // 🏅 Insignias de todos los jugadores (historial cerrado del Club,
+  // calculado al vuelo en 3 consultas; ver src/hooks/useInsignias.ts).
+  const { insigniasPorUsuario } = useInsigniasRanking();
   
   const [menuReaccionAbierto, setMenuReaccionAbierto] = useState<string | null>(null);
   const [tooltipListaUsuariosId, setTooltipListaUsuariosId] = useState<string | null>(null);
@@ -843,6 +849,7 @@ export default function Posiciones() {
                     <span className="text-[10px] font-black text-slate-400 bg-slate-950 border border-slate-800 px-1.5 py-0.5 rounded w-8 text-center shrink-0">{f.posicion}°</span>
                     <img src={getAvatarUrl(f.nombre, f.avatar_url)} alt={f.nombre} className="w-6 h-6 md:w-7 md:h-7 rounded-full object-cover bg-slate-900 shrink-0" />
                     <span className="font-black uppercase text-[10px] md:text-xs text-slate-200 truncate max-w-[120px] md:max-w-[200px]">{f.nombre}</span>
+                    <IconosInsignias resultado={insigniasPorUsuario.get(f.usuarioId)} />
                     {f.movimiento > 0 && <span className="text-[9px] font-black text-green-400 shrink-0">▲{f.movimiento}</span>}
                     {f.movimiento < 0 && <span className="text-[9px] font-black text-red-400 shrink-0">▼{Math.abs(f.movimiento)}</span>}
                     {f.movimiento === 0 && <span className="text-[9px] font-black text-slate-600 shrink-0">—</span>}
@@ -1049,6 +1056,7 @@ export default function Posiciones() {
                                    >
                                      {jugador.nombre} {esLider && <span className="ml-0.5 text-[9px] pointer-events-none">👑</span>}
                                    </span>
+                                   <IconosInsignias resultado={insigniasPorUsuario.get(jugador.usuario_id)} />
                                    
                                    <div className="relative flex items-center z-50 reaccion-interact">
                                      {idReceptorSeguro && (
@@ -1327,6 +1335,7 @@ export default function Posiciones() {
                               >
                                 {jugador.nombre}
                               </span>
+                              <IconosInsignias resultado={insigniasPorUsuario.get(jugador.usuario_id)} />
                             </div>
                           </div>
                           

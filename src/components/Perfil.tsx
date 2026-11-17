@@ -4,6 +4,7 @@ import { usePerfilUsuario } from '@/hooks/usePerfilUsuario'
 import { supabase } from '@/lib/supabase'
 import { toPng } from 'html-to-image'
 import AjustesNotificaciones from '@/components/AjustesNotificaciones'
+import VitrinaInsignias from '@/components/VitrinaInsignias'
 
 const SelectorConLogo = ({ label, opciones, valorActual, onChange, placeholder }: any) => {
   const [abierto, setAbierto] = useState(false)
@@ -597,6 +598,9 @@ export default function Perfil({ usuarioActivo, onUpdate }: { usuarioActivo: any
           </div>
         </div>
       </div>
+
+      {/* 🏅 INSIGNIAS Y RACHA */}
+      <VitrinaInsignias usuarioId={usuarioActivo?.id} />
 
       {/* 🏷️ MODAL: DETALLE DEL TICKET */}
       {ticketModal && (
