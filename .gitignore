@@ -42,3 +42,6 @@ next-env.d.ts
 
 # estado local del programa de marcadores (dedupe de notificaciones)
 scripts/marcador-directo/estado-notificaciones.json
+# estado y resúmenes locales de la liquidación automática
+scripts/marcador-directo/estado-liquidaciones.json
+scripts/marcador-directo/liquidaciones/

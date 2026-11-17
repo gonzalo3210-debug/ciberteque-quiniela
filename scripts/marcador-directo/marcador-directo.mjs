@@ -13,9 +13,14 @@
 //    (FT/AET/PEN/AWD). Jamás se adelanta un final.
 //  - Durante el juego se confía SOLO en la API premium (regla acordada
 //    con Gonzalo el 2026-11-14); no hay segunda fuente escribiendo.
-//  - NUNCA cierra ni liquida una quiniela, NUNCA toca
-//    goles_totales_real, NUNCA escribe en un partido sin enlace
-//    confirmado con la API, y no escribe si el marcador no cambió.
+//  - NUNCA escribe en un partido sin enlace confirmado con la API,
+//    y no escribe si el marcador no cambió.
+//  - La LIQUIDACIÓN AUTOMÁTICA (autorizada por Gonzalo el 2026-11-17)
+//    es la única excepción al "nunca cierra": liquida quinielas por
+//    puntos (NO sorteo) cuando TODOS sus partidos están finales y una
+//    ventana de seguridad de 10 minutos pasa sin cambios en los
+//    marcadores, replicando paso a paso la liquidación manual de la
+//    app (ver liquidacion.mjs). Se apaga con LIQUIDACION_AUTO=off.
 //  - Un fallo de red o de la API se anota y se reintenta al siguiente
 //    ciclo; el programa no se cae.
 //  - Con la misma pasada detecta eventos de NOTIFICACIÓN push (gol,
@@ -34,7 +39,7 @@
 // Configuración: variables de entorno o el .env.local del repo (las del
 // sistema tienen prioridad). Ver README.md de esta carpeta.
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
@@ -49,6 +54,17 @@ import {
   normalizarNombreEquipo,
   planEscritura,
 } from './logica.mjs';
+import {
+  construirPlanLiquidacion,
+  crearEstadoLiquidaciones,
+  descripcionPremio,
+  evaluarElegibilidad,
+  evaluarVentana,
+  fotoMarcadores,
+  ganadoresPendientes,
+  golesTotalesEfectivos,
+  planPagoPremio,
+} from './liquidacion.mjs';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ_REPO = path.resolve(DIR, '..', '..');
@@ -112,7 +128,12 @@ if (AYUDA) {
       '',
       '  --once        Una sola pasada y sale.',
       '  --dry-run     Anota lo que ESCRIBIRÍA, sin escribir en la base.',
+      '                También simula la liquidación automática ("LIQUIDARÍA: …").',
       '  --interval=N  Segundos entre ciclos (10 a 30; por defecto 20).',
+      '',
+      'Liquidación automática (autorizada por Gonzalo, 2026-11-17):',
+      '  LIQUIDACION_AUTO=off        La apaga (default: activa).',
+      '  LIQUIDACION_VENTANA_MIN=N   Ventana de seguridad en minutos (default 10, máx 10).',
     ].join('\n')
   );
   process.exit(0);
@@ -169,6 +190,16 @@ async function cargarConfig() {
     tomar('PUSH_DISPATCH_URL') ||
     'https://ciberteque-quiniela.vercel.app/api/push/despachar';
   const pushSecret = tomar('PUSH_DISPATCH_SECRET');
+  // Liquidación automática (autorizada por Gonzalo el 2026-11-17):
+  // activa por defecto; LIQUIDACION_AUTO=off la apaga sin tocar
+  // código. La ventana de seguridad es de 10 minutos y NUNCA más de
+  // 10 (instrucción expresa de Gonzalo): LIQUIDACION_VENTANA_MIN solo
+  // puede acortarla.
+  const liquidacionAuto =
+    (tomar('LIQUIDACION_AUTO') || 'on').trim().toLowerCase() !== 'off';
+  let ventanaMin = Number(tomar('LIQUIDACION_VENTANA_MIN') ?? 10);
+  if (!Number.isFinite(ventanaMin)) ventanaMin = 10;
+  ventanaMin = Math.min(10, Math.max(0, ventanaMin));
 
   const faltan = [];
   if (!supabaseUrl) faltan.push('SUPABASE_URL (o NEXT_PUBLIC_SUPABASE_URL)');
@@ -187,6 +218,8 @@ async function cargarConfig() {
     tsdbKey,
     pushUrl,
     pushSecret,
+    liquidacionAuto,
+    ventanaMs: Math.round(ventanaMin * 60_000),
   };
 }
 
@@ -572,6 +605,629 @@ async function chequearCierres(sb, config, estado, ahoraMs) {
   );
 }
 
+// ---------- Liquidación automática ------------------------------------------
+//
+// Autorizada por Gonzalo el 2026-11-17 (sustituye su clic en CERRAR Y
+// LIQUIDAR). Replica la liquidación manual de la app en su mismo orden
+// de escrituras (cerrarJornadaDefinitivo, useArbitro.ts):
+//   1) puntos_totales de cada boleto (el GUARDAR AVANCE final),
+//   2) quinielas: goles_totales_real + estado 'cerrada',
+//   3) pago de cada premio (procesarPagoPremio: cobro de deuda y
+//      movimientos premio_quiniela/abono_deuda),
+//   4) notificaciones internas de resultado (best-effort),
+//   5) push de "premio acreditado" (el disparador del tipo premio).
+//
+// Seguridad:
+//  - Solo modos por puntos; el sorteo NUNCA se liquida solo.
+//  - Ventana de seguridad (10 min, persistida): si cualquier marcador
+//    cambia durante la ventana, el conteo se reinicia.
+//  - Candado de cierre: la quiniela se re-lee justo antes de cerrar y
+//    el update exige estado='abierta'; si alguien la cerró por otro
+//    medio, NO se paga nada y queda registrado.
+//  - Diario por quiniela (estado-liquidaciones.json) escrito ANTES de
+//    la primera escritura en base: si el programa se corta a mitad de
+//    los pagos, al volver reanuda SOLO lo que falta. Cada pago lleva
+//    su propia etapa persistida (pagando → saldo → completo) para no
+//    acreditar dos veces ni dejar movimientos sin dinero; si el saldo
+//    de un ganador no cuadra ni con el antes ni con el después, la
+//    quiniela se BLOQUEA para revisión manual (archivo REVISAR-*.txt)
+//    en vez de seguir pagando a ciegas.
+
+const RUTA_ESTADO_LIQ = path.join(DIR, 'estado-liquidaciones.json');
+const DIR_RESUMENES = path.join(DIR, 'liquidaciones');
+
+async function cargarEstadoLiquidaciones() {
+  try {
+    const datos = JSON.parse(await readFile(RUTA_ESTADO_LIQ, 'utf8'));
+    if (datos && typeof datos === 'object' && datos.ventanas && datos.enCurso && datos.liquidadas) {
+      return { ...crearEstadoLiquidaciones(), ...datos };
+    }
+  } catch {
+    // Sin archivo o corrupto: se arranca sin ventanas ni diarios.
+  }
+  return crearEstadoLiquidaciones();
+}
+
+async function guardarEstadoLiquidaciones(liq) {
+  if (DRY_RUN) return; // el modo seco no persiste nada
+  try {
+    await writeFile(RUTA_ESTADO_LIQ, JSON.stringify(liq), 'utf8');
+  } catch (e) {
+    log(`Aviso: no se pudo guardar el estado de liquidaciones: ${e.message}`);
+  }
+}
+
+const CAMPOS_QUINIELA_LIQ =
+  'id, nombre_jornada, precio_ticket, tipo_premiacion, modalidad, estado, goles_totales_real';
+
+async function leerPartidosQuiniela(sb, qid) {
+  const { data, error } = await sb
+    .from('partidos')
+    .select('id, quiniela_id, goles_local, goles_visitante, resultado_real, es_final')
+    .eq('quiniela_id', qid);
+  if (error) throw new Error(`leyendo partidos de la quiniela: ${error.message}`);
+  return data ?? [];
+}
+
+async function leerTicketsQuiniela(sb, qid) {
+  const { data, error } = await sb
+    .from('tickets')
+    .select('id, usuario_id, prediccion_goles_total, pronosticos(partido_id, eleccion_usuario)')
+    .eq('quiniela_id', qid);
+  if (error) throw new Error(`leyendo boletos de la quiniela: ${error.message}`);
+  return data ?? [];
+}
+
+async function leerNombresUsuarios(sb, tickets) {
+  const ids = [...new Set((tickets ?? []).map((t) => t.usuario_id).filter(Boolean))];
+  if (ids.length === 0) return {};
+  const { data, error } = await sb.from('usuarios').select('id, nombre').in('id', ids);
+  if (error) throw new Error(`leyendo nombres de usuarios: ${error.message}`);
+  const mapa = {};
+  for (const u of data ?? []) mapa[u.id] = u.nombre;
+  return mapa;
+}
+
+const dinero = (n) => `$${Number(n ?? 0).toFixed(2)}`;
+
+/**
+ * Paga UN premio con la secuencia crash-safe del diario:
+ *   (sin etapa) → se anota la intención con el plan y el saldo previo
+ *   'pagando'   → se confirma/aplica la actualización de `usuarios`
+ *   'saldo'     → se insertan los movimientos del plan
+ *   'completo'  → no se vuelve a tocar jamás
+ * Si al confirmar el saldo no cuadra ni con el previo ni con el
+ * posterior, marca el pago 'bloqueado' y detiene la quiniela entera.
+ */
+async function pagarPremio(sb, estado, diario, ganador) {
+  const uid = ganador.usuario_id;
+  let det = diario.detallePagos[uid];
+
+  if (!det) {
+    // Candado por movimientos: si el premio de esta jornada ya existe
+    // en transacciones (liquidación manual previa o un intento viejo),
+    // no se acredita otra vez; queda marcado para revisión.
+    const descripcion = descripcionPremio(ganador, diario.nombre);
+    const { data: previos } = await sb
+      .from('transacciones_creditos')
+      .select('id, cantidad')
+      .eq('usuario_id', uid)
+      .eq('tipo_movimiento', 'premio_quiniela')
+      .eq('descripcion', descripcion);
+    if ((previos ?? []).some((t) => Number(t.cantidad) === Number(ganador.cantidad))) {
+      det = { etapa: 'completo', yaExistia: true, cobroDeuda: 0, nuevoSaldo: null };
+      diario.detallePagos[uid] = det;
+      if (!diario.pagados.includes(uid)) diario.pagados.push(uid);
+      await guardarEstadoLiquidaciones(estado.liq);
+      log(
+        `LIQUIDACIÓN ${diario.nombre}: ⚠️ ya existe el movimiento "${descripcion}" por ${dinero(ganador.cantidad)} ` +
+          `para ${ganador.nombre}; se toma como pagado SIN volver a acreditar. Revisar a mano.`
+      );
+      return det;
+    }
+
+    const { data: userData, error: errL } = await sb
+      .from('usuarios')
+      .select('id, creditos_disponibles, saldo_pesos, deuda_pesos')
+      .eq('id', uid)
+      .single();
+    if (errL || !userData) {
+      throw new Error(`leyendo el saldo de ${ganador.nombre}: ${errL?.message ?? 'sin renglón de usuario'}`);
+    }
+    const plan = planPagoPremio(userData, ganador.cantidad, descripcion);
+    det = {
+      etapa: 'pagando',
+      plan,
+      saldoPrevioTotal: plan.saldoActual,
+      saldoPrevioDeuda: plan.deudaInicial,
+      cobroDeuda: plan.cobroDeuda,
+      nuevoSaldo: plan.nuevoSaldo,
+    };
+    diario.detallePagos[uid] = det;
+    await guardarEstadoLiquidaciones(estado.liq);
+  }
+
+  if (det.etapa === 'pagando') {
+    const { data: userData, error: errL } = await sb
+      .from('usuarios')
+      .select('creditos_disponibles, saldo_pesos, deuda_pesos')
+      .eq('id', uid)
+      .single();
+    if (errL || !userData) {
+      throw new Error(`releyendo el saldo de ${ganador.nombre}: ${errL?.message ?? 'sin renglón de usuario'}`);
+    }
+    const totalActual =
+      Number(userData.creditos_disponibles || 0) + Number(userData.saldo_pesos || 0);
+    const deudaActual = Math.abs(Number(userData.deuda_pesos || 0));
+    if (totalActual === det.plan.nuevoSaldo && deudaActual === det.plan.deudaRestante) {
+      det.etapa = 'saldo'; // la actualización ya estaba aplicada
+      await guardarEstadoLiquidaciones(estado.liq);
+    } else if (totalActual === det.saldoPrevioTotal && deudaActual === det.saldoPrevioDeuda) {
+      const { error: errU } = await sb
+        .from('usuarios')
+        .update(det.plan.actualizacion)
+        .eq('id', uid);
+      if (errU) throw new Error(`actualizando el saldo de ${ganador.nombre}: ${errU.message}`);
+      det.etapa = 'saldo';
+      await guardarEstadoLiquidaciones(estado.liq);
+    } else {
+      det.etapa = 'bloqueado';
+      diario.bloqueada =
+        `El saldo de ${ganador.nombre} no coincide ni con el estado previo al pago ` +
+        `(total ${dinero(det.saldoPrevioTotal)}, deuda ${dinero(det.saldoPrevioDeuda)}) ni con el posterior ` +
+        `(total ${dinero(det.plan.nuevoSaldo)}, deuda ${dinero(det.plan.deudaRestante)}); ` +
+        `lo actual es total ${dinero(totalActual)}, deuda ${dinero(deudaActual)}. ` +
+        'La liquidación de esta quiniela se detuvo para revisión manual: los ganadores restantes NO se pagaron.';
+      await guardarEstadoLiquidaciones(estado.liq);
+      await escribirAlertaRevision(diario).catch(() => {});
+      throw new Error(diario.bloqueada);
+    }
+  }
+
+  if (det.etapa === 'saldo') {
+    const { error: errT } = await sb
+      .from('transacciones_creditos')
+      .insert(det.plan.transacciones);
+    if (errT) {
+      throw new Error(
+        `registrando los movimientos de ${ganador.nombre}: ${errT.message} ` +
+          '(el saldo YA quedó actualizado; el reintento solo inserta los movimientos)'
+      );
+    }
+    det.etapa = 'completo';
+    if (!diario.pagados.includes(uid)) diario.pagados.push(uid);
+    await guardarEstadoLiquidaciones(estado.liq);
+  }
+
+  return det;
+}
+
+/** Notificaciones internas de resultado, como las del cierre manual. */
+async function insertarNotificacionesInternas(sb, diario) {
+  const { data: usuarios, error } = await sb.from('usuarios').select('id');
+  if (error) throw new Error(error.message);
+  const idsGanadores = new Set(diario.ganadores.map((g) => g.usuario_id));
+  // La app excluye al usuario admin autenticado; el programa no tiene
+  // sesión, así que el aviso interno llega a todos (incluido Gonzalo).
+  const filas = (usuarios ?? []).map((u) => ({
+    usuario_emisor_id: null,
+    usuario_receptor_id: u.id,
+    tipo: 'resultado',
+    contenido: idsGanadores.has(u.id)
+      ? `te felicita porque GANASTE en la ${diario.nombre} 🏆. ¡Tu premio ha sido procesado (se descontaron deudas pendientes si tenías)!`
+      : `cerró oficialmente la ${diario.nombre}. 🏁 Los premios han sido repartidos, ¡revisa el podio!`,
+  }));
+  if (filas.length === 0) return;
+  const { error: errI } = await sb.from('notificaciones').insert(filas);
+  if (errI) throw new Error(errI.message);
+}
+
+function textoResumenLiquidacion(diario) {
+  const lineas = [
+    `🏆 LIQUIDACIÓN AUTOMÁTICA — ${diario.nombre}`,
+    `Modalidad: ${diario.modalidad} · Premiación: ${diario.tipoPremiacion} · Boletos: ${diario.numBoletos} × ${dinero(diario.precioTicket)}`,
+    `Caja total: ${dinero(diario.totalRecaudado)} · Bolsa de premios (80%): ${dinero(diario.bolsaPremios)} · Comisión (20%): ${dinero(diario.comision)}`,
+    `Goles totales: ${diario.golesTotalesReal}`,
+    '',
+    'Desglose (el de la app):' + (diario.desgloseTexto || ' sin ganadores.'),
+    '',
+    'Tabla final:',
+    ...diario.tabla.map(
+      (f) => `${f.posicion}. ${f.nombre} — ${f.puntos} pts · DIF ${f.golesDiff}`
+    ),
+    '',
+    'Pagos:',
+  ];
+  if (diario.ganadores.length === 0) lineas.push('- Sin ganadores: la bolsa queda en caja.');
+  for (const g of diario.ganadores) {
+    const det = diario.detallePagos[g.usuario_id] || {};
+    if (det.yaExistia) {
+      lineas.push(`- ${g.nombre} — ${g.lugar} — ${dinero(g.cantidad)} · YA EXISTÍA el movimiento (no se acreditó de nuevo; revisar)`);
+    } else {
+      lineas.push(
+        `- ${g.nombre} — ${g.lugar} — premio ${dinero(g.cantidad)}` +
+          (det.cobroDeuda > 0 ? ` · cobro de deuda ${dinero(det.cobroDeuda)}` : '') +
+          (det.nuevoSaldo !== null && det.nuevoSaldo !== undefined
+            ? ` · saldo resultante ${dinero(det.nuevoSaldo)}`
+            : '')
+      );
+    }
+  }
+  return lineas.join('\n');
+}
+
+const slugNombre = (s) =>
+  String(s ?? 'quiniela')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'quiniela';
+
+async function escribirResumenLiquidacion(diario, texto) {
+  await mkdir(DIR_RESUMENES, { recursive: true });
+  const ruta = path.join(
+    DIR_RESUMENES,
+    `liquidacion-${slugNombre(diario.nombre)}-${String(diario.qid).slice(0, 8)}.txt`
+  );
+  await writeFile(ruta, texto + '\n', 'utf8');
+  return ruta;
+}
+
+async function escribirAlertaRevision(diario) {
+  await mkdir(DIR_RESUMENES, { recursive: true });
+  const ruta = path.join(
+    DIR_RESUMENES,
+    `REVISAR-liquidacion-${slugNombre(diario.nombre)}-${String(diario.qid).slice(0, 8)}.txt`
+  );
+  const texto =
+    `⚠️ LIQUIDACIÓN DETENIDA PARA REVISIÓN MANUAL — ${diario.nombre}\n\n` +
+    `${diario.bloqueada ?? 'Motivo no registrado.'}\n\n` +
+    `Quiniela: ${diario.qid}\n` +
+    `Cerrada en base por el programa: ${diario.cerradaEnBase ? 'sí' : 'no'}\n` +
+    `Ganadores del plan: ${diario.ganadores.map((g) => `${g.nombre} ${dinero(g.cantidad)}`).join(' · ') || 'ninguno'}\n` +
+    `Pagados por completo: ${diario.pagados.length} de ${diario.ganadores.length}\n` +
+    'El detalle por ganador vive en estado-liquidaciones.json (diario enCurso). ' +
+    'Para reanudar tras corregir a mano, ajusta el diario o borra la entrada enCurso de esta quiniela.\n';
+  await writeFile(ruta, texto, 'utf8');
+  log(`LIQUIDACIÓN ${diario.nombre}: alerta de revisión guardada en ${ruta}`);
+  return ruta;
+}
+
+/** Aborta el cierre porque la quiniela apareció cerrada por otro medio. */
+async function abortarPorCierreAjeno(sb, config, estado, diario, estadoVisto) {
+  diario.abortada =
+    `la quiniela apareció como "${estadoVisto}" antes de que el programa la cerrara ` +
+    '(¿liquidación manual en paralelo?). NO se pagó ningún premio desde el programa.';
+  log(`LIQUIDACIÓN ${diario.nombre}: ⚠️ ABORTADA — ${diario.abortada}`);
+  estado.liq.liquidadas[diario.qid] = {
+    nombre: diario.nombre,
+    en: new Date().toISOString(),
+    resultado: 'abortada',
+    detalle: diario.abortada,
+  };
+  delete estado.liq.enCurso[diario.qid];
+  delete estado.liq.ventanas[diario.qid];
+  await guardarEstadoLiquidaciones(estado.liq);
+}
+
+/**
+ * Ejecuta (o reanuda) la liquidación de UNA quiniela siguiendo el
+ * diario. Lanza en caso de error transitorio: el llamador anota y el
+ * próximo ciclo reanuda donde el diario quedó.
+ */
+async function ejecutarLiquidacion(sb, config, estado, qid) {
+  let diario = estado.liq.enCurso[qid];
+
+  if (!diario) {
+    const { data: q, error: errQ } = await sb
+      .from('quinielas')
+      .select(CAMPOS_QUINIELA_LIQ)
+      .eq('id', qid)
+      .single();
+    if (errQ || !q) {
+      delete estado.liq.ventanas[qid];
+      await guardarEstadoLiquidaciones(estado.liq);
+      return;
+    }
+    if (q.estado !== 'abierta') {
+      log(
+        `Liquidación automática: ${q.nombre_jornada} ya está cerrada (no por el programa); no se liquida.`
+      );
+      delete estado.liq.ventanas[qid];
+      await guardarEstadoLiquidaciones(estado.liq);
+      return;
+    }
+    const partidos = await leerPartidosQuiniela(sb, qid);
+    const tickets = await leerTicketsQuiniela(sb, qid);
+    if (tickets.length === 0) {
+      log(`Liquidación automática: ${q.nombre_jornada} no tiene boletos; no hay nada que liquidar.`);
+      delete estado.liq.ventanas[qid];
+      await guardarEstadoLiquidaciones(estado.liq);
+      return;
+    }
+    const nombres = await leerNombresUsuarios(sb, tickets);
+    const plan = construirPlanLiquidacion(q, tickets, partidos, nombres);
+    diario = {
+      qid,
+      nombre: q.nombre_jornada,
+      modalidad: q.modalidad,
+      tipoPremiacion: q.tipo_premiacion || 'unico',
+      precioTicket: q.precio_ticket ?? 30,
+      iniciadoEn: new Date().toISOString(),
+      golesTotalesReal: plan.golesTotalesReal,
+      numBoletos: tickets.length,
+      totalRecaudado: plan.totalRecaudado,
+      bolsaPremios: plan.bolsaPremios,
+      comision: plan.comision,
+      desgloseTexto: plan.desgloseTexto,
+      tabla: plan.tabla,
+      ganadores: plan.ganadores,
+      puntosPorTicket: plan.puntosPorTicket,
+      puntosEscritos: false,
+      cerradaEnBase: false,
+      pagados: [],
+      detallePagos: {},
+      notifInterna: false,
+      notifIntentos: 0,
+      pushEnviado: false,
+      pushIntentos: 0,
+    };
+    estado.liq.enCurso[qid] = diario;
+    // El diario queda en disco ANTES de la primera escritura en base.
+    await guardarEstadoLiquidaciones(estado.liq);
+    log(
+      `Liquidación automática: liquidando ${diario.nombre} — caja ${dinero(plan.totalRecaudado)}, ` +
+        `bolsa ${dinero(plan.bolsaPremios)}, ${plan.ganadores.length} ganador(es).`
+    );
+  }
+
+  if (diario.bloqueada) return; // ya se alertó; no se insiste
+
+  // 1) puntos_totales (el equivalente al GUARDAR AVANCE final).
+  if (!diario.puntosEscritos) {
+    for (const [ticketId, pts] of Object.entries(diario.puntosPorTicket)) {
+      const { error } = await sb
+        .from('tickets')
+        .update({ puntos_totales: pts })
+        .eq('id', ticketId);
+      if (error) {
+        throw new Error(`escribiendo puntos_totales del boleto ${ticketId}: ${error.message}`);
+      }
+    }
+    diario.puntosEscritos = true;
+    await guardarEstadoLiquidaciones(estado.liq);
+  }
+
+  // 2) Cierre: relectura inmediata + update condicionado a 'abierta'.
+  if (!diario.cerradaEnBase) {
+    const { data: q2 } = await sb
+      .from('quinielas')
+      .select('estado')
+      .eq('id', qid)
+      .single();
+    if (!q2 || q2.estado !== 'abierta') {
+      await abortarPorCierreAjeno(sb, config, estado, diario, q2?.estado ?? 'inexistente');
+      return;
+    }
+    const { data: filas, error: errC } = await sb
+      .from('quinielas')
+      .update({ goles_totales_real: diario.golesTotalesReal, estado: 'cerrada' })
+      .eq('id', qid)
+      .eq('estado', 'abierta')
+      .select('id');
+    if (errC) throw new Error(`cerrando la quiniela: ${errC.message}`);
+    if (!filas || filas.length === 0) {
+      await abortarPorCierreAjeno(sb, config, estado, diario, 'cerrada entre la relectura y el update');
+      return;
+    }
+    diario.cerradaEnBase = true;
+    await guardarEstadoLiquidaciones(estado.liq);
+    log(
+      `Liquidación automática: ${diario.nombre} cerrada (goles totales ${diario.golesTotalesReal}). Pagando premios…`
+    );
+  }
+
+  // 3) Pagos, uno por uno; el diario impide duplicar al reanudar.
+  for (const ganador of diario.ganadores) {
+    const detPrevio = diario.detallePagos[ganador.usuario_id];
+    if (detPrevio?.etapa === 'completo') continue;
+    const det = await pagarPremio(sb, estado, diario, ganador);
+    if (!det.yaExistia) {
+      log(
+        `Liquidación automática: premio pagado a ${ganador.nombre} — ${dinero(ganador.cantidad)} (${ganador.lugar})` +
+          (det.cobroDeuda > 0 ? ` · cobro de deuda ${dinero(det.cobroDeuda)}` : '') +
+          (det.nuevoSaldo !== null && det.nuevoSaldo !== undefined
+            ? ` · saldo resultante ${dinero(det.nuevoSaldo)}`
+            : '')
+      );
+    }
+  }
+
+  // 4) Notificaciones internas (best-effort, como el cierre manual).
+  if (!diario.notifInterna && diario.notifIntentos < 3) {
+    try {
+      await insertarNotificacionesInternas(sb, diario);
+      diario.notifInterna = true;
+      await guardarEstadoLiquidaciones(estado.liq);
+    } catch (e) {
+      diario.notifIntentos += 1;
+      await guardarEstadoLiquidaciones(estado.liq);
+      log(
+        `Aviso: las notificaciones internas de ${diario.nombre} fallaron (intento ${diario.notifIntentos}/3): ${e.message} ` +
+          '(los premios ya están pagados)'
+      );
+      if (diario.notifIntentos >= 3) diario.notifInterna = true;
+    }
+  }
+
+  // 5) Push de premio acreditado: el disparador del tipo 'premio'.
+  if (!diario.pushEnviado && diario.pushIntentos < 3) {
+    if (config.pushSecret && diario.ganadores.length > 0) {
+      const eventos = diario.ganadores.map((g) => ({
+        tipo: 'premio',
+        clave: `premio:${qid}:${g.usuario_id}`,
+        usuarios: [g.usuario_id],
+        quiniela_id: qid,
+        titulo: `🏆 ¡Ganaste en ${diario.nombre}!`,
+        cuerpo:
+          `Tu premio de ${dinero(g.cantidad)} ya se procesó en tu billetera` +
+          ((diario.detallePagos[g.usuario_id]?.cobroDeuda ?? 0) > 0
+            ? ' (se cobró tu saldo pendiente)'
+            : '') +
+          '. ¡Felicidades!',
+        url: '/',
+      }));
+      try {
+        await despacharEventos(config, eventos);
+        diario.pushEnviado = true;
+        await guardarEstadoLiquidaciones(estado.liq);
+        log(`Liquidación automática: push de premio despachado a ${eventos.length} ganador(es).`);
+      } catch (e) {
+        diario.pushIntentos += 1;
+        await guardarEstadoLiquidaciones(estado.liq);
+        log(
+          `Aviso: el push de premio de ${diario.nombre} falló (intento ${diario.pushIntentos}/3): ${e.message} ` +
+            '(los premios ya están pagados)'
+        );
+        if (diario.pushIntentos >= 3) diario.pushEnviado = true;
+      }
+    } else {
+      diario.pushEnviado = true;
+      await guardarEstadoLiquidaciones(estado.liq);
+    }
+  }
+
+  // 6) Resumen (log + archivo por quiniela) y cierre del diario.
+  const texto = textoResumenLiquidacion(diario);
+  try {
+    const ruta = await escribirResumenLiquidacion(diario, texto);
+    log(`Liquidación automática: resumen guardado en ${ruta}`);
+  } catch (e) {
+    log(`Aviso: no se pudo guardar el archivo de resumen de ${diario.nombre}: ${e.message}`);
+  }
+  for (const linea of texto.split('\n')) log(linea);
+  estado.liq.liquidadas[qid] = {
+    nombre: diario.nombre,
+    en: new Date().toISOString(),
+    resultado: 'liquidada',
+    ganadores: diario.ganadores.map((g) => ({
+      nombre: g.nombre,
+      cantidad: g.cantidad,
+      lugar: g.lugar,
+    })),
+  };
+  delete estado.liq.enCurso[qid];
+  delete estado.liq.ventanas[qid];
+  await guardarEstadoLiquidaciones(estado.liq);
+}
+
+/** Simulación en modo seco: calcula el plan y lo reporta sin escribir. */
+async function simularLiquidacion(sb, q, partidos) {
+  const tickets = await leerTicketsQuiniela(sb, q.id);
+  if (tickets.length === 0) {
+    log(`LIQUIDARÍA: ${q.nombre_jornada} no tiene boletos; no habría nada que liquidar.`);
+    return;
+  }
+  const nombres = await leerNombresUsuarios(sb, tickets);
+  const plan = construirPlanLiquidacion(q, tickets, partidos, nombres);
+  log(
+    `LIQUIDARÍA: ${q.nombre_jornada} — caja ${dinero(plan.totalRecaudado)} · bolsa (80%) ${dinero(plan.bolsaPremios)} · ` +
+      `comisión ${dinero(plan.comision)} · goles totales ${plan.golesTotalesReal}`
+  );
+  for (const g of plan.ganadores) {
+    const fila = plan.tabla.find((f) => f.usuario_id === g.usuario_id);
+    log(
+      `LIQUIDARÍA: → ${g.nombre} (${g.lugar}) ${dinero(g.cantidad)}` +
+        (fila ? ` · ${fila.puntos} pts · DIF ${fila.golesDiff}` : '')
+    );
+  }
+  if (plan.ganadores.length === 0) log('LIQUIDARÍA: → sin ganadores (la bolsa quedaría en caja).');
+  log('LIQUIDARÍA: (modo seco: no se escribió nada; en modo real se liquida tras la ventana de seguridad sin cambios)');
+}
+
+/**
+ * Paso de liquidación de cada ciclo: reanuda diarios a medias,
+ * descubre quinielas con todos sus partidos finales y corre sus
+ * ventanas de seguridad. Corre aunque no haya partidos en ventana.
+ */
+async function procesarLiquidaciones(sb, config, estado, ahoraMs) {
+  if (!config.liquidacionAuto) return;
+
+  // 1) Reanudar lo empezado (tiene prioridad sobre lo nuevo).
+  for (const qid of Object.keys(estado.liq.enCurso)) {
+    if (DRY_RUN) continue;
+    try {
+      await ejecutarLiquidacion(sb, config, estado, qid);
+    } catch (e) {
+      log(`LIQUIDACIÓN ${estado.liq.enCurso[qid]?.nombre ?? qid}: error al reanudar (se reintenta el próximo ciclo): ${e.message}`);
+    }
+  }
+
+  // 2) Descubrir quinielas abiertas con todos los partidos finales.
+  const { data: abiertas, error } = await sb
+    .from('quinielas')
+    .select(CAMPOS_QUINIELA_LIQ)
+    .eq('estado', 'abierta');
+  if (error) throw new Error(`leyendo quinielas para liquidar: ${error.message}`);
+
+  for (const q of abiertas ?? []) {
+    if (estado.liq.enCurso[q.id] || estado.liq.liquidadas[q.id]) continue;
+    const partidos = await leerPartidosQuiniela(sb, q.id);
+    const eleg = evaluarElegibilidad(q, partidos);
+    const mapaVentanas = DRY_RUN ? estado.liqSecoVentanas : estado.liq.ventanas;
+
+    if (!eleg.elegible) {
+      if (mapaVentanas[q.id]) {
+        delete mapaVentanas[q.id];
+        if (!DRY_RUN) await guardarEstadoLiquidaciones(estado.liq);
+        log(`Liquidación automática: la ventana de ${q.nombre_jornada} se canceló (${eleg.motivo}).`);
+      }
+      continue;
+    }
+
+    const foto = fotoMarcadores(partidos, golesTotalesEfectivos(q, partidos));
+    const ev = evaluarVentana(mapaVentanas[q.id], foto, ahoraMs, config.ventanaMs);
+
+    if (DRY_RUN) {
+      if (ev.accion === 'iniciar' || ev.accion === 'reiniciar') {
+        estado.liqSecoVentanas[q.id] = ev.entrada;
+      }
+      const claveReporte = `${q.id}:${foto}`;
+      if (
+        (ev.accion === 'liquidar' || MODO_ONCE) &&
+        !estado.liqSecoReportadas.has(claveReporte)
+      ) {
+        estado.liqSecoReportadas.add(claveReporte);
+        await simularLiquidacion(sb, q, partidos);
+      }
+      continue;
+    }
+
+    if (ev.accion === 'iniciar') {
+      estado.liq.ventanas[q.id] = ev.entrada;
+      await guardarEstadoLiquidaciones(estado.liq);
+      log(
+        `Liquidación automática: ${q.nombre_jornada} tiene TODOS sus partidos finales. ` +
+          `Ventana de seguridad de ${Math.round(config.ventanaMs / 60_000)} min: si ningún marcador cambia, se liquida sola.`
+      );
+    } else if (ev.accion === 'reiniciar') {
+      estado.liq.ventanas[q.id] = ev.entrada;
+      await guardarEstadoLiquidaciones(estado.liq);
+      log(
+        `Liquidación automática: un marcador de ${q.nombre_jornada} cambió durante la ventana; ` +
+          `el conteo de ${Math.round(config.ventanaMs / 60_000)} min se reinicia.`
+      );
+    } else if (ev.accion === 'liquidar') {
+      try {
+        await ejecutarLiquidacion(sb, config, estado, q.id);
+      } catch (e) {
+        log(`LIQUIDACIÓN ${q.nombre_jornada}: error (se reintenta el próximo ciclo): ${e.message}`);
+      }
+    }
+  }
+}
+
 // ---------- Un ciclo --------------------------------------------------------
 
 async function ciclo(sb, config, herramientas, estado) {
@@ -586,6 +1242,15 @@ async function ciclo(sb, config, herramientas, estado) {
     } catch (e) {
       log(`Aviso: el chequeo de cierres falló: ${e.message}`);
     }
+  }
+
+  // Liquidación automática: también corre sin partidos en ventana —
+  // una quiniela con todos sus partidos finales ya no tiene trabajo
+  // de marcadores, pero sí ventana corriendo o pagos por reanudar.
+  try {
+    await procesarLiquidaciones(sb, config, estado, ahoraMs);
+  } catch (e) {
+    log(`Aviso: la liquidación automática falló este ciclo: ${e.message}`);
   }
 
   if (partidos.length === 0) {
@@ -752,11 +1417,19 @@ async function main() {
     fixturesTodasEn: 0,
     ultimoChequeoCierre: 0,
     notif: await cargarEstadoNotificaciones(),
+    liq: await cargarEstadoLiquidaciones(),
+    liqSecoVentanas: {},
+    liqSecoReportadas: new Set(),
   };
   log(
     config.pushSecret
       ? `Notificaciones push: activas (despacho a ${new URL(config.pushUrl).host}).`
       : 'Notificaciones push: desactivadas (falta PUSH_DISPATCH_SECRET); los marcadores trabajan igual.'
+  );
+  log(
+    config.liquidacionAuto
+      ? `Liquidación automática: ACTIVA (ventana de seguridad de ${Math.round(config.ventanaMs / 60_000)} min sin cambios; modos por puntos, sorteo excluido).`
+      : 'Liquidación automática: APAGADA (LIQUIDACION_AUTO=off); la liquidación sigue manual en la app.'
   );
 
   do {
