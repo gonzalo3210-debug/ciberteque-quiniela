@@ -58,14 +58,11 @@ function getLEV(marcador: string | null | undefined): string | null {
 }
 
 function partidoTerminado(p: any): boolean {
-  return (
-    p?.es_final === true ||
-    (p?.goles_local !== null &&
-      p?.goles_local !== undefined &&
-      p?.goles_visitante !== null &&
-      p?.goles_visitante !== undefined) ||
-    (p?.resultado_real !== null && p?.resultado_real !== undefined)
-  );
+  // Terminado SOLO cuando el Árbitro ya lo marcó final (es_final).
+  // Un avance parcial (goles capturados o resultado_real en vivo)
+  // NO cuenta: si no, Noticias anuncia «Final» con el partido aún
+  // en juego y el conteo de «partidos jugados» sale inflado.
+  return p?.es_final === true;
 }
 
 interface RenglonRanking {

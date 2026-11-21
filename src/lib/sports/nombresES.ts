@@ -126,6 +126,16 @@ const ENTRADAS: EntradaNombreES[] = [
   ['133712', 'Nice', 'Niza'],
   ['133823', 'Monaco', 'Mónaco'],
   ['133882', 'Strasbourg', 'Estrasburgo'],
+
+  // ---- Clubes de la Liga MX cuyo nombre en la quiniela difiere del de
+  // la API. Sin estas líneas el emparejamiento jornada↔API no enlaza el
+  // partido (la API dice «Pumas UNAM» y la quiniela «Pumas») y el
+  // programa de marcadores directos lo salta. IDs y nombres originales
+  // verificados contra eventsseason de la API (liga 4350, 2026-11-20).
+  ['136856', 'Atletico de San Luis', 'Atlético San Luis'],
+  ['134201', 'Pumas UNAM', 'Pumas'],
+  ['134197', 'Tigres UANL', 'Tigres'],
+  ['134206', 'CD Guadalajara', 'Chivas'],
 ];
 
 const normalizar = (s: string): string =>
