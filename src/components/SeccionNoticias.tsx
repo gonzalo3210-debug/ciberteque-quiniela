@@ -14,12 +14,14 @@
 //       y otros deportes.
 //
 // Arriba van los CHIPS de filtro (corrección de Gonzalo, 2026-11-14):
-// Todos · 🎯 Quiniela · ⚽ Equipos · 📰 Deportes. La clasificación la
-// hace el servidor (la ruta marca cada titular con su categoría), así
-// que cambiar de chip filtra al momento, sin volver a pedir nada.
-// El chip ⚡ Minuto a minuto (2026-11-17) es aparte: no mezcla
-// titulares, lista los eventos importantes (goles, penales y
-// expulsiones) de los partidos de la quiniela activa, del más
+// Todos · 🎯 Quiniela · ⭐ Favoritos · ⚡ Minuto a minuto · 📰
+// Deportes. La clasificación la hace el servidor (la ruta marca cada
+// titular con su categoría), así que cambiar de chip filtra al
+// momento, sin volver a pedir nada. El chip de equipos se llama
+// «Favoritos» y el ⚡ Minuto a minuto va junto a él, no al final
+// (corrección de Gonzalo, 2026-11-20). El Minuto a minuto es aparte:
+// no mezcla titulares, lista los eventos importantes (goles, penales
+// y expulsiones) de los partidos de la quiniela activa, del más
 // reciente al más viejo, desde la línea de tiempo del proveedor.
 //
 // Si la fuente externa falla, el feed muestra solo las del club.
@@ -60,9 +62,9 @@ type ChipNoticias = 'todos' | 'quiniela' | 'equipos' | 'deportes' | 'minuto'
 const CHIPS: { id: ChipNoticias; etiqueta: string }[] = [
   { id: 'todos', etiqueta: 'Todos' },
   { id: 'quiniela', etiqueta: '🎯 Quiniela' },
-  { id: 'equipos', etiqueta: '⚽ Equipos' },
-  { id: 'deportes', etiqueta: '📰 Deportes' },
+  { id: 'equipos', etiqueta: '⭐ Favoritos' },
   { id: 'minuto', etiqueta: '⚡ Minuto a minuto' },
+  { id: 'deportes', etiqueta: '📰 Deportes' },
 ]
 
 // ── ⚡ Minuto a minuto ──────────────────────────────────────────────
