@@ -983,13 +983,18 @@ function FilaPartidoApp({
 }) {
   const logoDe = (nombre: string) =>
     mapaLogos[(nombre || '').toLowerCase().trim()] || null
-  const esFinal =
-    partido.es_final === true ||
-    (partido.goles_local !== null &&
-      partido.goles_local !== undefined &&
-      partido.goles_visitante !== null &&
-      partido.goles_visitante !== undefined)
+  const esFinal = partido.es_final === true
+  const tieneMarcador =
+    partido.goles_local !== null &&
+    partido.goles_local !== undefined &&
+    partido.goles_visitante !== null &&
+    partido.goles_visitante !== undefined
   const iso = partido.fecha_hora_partido as string | null
+  // 🔴 En vivo: el partido ya inició (o ya tiene un avance capturado) y
+  // el Árbitro aún no lo marca final. Antes, tener marcador capturado
+  // bastaba para pintarlo «Final» aunque siguiera jugándose.
+  const yaInicio = iso ? new Date(iso).getTime() <= Date.now() : false
+  const enVivo = !esFinal && (tieneMarcador || yaInicio)
 
   const lado = (nombre: string, esLocal: boolean) => (
     <div
@@ -1022,6 +1027,15 @@ function FilaPartidoApp({
             </div>
             <div className="text-[10px] font-black uppercase tracking-widest text-slate-500 mt-1">
               Final
+            </div>
+          </div>
+        ) : enVivo ? (
+          <div>
+            <div className="font-black text-white text-base leading-none">
+              {partido.goles_local ?? 0} - {partido.goles_visitante ?? 0}
+            </div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-red-400 mt-1">
+              🔴 En vivo
             </div>
           </div>
         ) : (
@@ -1158,9 +1172,9 @@ function VistaQuiniela({
       : cierrePasado
         ? { texto: '🔴 En curso', clases: 'bg-red-600/20 border border-red-500/50 text-red-400' }
         : { texto: '🟢 Abierta', clases: 'bg-green-600/20 border border-green-500/50 text-green-400' }
-  const finales = partidos.filter(
-    (p) => p.es_final || (p.goles_local !== null && p.goles_local !== undefined)
-  ).length
+  // Solo cuentan como jugados los que el Árbitro ya marcó finales: un
+  // avance parcial (marcador capturado en vivo) NO es un partido jugado.
+  const finales = partidos.filter((p) => p.es_final === true).length
 
   return (
     <div className="w-full max-w-3xl flex flex-col gap-5 animate-in fade-in duration-500">
@@ -1520,12 +1534,16 @@ export default function SeccionPartidos() {
       setPartidoVista(d)
       return
     }
-    const esFinal =
-      p?.es_final === true ||
-      (p?.goles_local !== null &&
-        p?.goles_local !== undefined &&
-        p?.goles_visitante !== null &&
-        p?.goles_visitante !== undefined)
+    const esFinal = p?.es_final === true
+    const tieneMarcador =
+      p?.goles_local !== null &&
+      p?.goles_local !== undefined &&
+      p?.goles_visitante !== null &&
+      p?.goles_visitante !== undefined
+    const yaInicio = p?.fecha_hora_partido
+      ? new Date(p.fecha_hora_partido).getTime() <= Date.now()
+      : false
+    const enVivo = !esFinal && (tieneMarcador || yaInicio)
     setPartidoVista({
       homeTeam: p?.equipo_local || '',
       awayTeam: p?.equipo_visitante || '',
@@ -1536,7 +1554,7 @@ export default function SeccionPartidos() {
       leagueProviderId: null,
       leagueName: null,
       kickoffIso: p?.fecha_hora_partido ?? null,
-      status: esFinal ? 'finished' : 'scheduled',
+      status: esFinal ? 'finished' : enVivo ? 'live' : 'scheduled',
       statusRaw: null,
       progress: null,
       homeScore: p?.goles_local ?? null,
