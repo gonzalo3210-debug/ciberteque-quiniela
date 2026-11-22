@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { obtenerQuinielasActivas } from '@/lib/queries'
+import { ordenarPorPreferenciaSemana } from '@/lib/quinielaSemana'
 
 export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: number) => void) {
   const [quinielasActivas, setQuinielasActivas] = useState<any[]>([])
@@ -54,8 +55,18 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
           });
 
           if (jornadasDisponibles.length > 0) {
-            setQuinielasActivas(jornadasDisponibles);
-            await cambiarQuinielaVisible(jornadasDisponibles[0]); 
+            // Al entrar a Jugar se ve LA DE LA SEMANA (ver
+            // src/lib/quinielaSemana.ts): la lista queda ordenada
+            // con esa preferencia — la semanal primero también en
+            // el selector — y esa es la visible al inicio. Las
+            // especiales quedan a un toque en el selector.
+            const ordenadas = ordenarPorPreferenciaSemana(jornadasDisponibles, (q) => ({
+              modalidad: q.modalidad,
+              fechaCierre: q.fecha_cierre,
+              cantidadPartidos: (q.partidos || []).length,
+            }));
+            setQuinielasActivas(ordenadas);
+            await cambiarQuinielaVisible(ordenadas[0]);
           } else {
             setQuinielasActivas([]);
             setQuinielaActual(null);
@@ -90,6 +101,9 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
             setQuinielasActivas(prev => {
                 const filtradas = prev.filter(q => q.id !== payload.new.id);
                 if (quinielaActual.id === payload.new.id) {
+                    // La lista ya viene ordenada por la preferencia
+                    // de la semana: la primera que queda es el
+                    // reemplazo correcto.
                     if (filtradas.length > 0) cambiarQuinielaVisible(filtradas[0]);
                     else setQuinielaActual(null);
                 }

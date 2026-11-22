@@ -1,11 +1,13 @@
 // src/hooks/useJornadaActual.ts
 //
 // La jornada "de ahorita" del Club para la sección Partidos (pestaña
-// 🎯 Quiniela y filtro 🔴 Live): la quiniela ABIERTA más próxima a
-// cerrar; si no hay abiertas, la que quedó CERRADA pero sigue en
-// curso (todavía le faltan partidos finales, p. ej. entre el cierre
-// y la liquidación). Respeta la privacidad de siempre: las jornadas
-// solo_admins no se le muestran a quien no es admin.
+// 🎯 Quiniela y filtro 🔴 Live): si hay abiertas, la seleccionada por
+// defecto es LA DE LA SEMANA (ver src/lib/quinielaSemana.ts: la
+// regular con más partidos, no la que cierra primero); si no hay
+// abiertas, la que quedó CERRADA pero sigue en curso (todavía le
+// faltan partidos finales, p. ej. entre el cierre y la liquidación).
+// Respeta la privacidad de siempre: las jornadas solo_admins no se
+// le muestran a quien no es admin.
 //
 // Devuelve TODAS las candidatas (puede haber más de una abierta) con
 // la seleccionada, para que la vista ofrezca cambiar entre ellas.
@@ -14,6 +16,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { obtenerCatalogoEquipos } from '@/lib/queries'
+import { ordenarPorPreferenciaSemana } from '@/lib/quinielaSemana'
 
 export interface JornadaConPartidos {
   quiniela: any
@@ -104,10 +107,22 @@ export function useJornadaActual() {
           .slice(0, 3)
       }
 
-      setCandidatas(lista)
+      // La de la semana va primero en la lista (así sale primero en
+      // el selector) y es la seleccionada por defecto; si el usuario
+      // ya eligió otra en esta sesión y sigue en la lista, su
+      // elección se respeta. También aplica al camino de cerradas
+      // en curso: compitiendo una regular y un sorteo, manda la
+      // misma preferencia.
+      const ordenadas = ordenarPorPreferenciaSemana(lista, (c) => ({
+        modalidad: c.quiniela.modalidad,
+        fechaCierre: c.quiniela.fecha_cierre,
+        cantidadPartidos: c.partidos.length,
+      }))
+
+      setCandidatas(ordenadas)
       setSeleccionId((prev) => {
-        if (prev && lista.some((c) => c.quiniela.id === prev)) return prev
-        return lista.length > 0 ? lista[0].quiniela.id : null
+        if (prev && ordenadas.some((c) => c.quiniela.id === prev)) return prev
+        return ordenadas.length > 0 ? ordenadas[0].quiniela.id : null
       })
       setError(null)
     } catch (e) {
