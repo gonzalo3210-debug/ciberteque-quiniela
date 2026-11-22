@@ -429,5 +429,92 @@ const vacio = calcularLlavesCamino(calcularCaminoFinal([], [], 8), [], []);
 eq(vacio.porRonda, [[], [], []], 'sin pases ni partidos: ninguna llave');
 eq(vacio.fuentePrimeraRonda, null, 'sin pases ni partidos: sin fuente');
 
+// ---------- 16) Reproducción: la sala real de Gonzalo (2026-11-22) -------------------
+// «PRUEBA LIGUILLA», 4 jugadores × 2 pases. Al llenar el bombo a
+// mano, Gonzalo desmarcó al América y lo volvió a marcar: el orden
+// guardado quedó en orden de SELECCIÓN, con el América (2° de la
+// tabla) al final del arreglo. Sembrando sobre ese orden, las
+// llaves salían Cruz Azul–América, Chivas–Pachuca, Atlas–León y
+// Toluca–Monterrey (así se vio en vivo). El arreglo: la siembra se
+// deriva de la TABLA (resolverSiembra) y las llaves correctas son
+// 1v8, 2v7, 3v6, 4v5, cada lado con su número de posición.
+const { resolverSiembra } = await import('../src/lib/bomboSorteo.ts');
+const { nombreEquipoES } = await import('../src/lib/sports/nombresES.ts');
+const EQ_SALA = {
+  cruzAzul: { id: 's-cru', nombre: 'Cruz Azul' },
+  america: { id: 's-ame', nombre: 'América' },
+  chivas: { id: 's-chi', nombre: 'Chivas' },
+  atlas: { id: 's-atl', nombre: 'Atlas' },
+  toluca: { id: 's-tol', nombre: 'Toluca' },
+  monterrey: { id: 's-mon', nombre: 'Monterrey' },
+  leon: { id: 's-leo', nombre: 'León' },
+  pachuca: { id: 's-pac', nombre: 'Pachuca' },
+};
+const PASES_SALA = [
+  pase('s1', 'u-yajaira', 'Yajaira Robles', EQ_SALA.cruzAzul),
+  pase('s2', 'u-yajaira', 'Yajaira Robles', EQ_SALA.monterrey),
+  pase('s3', 'u-gonzalo', 'Gonzalo Montero', EQ_SALA.america),
+  pase('s4', 'u-gonzalo', 'Gonzalo Montero', EQ_SALA.leon),
+  pase('s5', 'u-dario', 'Darío Murillo', EQ_SALA.chivas),
+  pase('s6', 'u-dario', 'Darío Murillo', EQ_SALA.pachuca),
+  pase('s7', 'u-julio', 'Julio Montero', EQ_SALA.atlas),
+  pase('s8', 'u-julio', 'Julio Montero', EQ_SALA.toluca),
+];
+// El orden EXACTO que quedó guardado en la sala (leído de la base).
+const ORDEN_GUARDADO_SALA = [
+  'Cruz Azul', 'Chivas', 'Atlas', 'Toluca',
+  'Monterrey', 'León', 'Pachuca', 'América',
+];
+// La tabla real de la API a la jornada 17 (nombre e ID del proveedor).
+const TABLA_SALA = [
+  { rank: 1, teamName: 'Cruz Azul', teamProviderId: '134196' },
+  { rank: 2, teamName: 'América', teamProviderId: '134193' },
+  { rank: 3, teamName: 'CD Guadalajara', teamProviderId: '134206' },
+  { rank: 4, teamName: 'Atlas', teamProviderId: '134195' },
+  { rank: 5, teamName: 'Toluca', teamProviderId: '134204' },
+  { rank: 6, teamName: 'Monterrey', teamProviderId: '134198' },
+  { rank: 7, teamName: 'León', teamProviderId: '134207' },
+  { rank: 8, teamName: 'Pachuca', teamProviderId: '134191' },
+  { rank: 9, teamName: 'Tijuana', teamProviderId: '134202' },
+  { rank: 10, teamName: 'Santos Laguna', teamProviderId: '134192' },
+];
+const caminoSala = calcularCaminoFinal(PASES_SALA, [], 8);
+// El bug, tal cual se vio en vivo: sembrando sobre el orden guardado.
+eq(
+  paresDe(calcularLlavesCamino(caminoSala, [], ORDEN_GUARDADO_SALA).porRonda[0]),
+  [['Cruz Azul', 'América'], ['Chivas', 'Pachuca'], ['Atlas', 'León'], ['Toluca', 'Monterrey']],
+  'el bug: con el orden guardado en orden de selección, las llaves salen mal'
+);
+// El arreglo: la siembra sale de la tabla y las llaves se corrigen.
+const siembraSala = resolverSiembra(ORDEN_GUARDADO_SALA, TABLA_SALA, nombreEquipoES);
+const llavesSala = calcularLlavesCamino(caminoSala, [], siembraSala.orden, {
+  posicionesSiembra: siembraSala.posiciones,
+  siembraDesdeTabla: siembraSala.fuente === 'tabla',
+});
+eq(llavesSala.fuentePrimeraRonda, 'siembra', 'la sala sin partidos: la fuente es la siembra');
+eq(llavesSala.siembraDesdeTabla, true, 'la siembra de la sala salió de la tabla');
+eq(
+  paresDe(llavesSala.porRonda[0]),
+  [['Cruz Azul', 'Pachuca'], ['América', 'León'], ['Chivas', 'Monterrey'], ['Atlas', 'Toluca']],
+  'con la siembra de tabla: Cruz Azul–Pachuca, América–León, Chivas–Monterrey, Atlas–Toluca'
+);
+eq(
+  llavesSala.porRonda[0].map((l) => l.lados.map((s) => s.posicionSiembra)),
+  [[1, 8], [2, 7], [3, 6], [4, 5]],
+  'cada lado trae su número de posición según la tabla'
+);
+eq(
+  llavesSala.porRonda[0][1].lados.map((s) => s.pases.map((e) => e.pase.nombreJugador)),
+  [['Gonzalo Montero'], ['Gonzalo Montero']],
+  'la llave B es el duelo de Gonzalo: su América (2) contra su León (7)'
+);
+// El respaldo queda marcado: sin tabla, la vista avisa (no calla).
+const siembraGuardada = resolverSiembra(ORDEN_GUARDADO_SALA, null, nombreEquipoES);
+const llavesGuardada = calcularLlavesCamino(caminoSala, [], siembraGuardada.orden, {
+  posicionesSiembra: siembraGuardada.posiciones,
+  siembraDesdeTabla: siembraGuardada.fuente === 'tabla',
+});
+eq(llavesGuardada.siembraDesdeTabla, false, 'sin tabla: la siembra por orden guardado queda marcada para el aviso');
+
 console.log(`\ncamino-final: ${pasan} pasan, ${fallan} fallan`);
 if (fallan > 0) process.exit(1);

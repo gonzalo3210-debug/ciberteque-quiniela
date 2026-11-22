@@ -25,6 +25,13 @@
 // posicionales 1v8, 2v7, 3v6 y 4v5, que reproducen las llaves
 // reales de la liguilla.
 //
+// EXCEPCIÓN REAL (2026-11-22): el llenado A MANO guarda el orden de
+// selección — desmarcar un equipo y volverlo a marcar lo manda al
+// final del arreglo — y ese orden NO es la siembra. Por eso el
+// tablero ya no se fía del orden guardado: deriva la siembra de la
+// tabla al mostrar (resolverSiembra, abajo), y el creador además
+// reordena por tabla al guardar cuando la tabla está disponible.
+//
 // Los 8 equipos de liguilla ya no cambian (son los primeros 8 de la
 // tabla); lo que puede variar es su posición, y con ella las llaves.
 // Por eso la fuente de cuartos, cuando existe, manda sobre la tabla.
@@ -160,6 +167,72 @@ export function ordenarPorSiembra(
     }))
     .sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.i - b.i))
     .map((x) => x.e);
+}
+
+/** La siembra de un bombo, resuelta contra la tabla de su liga. */
+export interface SiembraResuelta {
+  /** Nombres de los equipos en orden de siembra (1° primero). */
+  orden: string[];
+  /** Posición de cada equipo, por nombre normalizado. */
+  posiciones: Map<string, number>;
+  /**
+   * De dónde salió la siembra: 'tabla' = la posición real en la
+   * tabla de la liga; 'guardada' = la tabla no resolvió a todo el
+   * bombo y se usa el orden guardado (la vista lo AVISA: nada de
+   * emparejar callada en un orden que no es la siembra).
+   */
+  fuente: 'tabla' | 'guardada';
+}
+
+/**
+ * LA SIEMBRA REAL de un bombo ya guardado, derivada de la TABLA de
+ * la liga (principio de Gonzalo, 2026-11-22): «el orden en que se
+ * seleccionan no tiene que ver con el orden en la tabla; cada
+ * equipo tiene su posición en la tabla». El orden guardado en
+ * quinielas.equipos_sorteo puede ser el orden de SELECCIÓN del
+ * admin: llenando a mano, si desmarca un equipo y lo vuelve a
+ * marcar, el arreglo lo manda al final y la siembra se corrompe
+ * (pasó en vivo: el América, 2° de la tabla, quedó 8° del arreglo y
+ * las llaves salieron Cruz Azul–América en vez de Cruz Azul–
+ * Pachuca). Por eso el tablero deriva la posición de cada equipo
+ * de la tabla — la misma de /api/tabla-liga, liveRows si vienen,
+ * si no las oficiales — y NUNCA del orden de selección ni del
+ * orden guardado.
+ *
+ * `nombresBombo` son los nombres del REGISTRO del Club; el cruce
+ * contra la tabla es por el nombre en español (nombresES), como en
+ * el jalado. La tabla solo se acepta si TODOS los equipos del
+ * bombo aparecen en ella con posiciones distintas; con cualquier
+ * duda se cae al orden guardado y la fuente queda 'guardada'.
+ */
+export function resolverSiembra(
+  nombresBombo: string[],
+  rows: StandingRow[] | null,
+  nombreES: ResolverNombreES
+): SiembraResuelta {
+  const posiciones = new Map<string, number>();
+  if (rows && rows.length > 0 && nombresBombo.length > 0) {
+    const rankPorNombre = new Map<string, number>();
+    for (const r of rows) {
+      rankPorNombre.set(normalizar(nombreES(r.teamName, r.teamProviderId)), r.rank);
+      rankPorNombre.set(normalizar(r.teamName), r.rank);
+    }
+    const conRank = nombresBombo.map((nombre) => ({
+      nombre,
+      rank: rankPorNombre.get(normalizar(nombre)) ?? null,
+    }));
+    const ranks = conRank.map((x) => x.rank);
+    if (ranks.every((r) => r !== null) && new Set(ranks).size === ranks.length) {
+      const ordenadas = [...conRank].sort((a, b) => a.rank! - b.rank!);
+      for (const x of ordenadas) posiciones.set(normalizar(x.nombre), x.rank!);
+      return { orden: ordenadas.map((x) => x.nombre), posiciones, fuente: 'tabla' };
+    }
+  }
+  // Respaldo: el orden guardado, con su posición posicional.
+  nombresBombo.forEach((nombre, i) => {
+    posiciones.set(normalizar(nombre), i + 1);
+  });
+  return { orden: [...nombresBombo], posiciones, fuente: 'guardada' };
 }
 
 /**

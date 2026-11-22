@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { construirPayloadJornada } from '@/lib/crearJornadaPayload';
 import {
   mapearEquiposARegistro,
+  resolverSiembra,
   sugerirBombo,
   type FuenteBombo,
 } from '@/lib/bomboSorteo';
@@ -291,6 +292,72 @@ export function useCreadorJornadas() {
     
     setCreando(true);
     try {
+      // LA SIEMBRA SE GUARDA POR TABLA, no por orden de selección
+      // (segunda capa del arreglo del 2026-11-22; la primera es el
+      // tablero, que deriva la siembra al mostrar): si el admin
+      // llenó el bombo a mano y desmarcó/re-marcó un equipo, el
+      // arreglo de selección lo manda al final. Aquí se reordena
+      // por la posición en la tabla de la liga elegida cuando la
+      // tabla está disponible y resuelve a los 8; si algo falla, se
+      // guarda el orden de selección y el tablero corrige al vuelo.
+      let equiposSorteoFinal = equiposSorteo;
+      if (modalidad === 'sorteo' && equiposSorteo.length === 8) {
+        try {
+          const { data: filasEq } = await supabase
+            .from('equipos')
+            .select('id, nombre')
+            .in('id', equiposSorteo);
+          const nombrePorId = new Map<string, string>(
+            (filasEq ?? []).map((e: any) => [e.id, e.nombre])
+          );
+          const nombres: string[] = [];
+          let completos = true;
+          for (const id of equiposSorteo) {
+            const n = nombrePorId.get(id);
+            if (!n) {
+              completos = false;
+              break;
+            }
+            nombres.push(n);
+          }
+          if (completos) {
+            const resTabla = await fetch(
+              `/api/tabla-liga?liga=${ligaBombo.providerId}`
+            );
+            if (resTabla.ok) {
+              const dataTabla = await resTabla.json();
+              const filas = (dataTabla.liveRows ??
+                dataTabla.rows ??
+                []) as StandingRow[];
+              const siembra = resolverSiembra(
+                nombres,
+                filas,
+                nombreEquipoES
+              );
+              if (siembra.fuente === 'tabla') {
+                const idPorNombre = new Map<string, string>();
+                equiposSorteo.forEach((id, i) => {
+                  if (!idPorNombre.has(nombres[i])) {
+                    idPorNombre.set(nombres[i], id);
+                  }
+                });
+                const ordenados = siembra.orden.map((n) =>
+                  idPorNombre.get(n)
+                );
+                if (
+                  ordenados.every((id) => typeof id === 'string') &&
+                  new Set(ordenados).size === 8
+                ) {
+                  equiposSorteoFinal = ordenados as string[];
+                }
+              }
+            }
+          }
+        } catch {
+          // Mejor esfuerzo: se guarda el orden de selección.
+        }
+      }
+
       // El payload se arma con el constructor puro compartido
       // (src/lib/crearJornadaPayload.ts): la conversión de la hora
       // local a UTC, el orden de partidos y las reglas por modalidad
@@ -298,7 +365,7 @@ export function useCreadorJornadas() {
       // asistente gráfico.
       const payload = construirPayloadJornada({
         nombreJornada, precioTicket, fechaCierre, tipoPremiacion,
-        modalidad, soloAdmins, equiposSorteo, partidosNuevos
+        modalidad, soloAdmins, equiposSorteo: equiposSorteoFinal, partidosNuevos
       });
 
       // 1. Insertar Quiniela

@@ -8,7 +8,16 @@
 //     pases con equipo) y arma las asignaciones con nombre de jugador
 //     y equipo, listas para el plan de revelado,
 //   - y lee los partidos del cuadro eliminatorio de la quiniela, que
-//     alimentan el tablero "🏁 Camino a la final" (caminoFinal.ts).
+//     alimentan el tablero "🏁 Camino a la final" (caminoFinal.ts),
+//   - y resuelve LA SIEMBRA REAL del bombo contra la tabla de su
+//     liga (/api/tabla-liga, resolverSiembra en bomboSorteo.ts): la
+//     posición de cada equipo sale de la tabla, nunca del orden
+//     guardado — ese orden puede ser el de selección manual del
+//     admin (desmarcó un equipo, lo volvió a marcar y el arreglo lo
+//     mandó al final). Así cualquier sala ya creada se ve bien sin
+//     re-guardar la quiniela; si ninguna liga elegible resuelve a
+//     todo el bombo, la siembra queda marcada como 'guardada' y el
+//     tablero lo avisa.
 // Antes del sorteo no devuelve asignaciones: la cartelera muestra el
 // panel de compra de siempre. La ceremonia es presentación; aquí no
 // se sortea nada ni se escribe en la base.
@@ -25,6 +34,13 @@ import {
   type AsignacionSorteo,
 } from '@/lib/sorteoCeremonia';
 import type { PartidoCamino } from '@/lib/caminoFinal';
+import {
+  resolverSiembra,
+  type SiembraResuelta,
+} from '@/lib/bomboSorteo';
+import { nombreEquipoES } from '@/lib/sports/nombresES';
+import { LIGAS_SORTEO } from '@/lib/sports/ligasSorteo';
+import type { StandingRow } from '@/lib/sports/types';
 
 export interface EquipoBombo {
   id: string;
@@ -37,6 +53,7 @@ export function useCeremoniaSorteo(quiniela: any) {
   const [realizado, setRealizado] = useState(false);
   const [asignaciones, setAsignaciones] = useState<AsignacionSorteo[]>([]);
   const [equiposBombo, setEquiposBombo] = useState<EquipoBombo[]>([]);
+  const [siembra, setSiembra] = useState<SiembraResuelta | null>(null);
   const [partidos, setPartidos] = useState<PartidoCamino[]>([]);
   // Solo la carga más reciente puede pintar: si la quiniela cambia o
   // llega un refresco mientras otra lectura va en vuelo, la vieja se
@@ -51,6 +68,7 @@ export function useCeremoniaSorteo(quiniela: any) {
       setRealizado(false);
       setAsignaciones([]);
       setEquiposBombo([]);
+      setSiembra(null);
       setPartidos([]);
       return;
     }
@@ -98,11 +116,49 @@ export function useCeremoniaSorteo(quiniela: any) {
         ])
       );
       // El bombo se muestra en el orden guardado en la quiniela.
-      setEquiposBombo(
-        idsBombo
-          .map((id) => equipoPorId.get(id))
-          .filter(Boolean) as EquipoBombo[]
-      );
+      const bombo = idsBombo
+        .map((id) => equipoPorId.get(id))
+        .filter(Boolean) as EquipoBombo[];
+      setEquiposBombo(bombo);
+
+      // LA SIEMBRA REAL: se deriva de la tabla de la liga (la
+      // primera liga elegible cuya tabla resuelva a TODO el bombo
+      // manda: Liga MX, Femenil o Expansión), nunca del orden
+      // guardado. Si ninguna resuelve, queda el orden guardado,
+      // marcado como respaldo para que el tablero lo avise.
+      if (bombo.length > 0) {
+        const nombresBombo = bombo.map((e) => e.nombre);
+        let siembraResuelta = resolverSiembra(
+          nombresBombo,
+          null,
+          nombreEquipoES
+        );
+        for (const liga of LIGAS_SORTEO) {
+          try {
+            const res = await fetch(
+              `/api/tabla-liga?liga=${liga.providerId}`
+            );
+            if (!res.ok) continue;
+            const data = await res.json();
+            const filas = (data.liveRows ?? data.rows ?? []) as StandingRow[];
+            const intento = resolverSiembra(
+              nombresBombo,
+              filas,
+              nombreEquipoES
+            );
+            if (intento.fuente === 'tabla') {
+              siembraResuelta = intento;
+              break;
+            }
+          } catch {
+            // Sin tabla de esta liga: se prueba la siguiente.
+          }
+        }
+        if (!vigente()) return;
+        setSiembra(siembraResuelta);
+      } else {
+        setSiembra(null);
+      }
 
       // Partidos del cuadro eliminatorio (para el Camino a la final).
       const { data: filasPartidos } = await supabase
@@ -162,6 +218,7 @@ export function useCeremoniaSorteo(quiniela: any) {
       if (vigente()) {
         setRealizado(false);
         setAsignaciones([]);
+        setSiembra(null);
       }
     } finally {
       if (vigente()) setCargando(false);
@@ -177,6 +234,7 @@ export function useCeremoniaSorteo(quiniela: any) {
     realizado,
     asignaciones,
     equiposBombo,
+    siembra,
     partidos,
     recargar: cargar,
   };

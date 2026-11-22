@@ -51,10 +51,17 @@
 //      equipos de una ronda, esas son las llaves. Para la primera
 //      ronda se acepta la fuente SOLO si cubre a todo el bombo.
 //   2. SIEMBRA (solo primera ronda): si aún no hay partidos que la
-//      cubran, se siembra por el orden guardado en
-//      quinielas.equipos_sorteo — que el jalado ya guarda en orden
-//      de tabla (ver bomboSorteo.ts) — con el cuadro clásico:
-//      1° vs 8°, 2° vs 7°, 3° vs 6°, 4° vs 5°.
+//      cubran, se siembra por la POSICIÓN EN LA TABLA de cada
+//      equipo, con el cuadro clásico: 1° vs 8°, 2° vs 7°, 3° vs 6°,
+//      4° vs 5°. El orden que recibe esta función ya viene resuelto
+//      por quien la llama (resolverSiembra en bomboSorteo.ts): la
+//      posición sale de la tabla de la liga, NUNCA del orden de
+//      selección ni del orden guardado en quinielas.equipos_sorteo
+//      — ese arreglo puede ser el orden en que el admin marcó los
+//      equipos a mano (desmarcar y re-marcar uno lo manda al
+//      final). Solo si la tabla no resuelve a todo el bombo se usa
+//      el orden guardado, y queda marcado (siembraDesdeTabla) para
+//      que la vista lo avise en vez de emparejar callada.
 // La ronda de cada partido se deriva de los estados ya calculados
 // (la caída del perdedor marca la ronda de un partido final; en uno
 // no final manda la etapa actual de sus equipos), sin recalcular
@@ -495,6 +502,12 @@ export interface LadoLlaveCamino {
    * no tiene pases (no debería pasar tras el sorteo).
    */
   representante: EstadoPaseCamino | null;
+  /**
+   * Su número de siembra (posición en la tabla; en el respaldo por
+   * orden guardado, su posición en ese orden): la vista lo pinta
+   * junto al escudo. Null si no se conoce ninguna posición.
+   */
+  posicionSiembra: number | null;
 }
 
 /** Una llave: dos lados que se enfrentan en una ronda. */
@@ -513,6 +526,28 @@ export interface LlavesCamino {
   porRonda: LlaveCamino[][];
   /** De dónde salieron las llaves de la primera ronda. */
   fuentePrimeraRonda: 'partidos' | 'siembra' | null;
+  /**
+   * La siembra usada salió de la TABLA de la liga (true) o del
+   * orden guardado del bombo (false, el respaldo): la vista lo
+   * distingue en la etiqueta y, si es el respaldo, muestra el aviso
+   * de que la siembra es por orden guardado.
+   */
+  siembraDesdeTabla: boolean;
+}
+
+/** Opciones de siembra para calcularLlavesCamino. */
+export interface OpcionesLlavesCamino {
+  /**
+   * Posición de siembra de cada equipo, por nombre normalizado
+   * (la entrega resolverSiembra en bomboSorteo.ts). Sin ella, la
+   * posición es el índice dentro del orden recibido.
+   */
+  posicionesSiembra?: Map<string, number> | null;
+  /**
+   * La siembra (el orden recibido) se derivó de la tabla de la
+   * liga. Sin especificar se asume que sí, como antes.
+   */
+  siembraDesdeTabla?: boolean;
 }
 
 /**
@@ -522,15 +557,22 @@ export interface LlavesCamino {
  *
  * @param camino      El resultado de calcularCaminoFinal.
  * @param partidos    Los mismos partidos del cuadro que se le dieron.
- * @param ordenBombo  Nombres de los equipos en el orden guardado en
- *                    quinielas.equipos_sorteo (la siembra); sin él no
- *                    hay fuente de siembra y la primera ronda solo
- *                    puede salir de los partidos.
+ * @param ordenBombo  Nombres de los equipos en ORDEN DE SIEMBRA
+ *                    (1° primero): quien llama lo resuelve contra la
+ *                    tabla con resolverSiembra (bomboSorteo.ts); el
+ *                    orden guardado en quinielas.equipos_sorteo solo
+ *                    se pasa como respaldo, marcado en `opciones`.
+ *                    Sin orden no hay fuente de siembra y la primera
+ *                    ronda solo puede salir de los partidos.
+ * @param opciones    Posiciones de siembra y su procedencia (tabla u
+ *                    orden guardado), para pintar el número de cada
+ *                    lado y avisar cuando manda el respaldo.
  */
 export function calcularLlavesCamino(
   camino: CaminoFinal,
   partidos: PartidoCamino[],
-  ordenBombo?: string[] | null
+  ordenBombo?: string[] | null,
+  opciones?: OpcionesLlavesCamino
 ): LlavesCamino {
   const rondas = camino.rondasTotales;
   const porRonda: LlaveCamino[][] = Array.from({ length: rondas }, () => []);
@@ -568,6 +610,16 @@ export function calcularLlavesCamino(
     }
   }
 
+  // Posición de siembra por equipo: la que resuelva quien llama
+  // (de la tabla); si no trae ninguna, el índice en el orden dado.
+  const posicionPorClave: Map<string, number> | null =
+    opciones?.posicionesSiembra ??
+    (ordenBombo && ordenBombo.length > 0
+      ? new Map(
+          ordenBombo.map((n, i) => [normalizarNombreEquipo(n), i + 1])
+        )
+      : null);
+
   const ladoDe = (clave: string): LadoLlaveCamino => {
     const pases = pasesPorClave.get(clave) ?? [];
     return {
@@ -575,6 +627,7 @@ export function calcularLlavesCamino(
       nombreEquipo: nombrePorClave.get(clave) ?? clave,
       pases,
       representante: pases[0] ?? null,
+      posicionSiembra: posicionPorClave?.get(clave) ?? null,
     };
   };
 
@@ -648,8 +701,9 @@ export function calcularLlavesCamino(
 
   // Primera ronda: los partidos mandan SOLO si cubren a todo el
   // bombo; si no, se descarta lo parcial y se siembra por el orden
-  // guardado (1° vs último, 2° vs penúltimo, …: en el cuadro de 8,
-  // 1v8, 2v7, 3v6, 4v5).
+  // recibido (1° vs último, 2° vs penúltimo, …: en el cuadro de 8,
+  // 1v8, 2v7, 3v6, 4v5). Ese orden es la siembra resuelta contra la
+  // tabla por quien llama (o su respaldo marcado, el guardado).
   let fuentePrimeraRonda: 'partidos' | 'siembra' | null = null;
   const clavesEnLlaves0 = new Set<string>(
     porRonda[0].flatMap((l) => l.lados.map((s) => s.clave))
@@ -687,5 +741,9 @@ export function calcularLlavesCamino(
     llave.letra = String.fromCharCode(65 + i);
   });
 
-  return { porRonda, fuentePrimeraRonda };
+  return {
+    porRonda,
+    fuentePrimeraRonda,
+    siembraDesdeTabla: opciones?.siembraDesdeTabla ?? true,
+  };
 }

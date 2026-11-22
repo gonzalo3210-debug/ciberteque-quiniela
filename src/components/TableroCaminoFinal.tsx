@@ -8,15 +8,20 @@
 // columnas por etapa (Cuartos → Semifinal → Final → 👑 Campeón)
 // FORMANDO LAS LLAVES, como los brackets de liguilla que pidió
 // Gonzalo: cada llave junta a los dos equipos que se enfrentan
-// (escudo + equipo + su jugador), el que cae se apaga dentro de su
-// llave y el que avanza se sigue viendo en la siguiente columna.
-// El emparejamiento lo deriva la lógica pura (calcularLlavesCamino
-// en src/lib/caminoFinal.ts): primero los partidos reales del
-// cuadro y, para cuartos sin partidos, la siembra del bombo
-// (1° vs 8°, 2° vs 7°, 3° vs 6°, 4° vs 5°). Las semifinales se
-// emparejan cuando los partidos cargados las definen; mientras
-// tanto sus pases se muestran sueltos con «emparejamiento por
-// definir», como antes.
+// (escudo + equipo + su jugador, con su NÚMERO de posición), el
+// que cae se apaga dentro de su llave y el que avanza se sigue
+// viendo en la siguiente columna. El emparejamiento lo deriva la
+// lógica pura (calcularLlavesCamino en src/lib/caminoFinal.ts):
+// primero los partidos reales del cuadro y, para cuartos sin
+// partidos, la siembra (1° vs 8°, 2° vs 7°, 3° vs 6°, 4° vs 5°).
+// LA SIEMBRA SALE DE LA TABLA de la liga (la resuelve
+// useCeremoniaSorteo con resolverSiembra y llega por la prop
+// `siembra`), NUNCA del orden guardado en la quiniela: ese orden
+// puede ser el de selección manual del admin y no es la siembra.
+// Solo si la tabla no resolvió, se usa el orden guardado y el
+// tablero lo AVISA. Las semifinales se emparejan cuando los
+// partidos cargados las definen; mientras tanto sus pases se
+// muestran sueltos con «emparejamiento por definir», como antes.
 //
 // Todo el estado se DERIVA de los resultados con la lógica pura
 // (src/lib/caminoFinal.ts): nada se escribe en la base y el tablero
@@ -45,6 +50,7 @@ import {
   type PartidoCamino,
 } from '@/lib/caminoFinal'
 import type { AsignacionSorteo } from '@/lib/sorteoCeremonia'
+import type { SiembraResuelta } from '@/lib/bomboSorteo'
 import {
   leerPreferenciaSonidos,
   sonarFanfarria,
@@ -123,15 +129,26 @@ function LineaEstado({ estado }: { estado: EstadoPaseCamino }) {
   )
 }
 
+/** El numerito de siembra sobre el escudo (posición en la tabla). */
+function InsigniaPosicion({ posicion }: { posicion: number }) {
+  return (
+    <span className="absolute -top-1.5 -left-1.5 min-w-[17px] h-[17px] px-0.5 rounded-full bg-blue-600 border border-blue-300/60 text-white text-[9px] font-black flex items-center justify-center shadow">
+      {posicion}
+    </span>
+  )
+}
+
 /** La ficha de siempre: un pase suelto en su columna. */
 function FichaPase({
   estado,
   usuarioActivoId,
   cambios,
+  posicion,
 }: {
   estado: EstadoPaseCamino
   usuarioActivoId?: string | null
   cambios: Map<string, CambioCamino>
+  posicion?: number | null
 }) {
   const esPropio =
     !!usuarioActivoId && estado.pase.usuarioId === usuarioActivoId
@@ -149,20 +166,23 @@ function FichaPase({
       }`}
     >
       <div className="flex items-center gap-2">
-        <div
-          className={`w-9 h-9 bg-slate-950 border border-slate-800 rounded-full p-1.5 flex items-center justify-center shrink-0 ${
-            estado.estado === 'eliminado' ? 'grayscale' : ''
-          }`}
-        >
-          {estado.pase.logoUrl ? (
-            <img
-              src={estado.pase.logoUrl}
-              alt=""
-              className="w-full h-full object-contain"
-            />
-          ) : (
-            <span className="text-xs">⚽</span>
-          )}
+        <div className="relative shrink-0">
+          <div
+            className={`w-9 h-9 bg-slate-950 border border-slate-800 rounded-full p-1.5 flex items-center justify-center ${
+              estado.estado === 'eliminado' ? 'grayscale' : ''
+            }`}
+          >
+            {estado.pase.logoUrl ? (
+              <img
+                src={estado.pase.logoUrl}
+                alt=""
+                className="w-full h-full object-contain"
+              />
+            ) : (
+              <span className="text-xs">⚽</span>
+            )}
+          </div>
+          {posicion != null && <InsigniaPosicion posicion={posicion} />}
         </div>
         <div className="min-w-0">
           <p
@@ -223,15 +243,20 @@ function LadoLlave({
       }`}
     >
       <div className="flex items-center gap-2">
-        <div
-          className={`w-8 h-8 bg-slate-950 border border-slate-800 rounded-full p-1 flex items-center justify-center shrink-0 ${
-            estadoEquipo === 'eliminado' ? 'grayscale' : ''
-          }`}
-        >
-          {logo ? (
-            <img src={logo} alt="" className="w-full h-full object-contain" />
-          ) : (
-            <span className="text-[11px]">⚽</span>
+        <div className="relative shrink-0">
+          <div
+            className={`w-8 h-8 bg-slate-950 border border-slate-800 rounded-full p-1 flex items-center justify-center ${
+              estadoEquipo === 'eliminado' ? 'grayscale' : ''
+            }`}
+          >
+            {logo ? (
+              <img src={logo} alt="" className="w-full h-full object-contain" />
+            ) : (
+              <span className="text-[11px]">⚽</span>
+            )}
+          </div>
+          {lado.posicionSiembra != null && (
+            <InsigniaPosicion posicion={lado.posicionSiembra} />
           )}
         </div>
         <div className="min-w-0">
@@ -311,10 +336,17 @@ interface TableroCaminoFinalProps {
   cantidadEquipos?: number
   /**
    * Nombres de los equipos en el orden guardado en
-   * quinielas.equipos_sorteo (la siembra): con él, los cuartos se
-   * arman como llaves aunque aún no haya partidos cargados.
+   * quinielas.equipos_sorteo: es solo el RESPALDO de la siembra
+   * (ese orden puede ser el de selección manual del admin).
    */
   ordenBombo?: string[]
+  /**
+   * LA SIEMBRA resuelta contra la tabla de la liga
+   * (resolverSiembra): si viene, su orden y sus posiciones mandan
+   * sobre el orden guardado; si su fuente es 'guardada', el
+   * tablero avisa que la siembra es por orden guardado.
+   */
+  siembra?: SiembraResuelta | null
 }
 
 export default function TableroCaminoFinal({
@@ -323,6 +355,7 @@ export default function TableroCaminoFinal({
   partidos,
   cantidadEquipos,
   ordenBombo,
+  siembra,
 }: TableroCaminoFinalProps) {
   const camino = useMemo(
     () =>
@@ -336,10 +369,19 @@ export default function TableroCaminoFinal({
     [asignaciones, partidos, cantidadEquipos]
   )
 
+  // La siembra efectiva: la de la tabla si se resolvió; si no, el
+  // orden guardado (marcado, para avisar en vez de callar).
+  const ordenEfectivo = siembra?.orden ?? ordenBombo
   const llaves = useMemo(
-    () => calcularLlavesCamino(camino, partidos, ordenBombo),
-    [camino, partidos, ordenBombo]
+    () =>
+      calcularLlavesCamino(camino, partidos, ordenEfectivo, {
+        posicionesSiembra: siembra?.posiciones ?? null,
+        siembraDesdeTabla: siembra ? siembra.fuente === 'tabla' : true,
+      }),
+    [camino, partidos, ordenEfectivo, siembra]
   )
+  const posicionDe = (nombreEquipo: string): number | null =>
+    siembra?.posiciones.get(normalizarNombreEquipo(nombreEquipo)) ?? null
 
   // Detección de cambios entre refrescos para animar una sola vez.
   const fotoRef = useRef<Map<string, FotoPaseCamino> | null>(null)
@@ -433,6 +475,12 @@ export default function TableroCaminoFinal({
               : 'El cuadro se activa cuando se carguen los partidos de la eliminatoria.'
             : `${camino.partidosFinales} de ${camino.partidosTotales} partidos finales · tu equipo te mantiene vivo mientras siga ganando.`}
         </p>
+        {siembra && siembra.fuente === 'guardada' && (
+          <p className="text-amber-400 text-[11px] mt-1.5 font-bold leading-snug">
+            ⚠️ No se pudo cargar la tabla de la liga: la siembra se
+            armó con el orden guardado del bombo.
+          </p>
+        )}
       </div>
 
       {camino.hayCampeon && (
@@ -511,7 +559,9 @@ export default function TableroCaminoFinal({
                 {columna.indice === 0 && llaves.fuentePrimeraRonda && (
                   <span className="block text-[9px] font-bold text-blue-400/80 uppercase tracking-wider mt-0.5">
                     {llaves.fuentePrimeraRonda === 'siembra'
-                      ? 'Siembra por tabla'
+                      ? llaves.siembraDesdeTabla
+                        ? 'Siembra por tabla'
+                        : 'Siembra por orden guardado'
                       : 'Según los partidos'}
                   </span>
                 )}
@@ -541,6 +591,7 @@ export default function TableroCaminoFinal({
                     estado={estado}
                     usuarioActivoId={usuarioActivoId}
                     cambios={cambios}
+                    posicion={posicionDe(estado.pase.nombreEquipo)}
                   />
                 ))}
                 {llavesColumna.length === 0 && sueltas.length === 0 && (

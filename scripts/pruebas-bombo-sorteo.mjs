@@ -23,6 +23,7 @@ const {
   ordenarPorSiembra,
   sugerirBombo,
   mapearEquiposARegistro,
+  resolverSiembra,
 } = await import('../src/lib/bomboSorteo.ts');
 const { nombreEquipoES } = await import('../src/lib/sports/nombresES.ts');
 
@@ -512,6 +513,58 @@ const liguillaExpansion = [
     sugerirBombo(cuartosRonda16, tablaExpansion, nombreEquipoES).fuente,
     'tabla',
     'con el default de Liga MX (17), la ronda 16 sería regular y manda la tabla'
+  );
+}
+
+// ---------- resolverSiembra: la posición sale de la tabla -------------------
+// La sala real de Gonzalo (2026-11-22): llenó el bombo A MANO con
+// los 8 ya seleccionados, DESMARCÓ al América y lo volvió a marcar;
+// el orden guardado quedó en orden de selección, con el América
+// (2° de la tabla) al final. La tabla de abajo es la real de la
+// API (nombres e IDs del proveedor, jornada 17).
+{
+  const tablaReal = [
+    fila(1, 'Cruz Azul', '134196'),
+    fila(2, 'América', '134193'),
+    fila(3, 'CD Guadalajara', '134206'),
+    fila(4, 'Atlas', '134195'),
+    fila(5, 'Toluca', '134204'),
+    fila(6, 'Monterrey', '134198'),
+    fila(7, 'León', '134207'),
+    fila(8, 'Pachuca', '134191'),
+    fila(9, 'Tijuana', '134202'),
+    fila(10, 'Santos Laguna', '134192'),
+  ];
+  const guardadoRevuelto = [
+    'Cruz Azul', 'Chivas', 'Atlas', 'Toluca',
+    'Monterrey', 'León', 'Pachuca', 'América',
+  ];
+  const siembra = resolverSiembra(guardadoRevuelto, tablaReal, nombreEquipoES);
+  eq(siembra.fuente, 'tabla', 'resolverSiembra: con la tabla completa la fuente es la tabla');
+  eq(
+    siembra.orden,
+    ['Cruz Azul', 'América', 'Chivas', 'Atlas', 'Toluca', 'Monterrey', 'León', 'Pachuca'],
+    'resolverSiembra: el orden sale de la tabla, no del orden guardado (el América vuelve al 2°)'
+  );
+  eq(siembra.posiciones.get('america'), 2, 'resolverSiembra: América es el 2 aunque se guardó al final');
+  eq(siembra.posiciones.get('chivas'), 3, 'resolverSiembra: Chivas cruza contra «CD Guadalajara» por nombresES');
+  eq(siembra.posiciones.get('pachuca'), 8, 'resolverSiembra: Pachuca es el 8');
+
+  const sinTabla = resolverSiembra(guardadoRevuelto, null, nombreEquipoES);
+  eq(sinTabla.fuente, 'guardada', 'resolverSiembra: sin tabla, la fuente es el orden guardado (avisado)');
+  eq(sinTabla.orden, guardadoRevuelto, 'resolverSiembra: sin tabla se conserva el orden guardado');
+  eq(sinTabla.posiciones.get('america'), 8, 'resolverSiembra: en el respaldo la posición es la del orden guardado');
+
+  const incompleta = resolverSiembra(
+    guardadoRevuelto,
+    tablaReal.filter((r) => r.teamName !== 'Pachuca'),
+    nombreEquipoES
+  );
+  eq(incompleta.fuente, 'guardada', 'resolverSiembra: si un equipo no aparece en la tabla, cae al orden guardado');
+  eq(
+    resolverSiembra(guardadoRevuelto, [], nombreEquipoES).fuente,
+    'guardada',
+    'resolverSiembra: tabla vacía = respaldo guardado'
   );
 }
 
