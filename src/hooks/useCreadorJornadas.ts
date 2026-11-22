@@ -7,7 +7,11 @@ import {
   sugerirBombo,
   type FuenteBombo,
 } from '@/lib/bomboSorteo';
-import { LIGA_MX_PROVIDER_ID } from '@/lib/sports/leagues';
+import {
+  LIGA_SORTEO_DEFECTO,
+  getLigaSorteo,
+  type LigaSorteo,
+} from '@/lib/sports/ligasSorteo';
 import { nombreEquipoES } from '@/lib/sports/nombresES';
 import type { SportsFixture, StandingRow } from '@/lib/sports/types';
 import toast from 'react-hot-toast';
@@ -15,6 +19,8 @@ import toast from 'react-hot-toast';
 /** De dónde salió el bombo actual al jalarlo (para avisar en la vista). */
 export interface OrigenBombo {
   tipo: FuenteBombo;
+  /** Nombre de la liga de la que se jaló (p. ej. "Liga MX"). */
+  liga: string;
   /** Equipos de la fuente que no están en el registro del Club. */
   noRegistrados: string[];
 }
@@ -54,6 +60,10 @@ export function useCreadorJornadas() {
   // eligió a mano o se clonó): la vista lo muestra junto al bombo.
   const [fuenteBombo, setFuenteBombo] = useState<OrigenBombo | null>(null);
   const [jalandoBombo, setJalandoBombo] = useState(false);
+
+  // Liga elegida en el selector del bombo (solo ligas con liguilla,
+  // ver ligasSorteo.ts): de ella se jalan la tabla y los partidos.
+  const [ligaBombo, setLigaBombo] = useState<LigaSorteo>(LIGA_SORTEO_DEFECTO);
 
   // Estados de control
   const [creando, setCreando] = useState(false);
@@ -188,33 +198,38 @@ export function useCreadorJornadas() {
 
   /**
    * ⬇️ JALAR LOS EQUIPOS DEL BOMBO (decisión de Gonzalo, 2026-11-22):
-   * llena el bombo sin escoger escudo por escudo. La tabla sale de
-   * /api/tabla-liga —la MISMA de Posiciones: si la ruta trae la tabla
-   * recalculada (liveRows, con el en vivo y la retención de 24 h de
-   * finales), manda esa— y los partidos de /api/partidos?liga= (la
-   * temporada completa de la Liga MX). La lógica pura
-   * (src/lib/bomboSorteo.ts) prefiere las llaves de cuartos si la API
-   * ya las lista y, si no, el top 8 de la tabla; el cruce al registro
-   * es por nombre con nombresES. Lo que no esté registrado NO se
-   * inventa: quedan marcados los hallados y la vista reporta los
-   * faltantes para elegirlos a mano. El bombo jalado se puede seguir
-   * corrigiendo en la rejilla de siempre.
+   * llena el bombo sin escoger escudo por escudo, desde la liga
+   * elegida en el selector (solo ligas con liguilla: ligasSorteo.ts).
+   * La tabla sale de /api/tabla-liga?liga= —la MISMA de Posiciones:
+   * si la ruta trae la tabla recalculada (liveRows, con el en vivo y
+   * la retención de 24 h de finales), manda esa— y los partidos de
+   * /api/partidos?liga= (la temporada completa de esa liga). La
+   * lógica pura (src/lib/bomboSorteo.ts) prefiere las llaves de
+   * cuartos si la API ya las lista y, si no, el top 8 de la tabla; el
+   * cruce al registro es por nombre con nombresES. Lo que no esté
+   * registrado NO se inventa: quedan marcados los hallados y la vista
+   * reporta los faltantes para elegirlos a mano. El bombo jalado se
+   * puede seguir corrigiendo en la rejilla de siempre.
    */
-  const jalarEquiposBombo = async (equiposRegistro: { id: string; nombre: string }[]) => {
-    const idToast = toast.loading('Jalando los equipos de la Liga MX...');
+  const jalarEquiposBombo = async (
+    equiposRegistro: { id: string; nombre: string }[],
+    ligaId?: string
+  ) => {
+    const liga = (ligaId && getLigaSorteo(ligaId)) || ligaBombo;
+    const idToast = toast.loading(`Jalando los equipos de ${liga.name}...`);
     setJalandoBombo(true);
     try {
       const [resTabla, resPartidos] = await Promise.all([
-        fetch('/api/tabla-liga'),
-        fetch(`/api/partidos?liga=${LIGA_MX_PROVIDER_ID}`),
+        fetch(`/api/tabla-liga?liga=${liga.providerId}`),
+        fetch(`/api/partidos?liga=${liga.providerId}`),
       ]);
       const dataTabla = await resTabla.json();
       if (!resTabla.ok) {
-        throw new Error(dataTabla?.error || 'No se pudo cargar la tabla de la Liga MX.');
+        throw new Error(dataTabla?.error || `No se pudo cargar la tabla de ${liga.name}.`);
       }
       const filas: StandingRow[] = dataTabla.liveRows ?? dataTabla.rows ?? [];
       if (filas.length === 0) {
-        throw new Error('La tabla de la Liga MX vino vacía. Intenta de nuevo en unos minutos.');
+        throw new Error(`La tabla de ${liga.name} vino vacía. Intenta de nuevo en unos minutos.`);
       }
       // Si los partidos fallan, se sigue solo con la tabla.
       let fixtures: SportsFixture[] = [];
@@ -223,19 +238,19 @@ export function useCreadorJornadas() {
         fixtures = dataPartidos.fixtures ?? [];
       }
 
-      const sugerido = sugerirBombo(fixtures, filas, nombreEquipoES);
+      const sugerido = sugerirBombo(fixtures, filas, nombreEquipoES, liga.rondasRegulares);
       const mapeo = mapearEquiposARegistro(sugerido.equipos, equiposRegistro, nombreEquipoES);
       if (mapeo.ids.length === 0) {
         throw new Error('Ninguno de los equipos de la fuente está en el registro del Club. Regístralos primero en Equipos.');
       }
 
       setEquiposSorteo(mapeo.ids);
-      setFuenteBombo({ tipo: sugerido.fuente, noRegistrados: mapeo.noRegistrados });
+      setFuenteBombo({ tipo: sugerido.fuente, liga: liga.name, noRegistrados: mapeo.noRegistrados });
 
       const desde =
         sugerido.fuente === 'cuartos'
-          ? 'desde los partidos de cuartos de final'
-          : 'con el top 8 de la tabla general';
+          ? `desde los partidos de cuartos de final de ${liga.name}`
+          : `con el top 8 de la tabla general de ${liga.name}`;
       if (mapeo.noRegistrados.length > 0) {
         toast.success(
           `Bombo llenado ${desde} (${mapeo.ids.length}/8). No registrados: ${mapeo.noRegistrados.join(', ')} — elígelos a mano cuando estén en el registro.`,
@@ -344,8 +359,8 @@ export function useCreadorJornadas() {
 
   return {
     formulario: { nombreJornada, precioTicket, fechaCierre, tipoPremiacion, partidosNuevos, modalidad, soloAdmins, equiposSorteo },
-    setters: { setNombreJornada, setPrecioTicket, setFechaCierre, setTipoPremiacion, setModalidad, setSoloAdmins },
+    setters: { setNombreJornada, setPrecioTicket, setFechaCierre, setTipoPremiacion, setModalidad, setSoloAdmins, setLigaBombo },
     acciones: { agregarPartidoInput, actualizarPartidoInput, moverPartido, eliminarPartido, agregarPartidosImportados, crearJornadaCompleta, toggleEquipoSorteo, clonarUltimoSorteo, jalarEquiposBombo },
-    estado: { creando, fuenteBombo, jalandoBombo }
+    estado: { creando, fuenteBombo, jalandoBombo, ligaBombo }
   };
 }

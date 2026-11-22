@@ -18,6 +18,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import { SUPPORTED_LEAGUES } from '@/lib/sports/leagues'
+import { LIGAS_SORTEO } from '@/lib/sports/ligasSorteo'
 import {
   utcADatetimeLocalMazatlan,
   textoFechaMazatlan,
@@ -419,13 +420,33 @@ export default function AsistenteJornada({
                 </p>
               </div>
               <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+                <select
+                  value={e.ligaBombo?.providerId || '4350'}
+                  onChange={(ev) => {
+                    const liga = LIGAS_SORTEO.find(
+                      (l) => l.providerId === ev.target.value
+                    )
+                    if (liga) s.setLigaBombo(liga)
+                  }}
+                  disabled={e.jalandoBombo}
+                  title="Liga de la que se jalan los equipos (solo ligas con liguilla)"
+                  className="bg-slate-950 border border-emerald-700 rounded-lg px-3 py-3 text-[11px] text-emerald-100 font-black uppercase outline-none focus:border-emerald-500 disabled:opacity-60"
+                >
+                  {LIGAS_SORTEO.map((l) => (
+                    <option key={l.providerId} value={l.providerId}>
+                      {l.name}
+                    </option>
+                  ))}
+                </select>
                 <button
                   onClick={() => a.jalarEquiposBombo(equipos)}
                   disabled={e.jalandoBombo}
                   type="button"
                   className="bg-emerald-900 hover:bg-emerald-800 disabled:opacity-60 text-emerald-100 text-[10px] font-black uppercase px-4 py-3 rounded-lg border border-emerald-700 transition-all shadow-md"
                 >
-                  {e.jalandoBombo ? '⏳ Jalando…' : '⬇️ Jalar top 8 de la tabla'}
+                  {e.jalandoBombo
+                    ? '⏳ Jalando…'
+                    : `⬇️ Jalar top 8 de ${e.ligaBombo?.name || 'Liga MX'}`}
                 </button>
                 <button
                   onClick={a.clonarUltimoSorteo}
@@ -444,6 +465,7 @@ export default function AsistenteJornada({
                   {e.fuenteBombo.tipo === 'cuartos'
                     ? 'desde los partidos de cuartos de final'
                     : 'desde la tabla general (top 8)'}
+                  {e.fuenteBombo.liga ? ` · ${e.fuenteBombo.liga}` : ''}
                   . Puedes corregir cualquier equipo a mano en la rejilla.
                 </p>
                 {(e.fuenteBombo.noRegistrados || []).map((nombre: string) => (

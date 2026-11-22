@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useEquipos } from '@/hooks/useEquipos'
 import { useCreadorJornadas, type PartidoInput } from '@/hooks/useCreadorJornadas'
 import { SUPPORTED_LEAGUES } from '@/lib/sports/leagues'
+import { LIGAS_SORTEO } from '@/lib/sports/ligasSorteo'
 import {
   utcADatetimeLocalMazatlan,
   textoFechaMazatlan,
@@ -368,8 +369,12 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
                   />
                 </div>
 
+                <select value={e.ligaBombo?.providerId || '4350'} onChange={(ev) => { const liga = LIGAS_SORTEO.find(l => l.providerId === ev.target.value); if (liga) s.setLigaBombo(liga); }} disabled={e.jalandoBombo} title="Liga de la que se jalan los equipos (solo ligas con liguilla)" className="bg-slate-950 border border-emerald-700 rounded-lg px-2 py-2 text-[10px] text-emerald-100 font-black uppercase outline-none focus:border-emerald-500 disabled:opacity-60 shrink-0">
+                  {LIGAS_SORTEO.map(l => <option key={l.providerId} value={l.providerId}>{l.name}</option>)}
+                </select>
+
                 <button onClick={() => a.jalarEquiposBombo(equipos)} disabled={e.jalandoBombo} type="button" className="bg-emerald-900 hover:bg-emerald-800 disabled:opacity-60 text-emerald-100 text-[10px] font-black uppercase px-4 py-2 rounded-lg border border-emerald-700 transition-all shadow-md shrink-0">
-                  {e.jalandoBombo ? '⏳ Jalando…' : '⬇️ Jalar top 8 de la tabla'}
+                  {e.jalandoBombo ? '⏳ Jalando…' : `⬇️ Jalar top 8 de ${e.ligaBombo?.name || 'Liga MX'}`}
                 </button>
 
                 <button onClick={a.clonarUltimoSorteo} type="button" className="bg-blue-900 hover:bg-blue-800 text-blue-100 text-[10px] font-black uppercase px-4 py-2 rounded-lg border border-blue-700 transition-all shadow-md shrink-0">
@@ -380,7 +385,7 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
               {e.fuenteBombo && (
                 <div className="bg-emerald-950/30 border border-emerald-900/50 rounded-lg px-3 py-2 space-y-1">
                   <p className="text-emerald-300 text-[10px] font-bold">
-                    ⬇️ Bombo jalado {e.fuenteBombo.tipo === 'cuartos' ? 'desde los partidos de cuartos de final' : 'desde la tabla general (top 8)'}. Puedes corregir cualquier equipo a mano en la rejilla.
+                    ⬇️ Bombo jalado {e.fuenteBombo.tipo === 'cuartos' ? 'desde los partidos de cuartos de final' : 'desde la tabla general (top 8)'}{e.fuenteBombo.liga ? ` · ${e.fuenteBombo.liga}` : ''}. Puedes corregir cualquier equipo a mano en la rejilla.
                   </p>
                   {(e.fuenteBombo.noRegistrados || []).map((nombre: string) => (
                     <p key={nombre} className="text-amber-300 text-[10px] font-bold">

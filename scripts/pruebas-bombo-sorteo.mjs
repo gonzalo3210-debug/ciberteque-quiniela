@@ -335,6 +335,151 @@ const registro = [
   eq(duplicado.noRegistrados, ['Pumas'], 'la segunda aparición cuenta como no registrada');
 }
 
+// ---------- 5) Selector de liga: catálogo y ligas hermanas ------------------
+// (Extensión 2026-11-22: el bombo ya no es solo de Liga MX; el
+// selector ofrece SOLO ligas con liguilla verificadas contra la API
+// real — ver src/lib/sports/ligasSorteo.ts.)
+const { LIGAS_SORTEO, LIGA_SORTEO_DEFECTO, getLigaSorteo } = await import(
+  '../src/lib/sports/ligasSorteo.ts'
+);
+
+{
+  eq(
+    LIGAS_SORTEO.map((l) => l.providerId),
+    ['4350', '5206', '4654'],
+    'el selector ofrece Liga MX, Liga MX Femenil y Liga de Expansión MX'
+  );
+  eq(LIGA_SORTEO_DEFECTO.providerId, '4350', 'la liga por defecto es Liga MX');
+  eq(getLigaSorteo('5206')?.name, 'Liga MX Femenil', 'getLigaSorteo encuentra la Femenil');
+  eq(getLigaSorteo('4654')?.rondasRegulares, 15, 'Expansión tiene 15 rondas regulares');
+  // Las de torneo regular puro y las no verificadas quedan FUERA.
+  for (const [id, nombre] of [
+    ['4328', 'Premier League'],
+    ['4335', 'La Liga'],
+    ['4346', 'MLS'],
+    ['4480', 'Champions League'],
+    ['4501', 'Copa Libertadores'],
+  ]) {
+    eq(getLigaSorteo(id), undefined, `${nombre} (${id}) NO es elegible para el sorteo`);
+  }
+}
+
+// Fábrica de fixtures para las ligas hermanas (su leagueProviderId
+// difiere del de Liga MX; la detección no depende de él).
+function fxLiga(leagueProviderId, round, homeTeam, awayTeam, homeId, awayId) {
+  return { ...fx(round, homeTeam, awayTeam, homeId, awayId), leagueProviderId };
+}
+
+// --- Liga MX Femenil (5206): tabla de 18 y llaves 1v8/2v7/3v6/4v5 ---
+const F = {
+  ame: 'f-ame', tig: 'f-tig', pach: 'f-pach', gdl: 'f-gdl', mty: 'f-mty',
+  tol: 'f-tol', pum: 'f-pum', jua: 'f-jua', ca: 'f-ca', leon: 'f-leon',
+};
+const tablaFemenil = [
+  fila(1, 'América Femenil', F.ame),
+  fila(2, 'Tigres UANL Femenil', F.tig),
+  fila(3, 'Pachuca Femenil', F.pach),
+  fila(4, 'CD Guadalajara Femenil', F.gdl),
+  fila(5, 'Monterrey Femenil', F.mty),
+  fila(6, 'Toluca Femenil', F.tol),
+  fila(7, 'Pumas UNAM Femenil', F.pum),
+  fila(8, 'Juárez Femenil', F.jua),
+  fila(9, 'Cruz Azul Femenil', F.ca),
+  fila(10, 'León Femenil', F.leon),
+  ...[11, 12, 13, 14, 15, 16, 17, 18].map((r) =>
+    fila(r, `Equipo Femenil ${r}`, `f-x${r}`)
+  ),
+];
+const cuartosFemenil = [
+  fxLiga('5206', 0, 'Juárez Femenil', 'América Femenil', F.jua, F.ame),
+  fxLiga('5206', 0, 'Pumas UNAM Femenil', 'Tigres UANL Femenil', F.pum, F.tig),
+  fxLiga('5206', 0, 'Toluca Femenil', 'Pachuca Femenil', F.tol, F.pach),
+  fxLiga('5206', 0, 'Monterrey Femenil', 'CD Guadalajara Femenil', F.mty, F.gdl),
+  // Vueltas (se ignoran)
+  fxLiga('5206', 0, 'América Femenil', 'Juárez Femenil', F.ame, F.jua),
+  fxLiga('5206', 0, 'Tigres UANL Femenil', 'Pumas UNAM Femenil', F.tig, F.pum),
+];
+
+{
+  const sug = sugerirBombo(cuartosFemenil, tablaFemenil, nombreEquipoES, 17);
+  eq(sug.fuente, 'cuartos', 'Femenil: con su liguilla publicada la fuente es cuartos');
+  eq(
+    sug.equipos.map((e) => e.nombre),
+    [
+      'Juárez Femenil', 'América Femenil',
+      'Pumas UNAM Femenil', 'Tigres UANL Femenil',
+      'Toluca Femenil', 'Pachuca Femenil',
+      'Monterrey Femenil', 'CD Guadalajara Femenil',
+    ],
+    'Femenil: las llaves salen en orden de ida (1v8, 2v7, 3v6, 4v5)'
+  );
+
+  const sinLiguilla = sugerirBombo([], tablaFemenil, nombreEquipoES, 17);
+  eq(sinLiguilla.fuente, 'tabla', 'Femenil: sin liguilla cae a su tabla');
+  eq(sinLiguilla.equipos[0].nombre, 'América Femenil', 'Femenil: el top 8 abre con su líder');
+}
+
+// --- Liga de Expansión MX (4654): 16 equipos, 15 rondas regulares ---
+const X = {
+  paz: 'x-paz', ven: 'x-ven', mor: 'x-mor', can: 'x-can', udg: 'x-udg',
+  tla: 'x-tla', pir: 'x-pir', dur: 'x-dur', tap: 'x-tap', tep: 'x-tep',
+};
+const tablaExpansion = [
+  fila(1, 'Atlético La Paz', X.paz),
+  fila(2, 'Venados', X.ven),
+  fila(3, 'Atlético Morelia', X.mor),
+  fila(4, 'Cancún', X.can),
+  fila(5, 'Leones Negros UdeG', X.udg),
+  fila(6, 'Tlaxcala', X.tla),
+  fila(7, 'Piratas', X.pir),
+  fila(8, 'Alacranes de Durango', X.dur),
+  fila(9, 'Tapatío', X.tap),
+  fila(10, 'Tepatitlán', X.tep),
+  ...[11, 12, 13, 14, 15, 16].map((r) => fila(r, `Equipo Expansión ${r}`, `x-x${r}`)),
+];
+const liguillaExpansion = [
+  // Repechaje (nadie es top 6: no cuenta como llave)
+  fxLiga('4654', 0, 'Piratas', 'Tepatitlán', X.pir, X.tep),
+  fxLiga('4654', 0, 'Alacranes de Durango', 'Tapatío', X.dur, X.tap),
+  // Cuartos, ida
+  fxLiga('4654', 0, 'Alacranes de Durango', 'Atlético La Paz', X.dur, X.paz),
+  fxLiga('4654', 0, 'Piratas', 'Venados', X.pir, X.ven),
+  fxLiga('4654', 0, 'Tlaxcala', 'Atlético Morelia', X.tla, X.mor),
+  fxLiga('4654', 0, 'Leones Negros UdeG', 'Cancún', X.udg, X.can),
+];
+
+{
+  const sug = sugerirBombo(liguillaExpansion, tablaExpansion, nombreEquipoES, 15);
+  eq(sug.fuente, 'cuartos', 'Expansión: con su liguilla la fuente es cuartos');
+  eq(
+    sug.equipos.map((e) => e.nombre),
+    [
+      'Alacranes de Durango', 'Atlético La Paz',
+      'Piratas', 'Venados',
+      'Tlaxcala', 'Atlético Morelia',
+      'Leones Negros UdeG', 'Cancún',
+    ],
+    'Expansión: las llaves salen sin el repechaje'
+  );
+
+  // El parámetro de rondas manda: si los cuartos vinieran numerados
+  // como ronda 16, con las 15 rondas de Expansión SÍ son liguilla;
+  // con las 17 de Liga MX serían "fase regular" y se caería a tabla.
+  const cuartosRonda16 = liguillaExpansion
+    .filter((f) => f.homeTeam !== 'Tepatitlán' && f.awayTeam !== 'Tapatío')
+    .map((f) => ({ ...f, round: 16 }));
+  eq(
+    sugerirBombo(cuartosRonda16, tablaExpansion, nombreEquipoES, 15).fuente,
+    'cuartos',
+    'Expansión (15 rondas): la ronda 16 cuenta como liguilla'
+  );
+  eq(
+    sugerirBombo(cuartosRonda16, tablaExpansion, nombreEquipoES).fuente,
+    'tabla',
+    'con el default de Liga MX (17), la ronda 16 sería regular y manda la tabla'
+  );
+}
+
 // ---------- Resumen ---------------------------------------------------------
 console.log(`\nPruebas del bombo del sorteo: ${pasan} pasan, ${fallan} fallan.`);
 if (fallan > 0) process.exit(1);

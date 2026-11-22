@@ -3,16 +3,18 @@
 // Lógica PURA para JALAR LOS EQUIPOS DEL BOMBO del modo sorteo
 // (decisión de Gonzalo, 2026-11-22): al crear la quiniela de liguilla,
 // el bombo de 8 equipos ya no se tiene que escoger a mano escudo por
-// escudo. La fuente, en orden de preferencia:
+// escudo. La liga se elige en el selector del bombo (solo ligas con
+// liguilla: ver src/lib/sports/ligasSorteo.ts) y la fuente, en orden
+// de preferencia, es:
 //
 //   1. CUARTOS: si el proveedor ya lista los partidos de cuartos de
-//      final de la liguilla de Liga MX, los 8 equipos salen de esos
+//      final de la liguilla de ESA liga, los 8 equipos salen de esos
 //      4 partidos, en el orden en que vengan las llaves.
 //   2. TABLA: si todavía no hay liguilla publicada, el bombo es el
-//      top 8 de la tabla general — LA MISMA que muestra Posiciones
-//      (la ruta /api/tabla-liga ya la entrega recalculada con el en
-//      vivo y la retención de 24 h de finales recientes; aquí solo se
-//      toman sus primeras 8 filas, sin recalcular nada).
+//      top 8 de la tabla general de esa liga — LA MISMA que muestra
+//      Posiciones (la ruta /api/tabla-liga ya la entrega recalculada
+//      con el en vivo y la retención de 24 h de finales recientes;
+//      aquí solo se toman sus primeras 8 filas, sin recalcular nada).
 //
 // Los 8 equipos de liguilla ya no cambian (son los primeros 8 de la
 // tabla); lo que puede variar es su posición, y con ella las llaves.
@@ -172,14 +174,22 @@ export function llavesCuartosDesdeFixtures(
 
 /**
  * La sugerencia completa del bombo: cuartos si la API ya los lista,
- * si no el top 8 de la tabla.
+ * si no el top 8 de la tabla. `rondasRegulares` es el de LA LIGA
+ * elegida (ver ligasSorteo.ts): lo que pase de ahí en los partidos
+ * cuenta como liguilla al reconocer el cuadro.
  */
 export function sugerirBombo(
   fixtures: SportsFixture[],
   rows: StandingRow[],
-  nombreES: ResolverNombreES
+  nombreES: ResolverNombreES,
+  rondasRegulares = 17
 ): BomboSugerido {
-  const llaves = llavesCuartosDesdeFixtures(fixtures, rows, nombreES);
+  const llaves = llavesCuartosDesdeFixtures(
+    fixtures,
+    rows,
+    nombreES,
+    rondasRegulares
+  );
   if (llaves) return { fuente: 'cuartos', equipos: llaves };
   return { fuente: 'tabla', equipos: top8DesdeTabla(rows) };
 }
