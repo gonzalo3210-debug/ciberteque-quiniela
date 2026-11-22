@@ -14,6 +14,14 @@
 // curso en `liveMatches`, para pintar el distintivo junto a cada equipo
 // que está jugando (Bloque 4, 2026-11-14).
 //
+// FINALES RECIENTES (regla de Gonzalo 2026-11-21): la tabla oficial del
+// proveedor tarda horas en recalcularse, así que un partido terminado
+// salía del ajuste en vivo antes de entrar a la oficial y sus puntos
+// "desaparecían". Ahora los finales de las últimas ~24 h que la oficial
+// aún no cuenta se mantienen aplicados (finalesNoContados, con guarda
+// anti doble conteo por partidos jugados) y la tabla recalculada se
+// devuelve en el mismo `liveRows`.
+//
 // Champions League (4480): TheSportsDB no trae su tabla, así que el
 // adaptador la pide a la fuente secundaria football-data.org y llega
 // por el camino OFICIAL (calculated: false). Si esa fuente falla, esta
@@ -33,6 +41,7 @@ import {
   getSportsProvider,
   computeLiveStandings,
   computeStandingsFromResults,
+  finalesNoContados,
   LIGA_MX_PROVIDER_ID,
   type ComputedTable,
   type LeagueZones,
@@ -218,12 +227,27 @@ export async function GET(request: Request) {
       // sigue oficial. Y si ningún marcador emparejó con la tabla (p.
       // ej. la Champions, cuya tabla viene de otra fuente), no se
       // marca "en vivo" una tabla que no cambió.
+      // A los resultados en curso se suman los FINALES recientes que
+      // la tabla oficial aún no cuenta (regla 2026-11-21, ver el
+      // encabezado): sin esto, al silbatazo el resultado salía del
+      // ajuste y los puntos desaparecían por horas.
       let liveRows: StandingRow[] | null = null;
       let marcadores: EnVivoLiga['marcadores'] = [];
       try {
         const vivo = await enVivoDeLiga(liga.providerId);
         marcadores = vivo.marcadores;
-        const resultados = vivo.resultados;
+        let resultados = vivo.resultados;
+        try {
+          const fixtures = await provider.getFixtures(liga.providerId, {
+            season,
+          });
+          const finales = finalesNoContados(rows, fixtures, {
+            excluir: resultados,
+          });
+          if (finales.length > 0) resultados = [...resultados, ...finales];
+        } catch (e) {
+          console.error(`Tabla ${liga.name}: falló el ajuste de finales:`, e);
+        }
         if (resultados.length > 0 && rows.length > 0) {
           const recalculada = computeLiveStandings(rows, resultados);
           const jugadosBase = rows.reduce((a, r) => a + r.played, 0);
