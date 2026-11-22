@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { marcarEmpates } from '@/lib/empates';
+import { totalGolesEfectivo } from '@/lib/proyeccion';
 
 export default function RankingPublico() {
   const [cargando, setCargando] = useState(true);
@@ -108,7 +109,7 @@ export default function RankingPublico() {
 
       const { data: partidos } = await supabase
         .from('partidos')
-        .select('id, resultado_real, es_final, fecha_hora, fecha_hora_partido')
+        .select('id, resultado_real, es_final, fecha_hora, fecha_hora_partido, goles_local, goles_visitante')
         .eq('quiniela_id', idQuiniela);
 
       if (partidos && partidos.length > 0) {
@@ -134,7 +135,12 @@ export default function RankingPublico() {
       }
 
       if (tickets) {
-        const golesReales = quiniela.goles_totales_real;
+        // Total real del desempate: suma de los goles capturados en
+        // los partidos (totalGolesEfectivo, la regla compartida); el
+        // campo guardado de la quiniela solo es respaldo — se quedaba
+        // viejo (en 1 con 16 goles jugados) si nadie guardaba desde
+        // el panel del árbitro. Corrección 2026-11-21.
+        const golesReales = totalGolesEfectivo(quiniela, partidos || []);
         
         // 1️⃣ PRIMERO: Mapeamos y calculamos la diferencia de goles para todos
         const rankingCalculado = tickets.map((t: any) => {

@@ -288,7 +288,10 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
           nombre_jornada: ticket.quinielas?.nombre_jornada,
           modalidad: ticket.quinielas?.modalidad, 
           estado: ticket.quinielas?.estado,
-          goles_reales: ticket.quinielas?.goles_totales_real !== null ? ticket.quinielas?.goles_totales_real : (hayGoles ? golesEnVivo : null),
+          // El total real manda desde los goles capturados (suma en
+          // vivo); el campo guardado solo es respaldo sin goles —
+          // misma regla que el ranking (totalGolesEfectivo).
+          goles_reales: hayGoles ? golesEnVivo : (ticket.quinielas?.goles_totales_real !== null ? ticket.quinielas?.goles_totales_real : null),
           fecha_cierre: ticket.quinielas?.fecha_cierre,
           partidos: ticket.pronosticos.map((pr: any) => ({
             id: pr.partidos?.id || `${pr.partidos?.equipo_local}-${pr.partidos?.equipo_visitante}`,

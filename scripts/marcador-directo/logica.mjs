@@ -156,10 +156,12 @@ export function construirHerramientasNombres(nombreEquipoES, normalizar) {
 // pronóstico suma 3 si es el marcador exacto en modalidad
 // marcador_exacto (1 si solo acierta la tendencia) y 1 si acierta la
 // tendencia L/E/V en las demás modalidades. El desempate usa la
-// diferencia contra goles_totales_real; como ese total solo existe al
-// liquidar, durante el juego vale 999 para todos (igual que en la app)
-// y el ranking provisional es, en la práctica, por puntos con lugares
-// compartidos en empate.
+// diferencia contra el total REAL de goles: desde la corrección del
+// 2026-11-21 (espejo de totalGolesEfectivo en src/lib/proyeccion.ts)
+// ese total es la SUMA de los goles capturados en los partidos, con
+// el campo guardado goles_totales_real solo de respaldo; sin ningún
+// gol capturado ni campo guardado vale 999 para todos y el ranking
+// provisional es, en la práctica, por puntos con lugares compartidos.
 
 /** Tendencia L/E/V de una elección o marcador ("L", "2-1", …). */
 export function eleccionATendencia(valor) {
@@ -222,8 +224,25 @@ export function puntosPronostico(modalidad, eleccion, partido) {
 export function calcularRankingProvisional(quiniela, tickets, partidos) {
   if (quiniela.modalidad === 'sorteo') return [];
   const porId = new Map(partidos.map((p) => [p.id, p]));
-  const golesReales =
-    quiniela.goles_totales_real !== null && quiniela.goles_totales_real !== undefined
+  // Total real del desempate (corrección 2026-11-21, espejo de la
+  // app): suma de los goles capturados; el campo guardado solo es
+  // respaldo. Sin ninguno de los dos, -1 → diferencia 999.
+  let sumaGoles = 0;
+  let hayGoles = false;
+  for (const p of partidos) {
+    if (
+      p.goles_local !== null &&
+      p.goles_local !== undefined &&
+      p.goles_visitante !== null &&
+      p.goles_visitante !== undefined
+    ) {
+      sumaGoles += p.goles_local + p.goles_visitante;
+      hayGoles = true;
+    }
+  }
+  const golesReales = hayGoles
+    ? sumaGoles
+    : quiniela.goles_totales_real !== null && quiniela.goles_totales_real !== undefined
       ? quiniela.goles_totales_real
       : -1;
 

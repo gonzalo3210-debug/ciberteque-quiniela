@@ -17,8 +17,14 @@
 //    marcador_exacto = 3 pts; acertar solo la tendencia L/E/V = 1 pt;
 //    en las demás modalidades acertar la tendencia = 1 pt.
 //  - Desempate: diferencia entre la predicción de goles totales del
-//    boleto y goles_totales_real de la quiniela; sin ese total vale
-//    999 para todos (durante el juego, en la práctica, manda puntos).
+//    boleto y el total REAL de goles, que es la SUMA de los goles
+//    capturados en los partidos (totalGolesEfectivo, la misma regla
+//    con la que liquida el programa de marcadores); el campo guardado
+//    goles_totales_real solo es respaldo cuando ningún partido trae
+//    goles. Sin ningún total vale 999 para todos (durante el juego,
+//    en la práctica, manda puntos). Corrección 2026-11-21: antes se
+//    leía solo el campo guardado, que se queda viejo si nadie guarda
+//    desde el panel del árbitro (quedó en 1 con 16 goles jugados).
 //  - Orden: puntos desc, diferencia asc; empate exacto en ambos =
 //    lugar compartido.
 //  - Sorteo NO se proyecta: es supervivencia por equipo asignado y su
@@ -134,6 +140,34 @@ export function partidoEnVivo(partido: PartidoPuntuable): boolean {
   return partidoTieneResultado(partido) && !partido.es_final;
 }
 
+/**
+ * Total REAL de goles de la quiniela para el desempate: la SUMA de
+ * los goles capturados en los partidos (con soloFinales, solo los de
+ * partidos finales). Es la regla de golesTotalesEfectivos del
+ * programa de marcadores (liquidacion.mjs): si hay goles capturados
+ * manda su suma; si no hay ninguno, vale el campo guardado
+ * goles_totales_real (o null). Así el ranking no depende de que
+ * alguien guarde desde el panel del árbitro para tener el total
+ * al corriente.
+ */
+export function totalGolesEfectivo(
+  quiniela: QuinielaPuntuable,
+  partidos: PartidoPuntuable[],
+  soloFinales = false
+): number | null {
+  let suma = 0;
+  let hayGoles = false;
+  for (const p of partidos) {
+    if (soloFinales && !p.es_final) continue;
+    if (tieneGoles(p)) {
+      suma += (p.goles_local as number) + (p.goles_visitante as number);
+      hayGoles = true;
+    }
+  }
+  if (hayGoles) return suma;
+  return quiniela.goles_totales_real ?? null;
+}
+
 /** Diferencia de desempate de un boleto contra el total real. */
 export function diferenciaGoles(
   prediccionGolesTotal: number | null | undefined,
@@ -198,6 +232,10 @@ export function calcularTabla(
   if (quiniela.modalidad === 'sorteo') return [];
   const soloFinales = Boolean(opciones?.soloFinales);
   const porId = new Map(partidos.map((p) => [p.id, p]));
+  // Total real para el desempate: suma de los goles capturados (con
+  // el mismo criterio de finales que los puntos), NO solo el campo
+  // guardado — ver totalGolesEfectivo.
+  const golesReales = totalGolesEfectivo(quiniela, partidos, soloFinales);
 
   const filas: FilaTabla[] = tickets.map((ticket) => {
     let puntos = 0;
@@ -226,10 +264,7 @@ export function calcularTabla(
       ticketId: ticket.id,
       usuarioId: ticket.usuario_id ?? null,
       puntos,
-      golesDiff: diferenciaGoles(
-        ticket.prediccion_goles_total,
-        quiniela.goles_totales_real
-      ),
+      golesDiff: diferenciaGoles(ticket.prediccion_goles_total, golesReales),
       posicion: 0,
       aciertos,
       detalle,

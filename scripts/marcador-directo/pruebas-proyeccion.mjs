@@ -65,9 +65,12 @@ eq(proy1.porTicket.B.desgloseEnVivo[0].estado, 'acierto_exacto', 'B: estado exac
 eq(proy1.tablaProyeccion[0].ticketId, 'B', 'la tabla proyectada abre con B');
 
 // ---------- 2) Empate en puntos: manda la diferencia de goles ----------
-// Un solo partido final 1-0 (clásica). Total real de la jornada: 5.
+// Un solo partido final 3-2 (clásica). Total real de la jornada: 5,
+// que es la SUMA de los goles capturados (desde la corrección del
+// 2026-11-21 el total efectivo sale de los partidos, no del campo
+// guardado; aquí el campo coincide con la suma).
 const partidos2 = [
-  { id: 'p1', goles_local: 1, goles_visitante: 0, resultado_real: 'L', es_final: true },
+  { id: 'p1', goles_local: 3, goles_visitante: 2, resultado_real: 'L', es_final: true },
 ];
 const mkTicket = (id, pred) => ({
   id, usuario_id: id, prediccion_goles_total: pred,
@@ -83,14 +86,46 @@ eq(tabla2[0].posicion, 1, 'C (diff 0) va 1°');
 eq(tabla2[1].posicion, 2, 'D va 2°');
 eq(tabla2[2].posicion, 2, 'E comparte el 2° con D (mismos puntos y misma diff)');
 eq(tabla2[3].posicion, 2, 'F también diff 3 → comparte el 2°');
-// Sin total real capturado, la diff vale 999 para todos y el empate es total.
+// Sin goles capturados en ningún partido y sin campo guardado, la
+// diff vale 999 para todos y el empate es total.
+const partidosSinGoles = [
+  { id: 'p1', goles_local: null, goles_visitante: null, resultado_real: null, es_final: false },
+];
 const tabla2b = calcularTabla(
+  { modalidad: 'clasica', goles_totales_real: null },
+  [mkTicket('C', 5), mkTicket('D', 8)],
+  partidosSinGoles
+);
+eq(tabla2b[0].golesDiff, 999, 'sin goles capturados ni campo guardado la diff es 999');
+eq(tabla2b[1].posicion, 1, 'con diff 999 pareja, el 1° se comparte');
+// Sin campo guardado pero CON goles capturados: la diff sale de la
+// suma (5), no 999.
+const tabla2c = calcularTabla(
   { modalidad: 'clasica', goles_totales_real: null },
   [mkTicket('C', 5), mkTicket('D', 8)],
   partidos2
 );
-eq(tabla2b[0].golesDiff, 999, 'sin goles_totales_real la diff es 999');
-eq(tabla2b[1].posicion, 1, 'con diff 999 pareja, el 1° se comparte');
+eq(tabla2c[0].golesDiff, 0, 'sin campo guardado, la diff usa la suma de goles capturados');
+eq(tabla2c[1].golesDiff, 3, 'sin campo guardado, la diff del otro también sale de la suma');
+// El caso real del 2026-11-21 (J17): el campo guardado quedó VIEJO
+// en 1 pero ya iban 16 goles capturados; la diff debe usar 16:
+// Elvis predijo 15 → diff 1; Miguel predijo 24 → diff 8.
+const partidosJ17 = [
+  { id: 'j1', goles_local: 1, goles_visitante: 1, resultado_real: 'E', es_final: true },
+  { id: 'j2', goles_local: 1, goles_visitante: 0, resultado_real: 'L', es_final: true },
+  { id: 'j3', goles_local: 3, goles_visitante: 3, resultado_real: 'E', es_final: true },
+  { id: 'j4', goles_local: 2, goles_visitante: 0, resultado_real: 'L', es_final: true },
+  { id: 'j5', goles_local: 1, goles_visitante: 2, resultado_real: 'V', es_final: true },
+  { id: 'j6', goles_local: 0, goles_visitante: 2, resultado_real: 'V', es_final: true },
+];
+const tablaJ17 = calcularTabla(
+  { modalidad: 'clasica', goles_totales_real: 1 },
+  [mkTicket('ELVIS', 15), mkTicket('MIGUEL', 24)],
+  partidosJ17
+);
+const difPorId = Object.fromEntries(tablaJ17.map((f) => [f.ticketId, f.golesDiff]));
+eq(difPorId.ELVIS, 1, 'J17: con 16 goles reales y predicción 15, la diff es 1 (no 14)');
+eq(difPorId.MIGUEL, 8, 'J17: con 16 goles reales y predicción 24, la diff es 8 (no 23)');
 
 // ---------- 3) Boleto sin partidos en vivo ------------------------------
 const tickets3 = [
