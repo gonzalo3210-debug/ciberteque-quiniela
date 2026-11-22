@@ -9,6 +9,7 @@
 
 const {
   calcularCaminoFinal,
+  calcularLlavesCamino,
   detectarCambiosCamino,
   fotoCamino,
   nombreEtapaCamino,
@@ -303,6 +304,130 @@ eq(
   'determinismo: misma entrada, mismo camino'
 );
 eq(JSON.stringify({ PASES, COMPLETO }), copia, 'el cálculo NO muta sus entradas');
+
+// ---------- 10) Llaves por siembra (sin partidos cargados) ----------------------
+// El orden guardado del bombo (la siembra, 1° a 8°): es el caso de
+// la sala de prueba de Gonzalo, jalada de la TABLA.
+const ORDEN_BOMBO = [
+  'América', 'Tigres', 'Cruz Azul', 'Toluca',
+  'Pachuca', 'Pumas', 'Monterrey', 'Chivas',
+];
+const paresDe = (llaves) => llaves.map((l) => l.lados.map((s) => s.nombreEquipo));
+const caminoSin = calcularCaminoFinal(PASES, [], 8);
+const llavesSiembra = calcularLlavesCamino(caminoSin, [], ORDEN_BOMBO);
+eq(llavesSiembra.fuentePrimeraRonda, 'siembra', 'sin partidos: la fuente de cuartos es la siembra');
+eq(
+  paresDe(llavesSiembra.porRonda[0]),
+  [['América', 'Chivas'], ['Tigres', 'Monterrey'], ['Cruz Azul', 'Pumas'], ['Toluca', 'Pachuca']],
+  'siembra clásica: llaves 1v8, 2v7, 3v6, 4v5'
+);
+eq(
+  llavesSiembra.porRonda[0].map((l) => l.letra),
+  ['A', 'B', 'C', 'D'],
+  'las llaves de cuartos llevan letra en orden'
+);
+ok(
+  llavesSiembra.porRonda[0].every((l) => l.partidoId === null),
+  'las llaves por siembra no traen partido'
+);
+eq(
+  llavesSiembra.porRonda[0][0].lados[0].pases.map((e) => e.pase.ticketId),
+  ['t1', 't10'],
+  'el lado de América trae a sus dos pases (jugadores del equipo)'
+);
+eq(llavesSiembra.porRonda[1], [], 'sin partidos no hay llaves de semifinal');
+eq(llavesSiembra.porRonda[2], [], 'sin partidos no hay llave de final');
+const llavesNada = calcularLlavesCamino(caminoSin, [], null);
+eq(llavesNada.fuentePrimeraRonda, null, 'sin partidos y sin orden guardado: no hay fuente');
+eq(llavesNada.porRonda[0], [], 'sin partidos y sin orden: cuartos sin llaves (la vista de hoy)');
+
+// ---------- 11) Llaves desde los partidos reales del cuadro ---------------------
+// Cruces DISTINTOS a los de la siembra: si el cuadro ya los trae,
+// mandan los partidos aunque exista orden guardado.
+const CUADRO_ALT = [
+  partido('a1', 'América', 'Pachuca', null, null, false, '2026-12-05T19:00:00Z'),
+  partido('a2', 'Tigres', 'Pumas', null, null, false, '2026-12-05T21:00:00Z'),
+  partido('a3', 'Cruz Azul', 'Chivas', null, null, false, '2026-12-06T18:00:00Z'),
+  partido('a4', 'Toluca', 'Monterrey', null, null, false, '2026-12-06T20:00:00Z'),
+];
+const llavesPartidos = calcularLlavesCamino(
+  calcularCaminoFinal(PASES, CUADRO_ALT, 8),
+  CUADRO_ALT,
+  ORDEN_BOMBO
+);
+eq(llavesPartidos.fuentePrimeraRonda, 'partidos', 'con los 4 cruces cargados la fuente es partidos');
+eq(
+  paresDe(llavesPartidos.porRonda[0]),
+  [['América', 'Pachuca'], ['Tigres', 'Pumas'], ['Cruz Azul', 'Chivas'], ['Toluca', 'Monterrey']],
+  'las llaves son los cruces reales del cuadro, no la siembra'
+);
+eq(llavesPartidos.porRonda[0][0].partidoId, 'a1', 'la llave guarda el partido que la define');
+
+// ---------- 12) El eliminado se apaga DENTRO de su llave ---------------------------
+const llavesCuartos = calcularLlavesCamino(trasCuartos, CUARTOS, ORDEN_BOMBO);
+eq(llavesCuartos.fuentePrimeraRonda, 'partidos', 'tras cuartos: la fuente sigue siendo partidos');
+const llaveA = llavesCuartos.porRonda[0][0];
+eq(
+  llaveA.lados.map((s) => s.nombreEquipo),
+  ['América', 'Chivas'],
+  'llave A: América vs Chivas'
+);
+eq(llaveA.lados[0].representante.estado, 'vivo', 'América sigue vivo dentro de su llave');
+eq(llaveA.lados[1].representante.estado, 'eliminado', 'Chivas se apaga dentro de su llave');
+eq(llaveA.lados[1].representante.caida.marcadorTexto, '0-2', 'la caída de Chivas viaja en su lado de la llave');
+eq(
+  paresDe(llavesCuartos.porRonda[1]),
+  [['América', 'Cruz Azul'], ['Tigres', 'Pachuca']],
+  'las semifinales se emparejan según los partidos cargados'
+);
+eq(
+  JSON.stringify(calcularLlavesCamino(trasCuartos, CUARTOS, ORDEN_BOMBO)),
+  JSON.stringify(llavesCuartos),
+  'llaves deterministas: misma entrada, mismas llaves'
+);
+
+// ---------- 13) La final se empareja cuando el cuadro la define ---------------------
+const TRAS_SEMIS2 = conMarcadores(SEMIS, {
+  sf2: { golesLocal: 0, golesVisitante: 2, esFinal: true, resultadoReal: 'V' },
+});
+const llavesS2 = calcularLlavesCamino(
+  calcularCaminoFinal(PASES, TRAS_SEMIS2, 8),
+  TRAS_SEMIS2,
+  ORDEN_BOMBO
+);
+eq(
+  paresDe(llavesS2.porRonda[2]),
+  [['América', 'Pachuca']],
+  'con las dos semifinales finales, la final se empareja según su partido'
+);
+const llaveFinal = calcularLlavesCamino(completo, COMPLETO, ORDEN_BOMBO).porRonda[2][0];
+eq(
+  llaveFinal.lados.map((s) => s.nombreEquipo),
+  ['América', 'Pachuca'],
+  'llave de la final: América vs Pachuca'
+);
+eq(llaveFinal.lados[0].representante.estado, 'campeon', 'el campeón se ve coronado en su lado de la final');
+eq(llaveFinal.lados[1].representante.estado, 'eliminado', 'el finalista caído se apaga en la llave');
+eq(llaveFinal.lados[1].representante.caida.etapaNombre, 'Final', 'Pachuca cayó en la Final (desde su lado)');
+
+// ---------- 14) Cuartos a medias no mandan: cae a la siembra -------------------------
+const PARCIAL = CUADRO.slice(0, 2);
+const llavesParcial = calcularLlavesCamino(
+  calcularCaminoFinal(PASES, PARCIAL, 8),
+  PARCIAL,
+  ORDEN_BOMBO
+);
+eq(
+  llavesParcial.fuentePrimeraRonda,
+  'siembra',
+  'con solo 2 cruces cargados no se aceptan los partidos: manda la siembra'
+);
+eq(llavesParcial.porRonda[0].length, 4, 'la siembra completa las 4 llaves');
+
+// ---------- 15) Sala sin sortear: vacío elegante ---------------------------------------
+const vacio = calcularLlavesCamino(calcularCaminoFinal([], [], 8), [], []);
+eq(vacio.porRonda, [[], [], []], 'sin pases ni partidos: ninguna llave');
+eq(vacio.fuentePrimeraRonda, null, 'sin pases ni partidos: sin fuente');
 
 console.log(`\ncamino-final: ${pasan} pasan, ${fallan} fallan`);
 if (fallan > 0) process.exit(1);

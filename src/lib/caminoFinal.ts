@@ -41,6 +41,25 @@
 // pases traen el id y el nombre del equipo asignado. El cruce es por
 // nombre normalizado (minúsculas, sin acentos, sin espacios extra),
 // el mismo criterio con el que la app resuelve logos por nombre.
+//
+// LAS LLAVES (calcularLlavesCamino, al final del archivo): la
+// presentación en forma de bracket que pidió Gonzalo — cada ronda
+// agrupa a los equipos en llaves de dos lados (equipo + sus pases),
+// como los cuadros de liguilla. El emparejamiento NO cambia la
+// supervivencia (que sigue siendo la de arriba); solo agrupa:
+//   1. PARTIDOS: si los partidos del cuadro ya emparejan a los
+//      equipos de una ronda, esas son las llaves. Para la primera
+//      ronda se acepta la fuente SOLO si cubre a todo el bombo.
+//   2. SIEMBRA (solo primera ronda): si aún no hay partidos que la
+//      cubran, se siembra por el orden guardado en
+//      quinielas.equipos_sorteo — que el jalado ya guarda en orden
+//      de tabla (ver bomboSorteo.ts) — con el cuadro clásico:
+//      1° vs 8°, 2° vs 7°, 3° vs 6°, 4° vs 5°.
+// La ronda de cada partido se deriva de los estados ya calculados
+// (la caída del perdedor marca la ronda de un partido final; en uno
+// no final manda la etapa actual de sus equipos), sin recalcular
+// ganadores por otra vía. El cuadro de la quiniela trae UN partido
+// por llave, como ya supone la supervivencia.
 
 import type { AsignacionSorteo } from './sorteoCeremonia';
 
@@ -457,4 +476,216 @@ export function detectarCambiosCamino(
     }
   }
   return cambios;
+}
+
+// ---------- Las llaves del cuadro (presentación en bracket) -----------------
+
+/** Un lado de una llave: un equipo y los pases que lo tienen. */
+export interface LadoLlaveCamino {
+  /** Nombre normalizado del equipo (la identidad en todo el módulo). */
+  clave: string;
+  /** Nombre para mostrar (el del registro de equipos, si se conoce). */
+  nombreEquipo: string;
+  /** Pases con este equipo (en una sala de 8, normalmente uno). */
+  pases: EstadoPaseCamino[];
+  /**
+   * Estado representativo del equipo (el de su primer pase): todos
+   * los pases de un equipo comparten victorias, caída y próximo
+   * partido, porque todo eso se deriva del equipo. Null si el equipo
+   * no tiene pases (no debería pasar tras el sorteo).
+   */
+  representante: EstadoPaseCamino | null;
+}
+
+/** Una llave: dos lados que se enfrentan en una ronda. */
+export interface LlaveCamino {
+  /** Letra de la llave en la primera ronda (A, B, C…); null en otras. */
+  letra: string | null;
+  /** Índice de la ronda (0 = primera del cuadro). */
+  ronda: number;
+  lados: [LadoLlaveCamino, LadoLlaveCamino];
+  /** Partido del cuadro que la define; null si salió de la siembra. */
+  partidoId: string | null;
+}
+
+export interface LlavesCamino {
+  /** Llaves por ronda, paralelo a las rondas del camino (sin Campeón). */
+  porRonda: LlaveCamino[][];
+  /** De dónde salieron las llaves de la primera ronda. */
+  fuentePrimeraRonda: 'partidos' | 'siembra' | null;
+}
+
+/**
+ * Las llaves del cuadro para pintar el bracket. Pura y determinista:
+ * no cambia estados, solo agrupa los ya calculados por
+ * calcularCaminoFinal.
+ *
+ * @param camino      El resultado de calcularCaminoFinal.
+ * @param partidos    Los mismos partidos del cuadro que se le dieron.
+ * @param ordenBombo  Nombres de los equipos en el orden guardado en
+ *                    quinielas.equipos_sorteo (la siembra); sin él no
+ *                    hay fuente de siembra y la primera ronda solo
+ *                    puede salir de los partidos.
+ */
+export function calcularLlavesCamino(
+  camino: CaminoFinal,
+  partidos: PartidoCamino[],
+  ordenBombo?: string[] | null
+): LlavesCamino {
+  const rondas = camino.rondasTotales;
+  const porRonda: LlaveCamino[][] = Array.from({ length: rondas }, () => []);
+
+  // Pases y nombre visible por equipo.
+  const pasesPorClave = new Map<string, EstadoPaseCamino[]>();
+  const nombrePorClave = new Map<string, string>();
+  for (const e of camino.pases) {
+    const clave = normalizarNombreEquipo(e.pase.nombreEquipo);
+    const arr = pasesPorClave.get(clave) ?? [];
+    arr.push(e);
+    pasesPorClave.set(clave, arr);
+    if (!nombrePorClave.has(clave)) {
+      nombrePorClave.set(clave, e.pase.nombreEquipo);
+    }
+  }
+  if (ordenBombo) {
+    for (const nombre of ordenBombo) {
+      const clave = normalizarNombreEquipo(nombre);
+      if (!nombrePorClave.has(clave)) nombrePorClave.set(clave, nombre);
+    }
+  }
+  for (const p of partidos) {
+    for (const nombre of [p.equipoLocal, p.equipoVisitante]) {
+      const clave = normalizarNombreEquipo(nombre);
+      if (!nombrePorClave.has(clave)) nombrePorClave.set(clave, nombre);
+    }
+  }
+
+  // Equipos del bombo: los de los pases y los del orden guardado.
+  const clavesBombo = new Set<string>(pasesPorClave.keys());
+  if (ordenBombo) {
+    for (const nombre of ordenBombo) {
+      clavesBombo.add(normalizarNombreEquipo(nombre));
+    }
+  }
+
+  const ladoDe = (clave: string): LadoLlaveCamino => {
+    const pases = pasesPorClave.get(clave) ?? [];
+    return {
+      clave,
+      nombreEquipo: nombrePorClave.get(clave) ?? clave,
+      pases,
+      representante: pases[0] ?? null,
+    };
+  };
+
+  // Orden cronológico estable, el mismo de calcularCaminoFinal.
+  const ordenados = partidos
+    .map((p, i) => ({ p, i }))
+    .sort((a, b) => {
+      const ta = a.p.fecha ? new Date(a.p.fecha).getTime() : NaN;
+      const tb = b.p.fecha ? new Date(b.p.fecha).getTime() : NaN;
+      const va = Number.isNaN(ta) ? Number.POSITIVE_INFINITY : ta;
+      const vb = Number.isNaN(tb) ? Number.POSITIVE_INFINITY : tb;
+      if (va !== vb) return va - vb;
+      return a.i - b.i;
+    })
+    .map((x) => x.p);
+
+  /**
+   * La ronda de un partido del cuadro, derivada de los estados: en
+   * un partido FINAL con ganador, la ronda es donde cayó el perdedor
+   * (equivale a las victorias del ganador menos una); en uno no
+   * final, la etapa actual de sus equipos. Null si el partido no
+   * empareja a dos equipos del bombo.
+   */
+  const rondaDePartido = (p: PartidoCamino): number | null => {
+    const cl = normalizarNombreEquipo(p.equipoLocal);
+    const cv = normalizarNombreEquipo(p.equipoVisitante);
+    if (cl === cv || !clavesBombo.has(cl) || !clavesBombo.has(cv)) {
+      return null;
+    }
+    const estL = pasesPorClave.get(cl)?.[0];
+    const estV = pasesPorClave.get(cv)?.[0];
+    if (p.esFinal) {
+      const res = ganadorPartidoFinal(p);
+      if (res) {
+        const estPerdedor = res.perdedor === cl ? estL : estV;
+        if (estPerdedor?.caida) return estPerdedor.caida.etapaIndice;
+        const estGanador = res.ganador === cl ? estL : estV;
+        if (estGanador) return Math.max(0, estGanador.victorias - 1);
+        return null;
+      }
+    }
+    if (estL && estV) return Math.min(estL.etapaIndice, estV.etapaIndice);
+    if (estL) return estL.etapaIndice;
+    if (estV) return estV.etapaIndice;
+    return null;
+  };
+
+  // Llaves desde los partidos: por ronda, parejas sin repetir equipo
+  // (la primera aparición manda; una vuelta o un cruce repetido se
+  // ignora porque sus equipos ya quedaron tomados en esa ronda).
+  const usadosPorRonda: Set<string>[] = Array.from(
+    { length: rondas },
+    () => new Set<string>()
+  );
+  for (const p of ordenados) {
+    const r = rondaDePartido(p);
+    if (r === null || r < 0 || r >= rondas) continue;
+    const cl = normalizarNombreEquipo(p.equipoLocal);
+    const cv = normalizarNombreEquipo(p.equipoVisitante);
+    const usados = usadosPorRonda[r];
+    if (usados.has(cl) || usados.has(cv)) continue;
+    usados.add(cl);
+    usados.add(cv);
+    porRonda[r].push({
+      letra: null,
+      ronda: r,
+      lados: [ladoDe(cl), ladoDe(cv)],
+      partidoId: p.id,
+    });
+  }
+
+  // Primera ronda: los partidos mandan SOLO si cubren a todo el
+  // bombo; si no, se descarta lo parcial y se siembra por el orden
+  // guardado (1° vs último, 2° vs penúltimo, …: en el cuadro de 8,
+  // 1v8, 2v7, 3v6, 4v5).
+  let fuentePrimeraRonda: 'partidos' | 'siembra' | null = null;
+  const clavesEnLlaves0 = new Set<string>(
+    porRonda[0].flatMap((l) => l.lados.map((s) => s.clave))
+  );
+  if (
+    porRonda[0].length > 0 &&
+    clavesBombo.size >= 2 &&
+    clavesEnLlaves0.size === clavesBombo.size
+  ) {
+    fuentePrimeraRonda = 'partidos';
+  } else if (ordenBombo && ordenBombo.length >= 2 && ordenBombo.length % 2 === 0) {
+    const claves = ordenBombo.map((n) => normalizarNombreEquipo(n));
+    const unicas = new Set(claves);
+    if (
+      unicas.size === claves.length &&
+      claves.every((c) => clavesBombo.has(c))
+    ) {
+      const n = claves.length;
+      const llavesSiembra: LlaveCamino[] = [];
+      for (let i = 0; i < n / 2; i++) {
+        llavesSiembra.push({
+          letra: null,
+          ronda: 0,
+          lados: [ladoDe(claves[i]), ladoDe(claves[n - 1 - i])],
+          partidoId: null,
+        });
+      }
+      porRonda[0] = llavesSiembra;
+      fuentePrimeraRonda = 'siembra';
+    }
+  }
+
+  // Letras A, B, C… para las llaves de la primera ronda.
+  porRonda[0].forEach((llave, i) => {
+    llave.letra = String.fromCharCode(65 + i);
+  });
+
+  return { porRonda, fuentePrimeraRonda };
 }

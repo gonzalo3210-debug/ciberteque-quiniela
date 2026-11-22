@@ -416,6 +416,7 @@ export default function Cartelera({ usuarioActivo, actualizarSaldo }: { usuarioA
             asignaciones={ceremonia.asignaciones}
             partidos={ceremonia.partidos}
             cantidadEquipos={ceremonia.equiposBombo.length}
+            ordenBombo={ceremonia.equiposBombo.map((e) => e.nombre)}
           />
         )}
 

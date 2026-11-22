@@ -9,12 +9,21 @@
 //
 //   1. CUARTOS: si el proveedor ya lista los partidos de cuartos de
 //      final de la liguilla de ESA liga, los 8 equipos salen de esos
-//      4 partidos, en el orden en que vengan las llaves.
+//      4 partidos.
 //   2. TABLA: si todavía no hay liguilla publicada, el bombo es el
 //      top 8 de la tabla general de esa liga — LA MISMA que muestra
 //      Posiciones (la ruta /api/tabla-liga ya la entrega recalculada
 //      con el en vivo y la retención de 24 h de finales recientes;
 //      aquí solo se toman sus primeras 8 filas, sin recalcular nada).
+//
+// EL ORDEN QUE SE GUARDA (quinielas.equipos_sorteo) es SIEMPRE el de
+// SIEMBRA: 1° a 8° según la tabla, venga el bombo de la fuente que
+// venga. Con la fuente de cuartos, los equipos detectados en las
+// llaves se REORDENAN por su posición en la tabla antes de guardar.
+// Así el orden guardado es la siembra y el tablero «Camino a la
+// final» (src/lib/caminoFinal.ts) puede armar las llaves
+// posicionales 1v8, 2v7, 3v6 y 4v5, que reproducen las llaves
+// reales de la liguilla.
 //
 // Los 8 equipos de liguilla ya no cambian (son los primeros 8 de la
 // tabla); lo que puede variar es su posición, y con ella las llaves.
@@ -70,7 +79,11 @@ export type FuenteBombo = 'cuartos' | 'tabla';
 
 export interface BomboSugerido {
   fuente: FuenteBombo;
-  /** Los equipos en el orden de la fuente (llaves o tabla). */
+  /**
+   * Los equipos en ORDEN DE SIEMBRA (posición de tabla, 1° a 8°):
+   * es el orden que se guarda en quinielas.equipos_sorteo, salga el
+   * bombo de los cuartos o de la tabla.
+   */
   equipos: EquipoFuenteBombo[];
 }
 
@@ -108,12 +121,56 @@ export function top8DesdeTabla(rows: StandingRow[]): EquipoFuenteBombo[] {
 }
 
 /**
+ * Resolvedor de posición en la tabla: por ID del proveedor si se
+ * puede; si no, por el nombre en español normalizado. Devuelve null
+ * si el equipo no aparece en la tabla.
+ */
+function resolvedorDeRank(
+  rows: StandingRow[],
+  nombreES: ResolverNombreES
+): (nombre: string, id: string | null) => number | null {
+  const rankPorId = new Map<string, number>();
+  const rankPorNombre = new Map<string, number>();
+  for (const r of rows) {
+    if (r.teamProviderId) rankPorId.set(r.teamProviderId, r.rank);
+    rankPorNombre.set(normalizar(nombreES(r.teamName, r.teamProviderId)), r.rank);
+  }
+  return (nombre, id) =>
+    (id ? rankPorId.get(id) : undefined) ??
+    rankPorNombre.get(normalizar(nombreES(nombre, id))) ??
+    null;
+}
+
+/**
+ * Reordena equipos por su posición en la tabla (orden de SIEMBRA).
+ * Un equipo que no aparece en la tabla queda al final, conservando
+ * su orden relativo. No muta la entrada.
+ */
+export function ordenarPorSiembra(
+  equipos: EquipoFuenteBombo[],
+  rows: StandingRow[],
+  nombreES: ResolverNombreES
+): EquipoFuenteBombo[] {
+  const rankDe = resolvedorDeRank(rows, nombreES);
+  return equipos
+    .map((e, i) => ({
+      e,
+      i,
+      rank: rankDe(e.nombre, e.teamProviderId) ?? Number.POSITIVE_INFINITY,
+    }))
+    .sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.i - b.i))
+    .map((x) => x.e);
+}
+
+/**
  * Las 4 llaves de cuartos de final desde los partidos de la
  * temporada, o null si no se pueden reconocer completas (la liguilla
  * aún no está publicada, viene a medias o el cuadro no cuadra).
  * `fixtures` debe venir en orden cronológico (así los entrega
  * /api/partidos?liga=): las llaves salen en ese orden, local y visita
- * tal como vienen en el partido de ida.
+ * tal como vienen en el partido de ida. OJO: el resultado viene en
+ * orden de LLAVES (parejas consecutivas); quien lo guarde como
+ * bombo debe pasarlo por ordenarPorSiembra, como hace sugerirBombo.
  */
 export function llavesCuartosDesdeFixtures(
   fixtures: SportsFixture[],
@@ -123,18 +180,7 @@ export function llavesCuartosDesdeFixtures(
 ): EquipoFuenteBombo[] | null {
   if (rows.length < 10) return null;
 
-  // Posición de cada equipo según la tabla (por ID del proveedor si
-  // se puede; si no, por su nombre en español normalizado).
-  const rankPorId = new Map<string, number>();
-  const rankPorNombre = new Map<string, number>();
-  for (const r of rows) {
-    if (r.teamProviderId) rankPorId.set(r.teamProviderId, r.rank);
-    rankPorNombre.set(normalizar(nombreES(r.teamName, r.teamProviderId)), r.rank);
-  }
-  const rankDe = (nombre: string, id: string | null): number | null =>
-    (id ? rankPorId.get(id) : undefined) ??
-    rankPorNombre.get(normalizar(nombreES(nombre, id))) ??
-    null;
+  const rankDe = resolvedorDeRank(rows, nombreES);
 
   // Partido de liguilla = fuera de las rondas de la fase regular.
   const esDeLiguilla = (f: SportsFixture): boolean =>
@@ -190,12 +236,19 @@ export function sugerirBombo(
     nombreES,
     rondasRegulares
   );
-  if (llaves) return { fuente: 'cuartos', equipos: llaves };
+  if (llaves) {
+    // El bombo se guarda en orden de SIEMBRA (ver la nota del
+    // encabezado): las llaves detectadas se reordenan por la tabla.
+    return {
+      fuente: 'cuartos',
+      equipos: ordenarPorSiembra(llaves, rows, nombreES),
+    };
+  }
   return { fuente: 'tabla', equipos: top8DesdeTabla(rows) };
 }
 
 export interface MapeoBombo {
-  /** IDs del registro, en el orden de la fuente (solo los hallados). */
+  /** IDs del registro, en el orden de la lista recibida (solo los hallados). */
   ids: string[];
   /** Equipos hallados, con el nombre del registro (para mostrar). */
   asignados: { id: string; nombre: string }[];

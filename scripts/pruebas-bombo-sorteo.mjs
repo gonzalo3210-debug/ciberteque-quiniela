@@ -20,6 +20,7 @@
 const {
   top8DesdeTabla,
   llavesCuartosDesdeFixtures,
+  ordenarPorSiembra,
   sugerirBombo,
   mapearEquiposARegistro,
 } = await import('../src/lib/bomboSorteo.ts');
@@ -264,7 +265,28 @@ const liguilla2025 = [
 
   const conLiguilla = sugerirBombo(liguilla2025, tablaLiguilla, nombreEquipoES);
   eq(conLiguilla.fuente, 'cuartos', 'con liguilla la fuente preferida es cuartos');
-  eq(conLiguilla.equipos[0].nombre, 'Monterrey', 'la sugerencia por cuartos abre con la primera llave');
+  // El bombo se GUARDA en orden de siembra (1° a 8° de la tabla),
+  // aunque la fuente sean las llaves: así la siembra posicional del
+  // tablero (1v8, 2v7, 3v6, 4v5) reproduce las llaves reales.
+  eq(
+    conLiguilla.equipos.map((e) => e.nombre),
+    ['Toluca', 'Tigres UANL', 'Cruz Azul', 'América', 'Monterrey', 'CD Guadalajara', 'Juárez', 'Tijuana'],
+    'la sugerencia por cuartos sale en orden de siembra, no en orden de llaves'
+  );
+
+  // ordenarPorSiembra directo: el que no está en la tabla va al
+  // final sin mover a los demás, y la entrada no se muta.
+  const desorden = [
+    { nombre: 'Tijuana', teamProviderId: ID.tijuana },
+    { nombre: 'Equipo Fantasma', teamProviderId: null },
+    { nombre: 'Toluca', teamProviderId: ID.toluca },
+  ];
+  eq(
+    ordenarPorSiembra(desorden, tablaLiguilla, nombreEquipoES).map((e) => e.nombre),
+    ['Toluca', 'Tijuana', 'Equipo Fantasma'],
+    'ordenarPorSiembra: por rank de tabla y el desconocido al final'
+  );
+  eq(desorden[0].nombre, 'Tijuana', 'ordenarPorSiembra NO muta su entrada');
 }
 
 // ---------- 4) Mapeo al registro de equipos del Club ------------------------
@@ -302,6 +324,19 @@ const registro = [
     mapeoCuartos.ids,
     ['e-mty', 'e-ame', 'e-tij', 'e-tigres', 'e-juarez', 'e-tol', 'e-chi', 'e-cruz'],
     'las llaves se mapean en su orden (Tigres UANL → Tigres, Pumas no va aquí)'
+  );
+
+  // El mapeo de la SUGERENCIA por cuartos (lo que de verdad se
+  // guarda en equipos_sorteo) sale en orden de siembra.
+  const mapeoSugerencia = mapearEquiposARegistro(
+    sugerirBombo(liguilla2025, tablaLiguilla, nombreEquipoES).equipos,
+    registro,
+    nombreEquipoES
+  );
+  eq(
+    mapeoSugerencia.ids,
+    ['e-tol', 'e-tigres', 'e-cruz', 'e-ame', 'e-mty', 'e-chi', 'e-juarez', 'e-tij'],
+    'el bombo guardado desde cuartos queda en orden de siembra (1° a 8°)'
   );
 
   // Equipo que no está en el registro: se reporta, no se inventa.
@@ -406,12 +441,12 @@ const cuartosFemenil = [
   eq(
     sug.equipos.map((e) => e.nombre),
     [
-      'Juárez Femenil', 'América Femenil',
-      'Pumas UNAM Femenil', 'Tigres UANL Femenil',
-      'Toluca Femenil', 'Pachuca Femenil',
-      'Monterrey Femenil', 'CD Guadalajara Femenil',
+      'América Femenil', 'Tigres UANL Femenil',
+      'Pachuca Femenil', 'CD Guadalajara Femenil',
+      'Monterrey Femenil', 'Toluca Femenil',
+      'Pumas UNAM Femenil', 'Juárez Femenil',
     ],
-    'Femenil: las llaves salen en orden de ida (1v8, 2v7, 3v6, 4v5)'
+    'Femenil: el bombo se guarda en orden de siembra (1° a 8° de su tabla)'
   );
 
   const sinLiguilla = sugerirBombo([], tablaFemenil, nombreEquipoES, 17);
@@ -454,12 +489,12 @@ const liguillaExpansion = [
   eq(
     sug.equipos.map((e) => e.nombre),
     [
-      'Alacranes de Durango', 'Atlético La Paz',
-      'Piratas', 'Venados',
-      'Tlaxcala', 'Atlético Morelia',
-      'Leones Negros UdeG', 'Cancún',
+      'Atlético La Paz', 'Venados',
+      'Atlético Morelia', 'Cancún',
+      'Leones Negros UdeG', 'Tlaxcala',
+      'Piratas', 'Alacranes de Durango',
     ],
-    'Expansión: las llaves salen sin el repechaje'
+    'Expansión: sin el repechaje y en orden de siembra (1° a 8°)'
   );
 
   // El parámetro de rondas manda: si los cuartos vinieran numerados
