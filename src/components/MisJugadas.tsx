@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { useSincronizacionRealtime } from '@/hooks/useSincronizacionRealtime'
 import { calcularTabla, calcularProyeccion, partidoTieneResultado, partidoEnVivo, puntosDePronostico } from '@/lib/proyeccion'
 import { coincideParEquipos } from '@/lib/emparejar'
+import CaminoEnMisJugadas from '@/components/CaminoEnMisJugadas'
 import type { SportsFixture } from '@/lib/sports/types'
 
 // ⏱️ Un partido solo se considera "en vivo" durante una ventana razonable
@@ -588,6 +589,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
         })()}
 
         {esSorteo ? (
+          <>
           <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 bg-blue-950/10">
             {grupo.tickets.map((t: any, idx: number) => {
               const eqSorteado = t.equipo_asignado_id ? equipos.find((e:any) => e.id === t.equipo_asignado_id) : null;
@@ -614,6 +616,10 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
               )
             })}
           </div>
+          {grupo.quiniela_id && (
+            <CaminoEnMisJugadas quinielaId={grupo.quiniela_id} usuarioId={usuarioId} />
+          )}
+          </>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left whitespace-nowrap">
