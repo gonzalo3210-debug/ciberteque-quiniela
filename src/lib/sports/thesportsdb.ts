@@ -460,7 +460,7 @@ async function getFixtures(
       const data = await tsdbFetch<{ events: TsdbEvent[] | null }>(
         `eventsseason.php?id=${encodeURIComponent(leagueProviderId)}` +
           `&s=${encodeURIComponent(season)}`,
-        3600
+        300
       );
       return (data?.events ?? [])
         .map((e) => mapEvent(e, leagueProviderId))
@@ -470,7 +470,11 @@ async function getFixtures(
     path =
       `eventsseason.php?id=${encodeURIComponent(leagueProviderId)}` +
       `&s=${encodeURIComponent(season)}`;
-    revalidate = 3600; // el calendario de temporada cambia poco
+    // 5 min (antes 1 h): el calendario cambia poco, pero sus ESTADOS
+    // (FT al silbatazo) alimentan el ajuste de finales recientes de la
+    // tabla (regla de Gonzalo 2026-11-21) y con 1 h de caché un final
+    // podía tardar hasta una hora en reflejarse ahí.
+    revalidate = 300;
   } else {
     path = `eventsnextleague.php?id=${encodeURIComponent(leagueProviderId)}`;
   }
