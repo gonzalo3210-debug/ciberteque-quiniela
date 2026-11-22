@@ -36,6 +36,77 @@ export interface PasoRevelado {
 export const DURACION_GIRO_MS = 2600;
 /** Cuánto se queda en pantalla cada asignación revelada. */
 export const DURACION_REVELADO_MS = 1700;
+/**
+ * Cada cuántos ms cambia el equipo que se baraja en un renglón del
+ * tablero: rápido (efecto rifa) pero legible, sin marear.
+ */
+export const INTERVALO_BARAJEO_MS = 150;
+
+/** Las fases de la ceremonia, en orden. */
+export type FaseCeremonia = 'giro' | 'revelando' | 'final';
+
+/** Cómo se ve un renglón del tablero: barajando equipos o ya fijado. */
+export type EstadoRenglonCeremonia = 'barajando' | 'fijado';
+
+/**
+ * El estado de un renglón del tablero según la fase: en el giro todo
+ * se baraja; revelando, ya se fijaron los renglones hasta el paso
+ * actual (inclusive: el paso en curso es el que acaba de caer con su
+ * golpe) y los demás siguen barajando; al final, todo fijado.
+ */
+export function estadoRenglonCeremonia(
+  indice: number,
+  fase: FaseCeremonia,
+  pasoActual: number
+): EstadoRenglonCeremonia {
+  if (fase === "final") return "fijado";
+  if (fase === "giro") return "barajando";
+  return indice <= pasoActual ? "fijado" : "barajando";
+}
+
+/** Una pareja jugador↔equipo de mentiras, de las que enseña el barajeo. */
+export interface ComboBarajeo {
+  nombreJugador: string;
+  nombreEquipo: string;
+  logoUrl?: string | null;
+}
+
+/**
+ * La pareja que enseña un renglón mientras se baraja: la barajeada
+ * mueve JUGADORES Y EQUIPOS a la vez (cada renglón enseña
+ * combinaciones cambiantes de un jugador con un equipo), como pidió
+ * Gonzalo. Los ciclos son deterministas, con desfases por renglón,
+ * para que en un mismo instante los renglones no repitan jugador ni
+ * equipo entre sí. Y nunca cae en la pareja REAL del propio renglón:
+ * esa solo aparece cuando el renglón se fija según el plan — el
+ * barajeo es decoración, no un spoiler anticipado. (Con un solo pase
+ * no hay otra pareja posible y se enseña la única que hay.)
+ */
+export function comboEnBarajeo(
+  plan: readonly PasoRevelado[],
+  tick: number,
+  indiceRenglon: number
+): ComboBarajeo | null {
+  const n = plan.length;
+  if (n === 0) return null;
+  const real = plan[indiceRenglon];
+  if (!real) return null;
+  const mod = (x: number) => ((x % n) + n) % n;
+  const jugador = plan[mod(tick + indiceRenglon * 3)].asignacion;
+  let equipo = plan[mod(tick * 2 + indiceRenglon * 5)].asignacion;
+  if (
+    n > 1 &&
+    jugador.ticketId === real.asignacion.ticketId &&
+    equipo.equipoId === real.asignacion.equipoId
+  ) {
+    equipo = plan[mod(tick * 2 + indiceRenglon * 5 + 1)].asignacion;
+  }
+  return {
+    nombreJugador: jugador.nombreJugador,
+    nombreEquipo: equipo.nombreEquipo,
+    logoUrl: equipo.logoUrl,
+  };
+}
 
 /**
  * ¿Ya se ejecutó el sorteo? Hay pases y TODOS tienen equipo asignado.
