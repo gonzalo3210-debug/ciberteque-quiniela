@@ -1,8 +1,10 @@
 'use client'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useSincronizacionRealtime } from '@/hooks/useSincronizacionRealtime'
 import { calcularTabla, calcularProyeccion, partidoTieneResultado, partidoEnVivo, puntosDePronostico } from '@/lib/proyeccion'
+import { coincideParEquipos } from '@/lib/emparejar'
+import type { SportsFixture } from '@/lib/sports/types'
 
 // ⏱️ Un partido solo se considera "en vivo" durante una ventana razonable
 // tras su inicio (un partido dura ~2 h; 3 h cubre tiempos extra y retrasos).
@@ -49,8 +51,18 @@ export function grupoQuinielaTerminada(grupo: any): boolean {
   )
 }
 
+/**
+ * Etiqueta del minuto en vivo de un fixture del feed, con el mismo
+ * formato que la fila de Resultados (FilaPartido): medio tiempo =
+ * 'MT', si no el minuto con apóstrofo ("67'"); sin minuto, 'EN VIVO'.
+ */
+export function etiquetaMinutoEnVivo(f: SportsFixture): string {
+  if (f.statusRaw === 'HT') return 'MT'
+  return f.progress ? `${f.progress}'` : 'EN VIVO'
+}
+
 // ⚡ MINI-COMPONENTE ACTUALIZADO: Maneja la cuenta regresiva y la transición automática a 0-0
-const ContadorPartido = ({ fechaHora, esFinal }: { fechaHora: string | null, esFinal?: boolean }) => {
+const ContadorPartido = ({ fechaHora, esFinal, minutoEnVivo }: { fechaHora: string | null, esFinal?: boolean, minutoEnVivo?: string | null }) => {
   const [estado, setEstado] = useState<'espera' | 'vivo' | 'sin_resultado'>('espera');
   const [texto, setTexto] = useState('');
 
@@ -97,7 +109,13 @@ const ContadorPartido = ({ fechaHora, esFinal }: { fechaHora: string | null, esF
       <div className="flex flex-col items-center gap-0.5 justify-center animate-in zoom-in duration-300">
         <span className="text-[10px] font-black text-white leading-none">0-0</span>
         <div className="flex items-center gap-1 mt-1">
-          <span className="text-[7px] font-black uppercase tracking-widest text-red-400">En Juego</span>
+          {minutoEnVivo ? (
+            <span className="px-1.5 py-px rounded-full bg-red-600/20 border border-red-500/50 text-red-400 text-[8px] font-black leading-tight">
+              {minutoEnVivo}
+            </span>
+          ) : (
+            <span className="text-[7px] font-black uppercase tracking-widest text-red-400">En Juego</span>
+          )}
           <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_5px_rgba(239,68,68,0.8)]"></span>
         </div>
       </div>
@@ -147,6 +165,13 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
   
   const [vistaActual, setVistaActual] = useState<'activas' | 'historial'>('activas')
   const [busqueda, setBusqueda] = useState('')
+
+  // ⏱️ Minuto en vivo por partido (id del partido del Club -> etiqueta
+  // "67'"/'MT'), emparejando las filas con el feed /api/en-vivo igual
+  // que la vista de Resultados: antes la tabla solo pintaba un punto
+  // rojo y el minuto no se veía en Mis Jugadas (pedido de Gonzalo,
+  // 2026-11-22).
+  const [minutosEnVivo, setMinutosEnVivo] = useState<Map<string, string>>(new Map())
 
   const [ticketEditando, setTicketEditando] = useState<any>(null)
   const [nuevasSelecciones, setNuevasSelecciones] = useState<Record<string, string>>({})
@@ -260,6 +285,61 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
   useEffect(() => {
     cargarHistorial()
   }, [usuarioId])
+
+  // Partidos de los grupos activos que podrían estar en juego ahora
+  // (iniciados, no finales, dentro de la ventana de 3 h): solo para
+  // esos se consulta el feed, y solo si hay al menos uno.
+  const partidosEnVentana = useMemo(() => {
+    const lista: any[] = []
+    for (const g of gruposActivos) {
+      if (g.modalidad === 'sorteo') continue
+      for (const p of g.partidos || []) {
+        if (partidoEnVentanaEnVivo(p.fecha_hora, p.es_final)) lista.push(p)
+      }
+    }
+    return lista
+  }, [gruposActivos])
+
+  const cargarMinutosEnVivo = useCallback(async () => {
+    if (partidosEnVentana.length === 0) {
+      setMinutosEnVivo((prev) => (prev.size === 0 ? prev : new Map()))
+      return
+    }
+    try {
+      const pares = partidosEnVentana
+        .map((p) => `${p.local}|${p.visitante}`)
+        .join(';')
+      const res = await fetch(`/api/en-vivo?pares=${encodeURIComponent(pares)}`)
+      const data = await res.json()
+      if (!res.ok) return
+      const fixtures: SportsFixture[] = data.fixtures || []
+      const mapa = new Map<string, string>()
+      for (const p of partidosEnVentana) {
+        const fixture = fixtures.find((f) =>
+          coincideParEquipos(
+            {
+              id: p.id,
+              equipo_local: p.local,
+              equipo_visitante: p.visitante,
+              fecha_hora_partido: p.fecha_hora,
+            },
+            f
+          )
+        )
+        if (fixture) mapa.set(p.id, etiquetaMinutoEnVivo(fixture))
+      }
+      setMinutosEnVivo(mapa)
+    } catch {
+      // Sin feed: la tabla se queda con el punto rojo de siempre.
+    }
+  }, [partidosEnVentana])
+
+  useEffect(() => {
+    cargarMinutosEnVivo()
+    if (partidosEnVentana.length === 0) return
+    const id = setInterval(cargarMinutosEnVivo, 60_000)
+    return () => clearInterval(id)
+  }, [cargarMinutosEnVivo, partidosEnVentana.length])
 
   const recargaSilenciosa = () => cargarHistorial(true)
   useSincronizacionRealtime('quinielas', recargaSilenciosa, false)
@@ -563,6 +643,7 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
                 {grupo.partidos.map((p: any, pIdx: number) => {
                   const tieneGoles = p.goles_local !== null && p.goles_visitante !== null;
                   const enVivo = tieneGoles && partidoEnVentanaEnVivo(p.fecha_hora, p.es_final);
+                  const minutoVivo = minutosEnVivo.get(p.id) || null;
                   
                   return (
                     <tr key={pIdx} className="hover:bg-slate-800/40 transition-colors">
@@ -597,14 +678,22 @@ export default function MisJugadas({ usuarioId }: { usuarioId: string }) {
                               <span className={`inline-block w-4 h-4 text-[8px] leading-4 rounded-full font-black shadow-inner ${p.real==='L'?'bg-blue-900 text-blue-300':p.real==='E'?'bg-slate-700 text-slate-300':'bg-red-900 text-red-300'}`}>
                                 {p.real}
                               </span>
-                              {enVivo && (
-                                <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_5px_rgba(239,68,68,0.8)]" title="Partido en Vivo"></span>
-                              )}
+                              {enVivo &&
+                                (minutoVivo ? (
+                                  <span
+                                    className="px-1.5 py-px rounded-full bg-red-600/20 border border-red-500/50 text-red-400 text-[8px] font-black leading-tight"
+                                    title="Minuto en vivo"
+                                  >
+                                    {minutoVivo}
+                                  </span>
+                                ) : (
+                                  <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_5px_rgba(239,68,68,0.8)]" title="Partido en Vivo"></span>
+                                ))}
                             </div>
                           </div>
                         ) : (
                           // ⚡ El componente ahora se encarga de mostrar la fecha o el 0-0 automáticamente
-                          <ContadorPartido fechaHora={p.fecha_hora} esFinal={p.es_final} />
+                          <ContadorPartido fechaHora={p.fecha_hora} esFinal={p.es_final} minutoEnVivo={minutoVivo} />
                         )}
                       </td>
 

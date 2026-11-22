@@ -15,6 +15,12 @@
 //                           eventsseason.php y filtra por intRound)
 //   fixtures de temporada:  eventsseason.php?id={liga}&s={temporada}
 //   próximos partidos:      eventsnextleague.php?id={liga}
+//   últimos resultados:     eventspastleague.php?id={liga} (los ~15
+//                           recientes con marcador; se mezcla encima
+//                           del calendario, ver getPastResults)
+//   en vivo por deporte:    api/v2 livescore/{deporte} (basketball
+//                           verificado 2026-11-22; el de soccer es el
+//                           getLiveScores de siempre)
 //   tabla de posiciones:    lookuptable.php?l={liga}&s={temporada}
 //   equipos de la liga:     search_all_teams.php?l={nombre oficial}
 //   en vivo (v2, premium):  api/v2/json/livescore/soccer (llave en header)
@@ -244,8 +250,22 @@ const numOrNull = (v: string | null | undefined): number | null => {
 const numOrZero = (v: string | undefined): number => numOrNull(v) ?? 0;
 
 /** Códigos crudos que inequívocamente son "en curso" (mismo criterio que
- *  la ruta /api/en-vivo). */
-const ESTADOS_EN_CURSO = new Set(['1H', 'HT', '2H', 'ET', 'BT', 'LIVE']);
+ *  la ruta /api/en-vivo). Q1–Q4/OT son del básquetbol (cuartos y tiempo
+ *  extra del feed v2 livescore/basketball, verificado 2026-11-22); el
+ *  fútbol nunca los emite, así que compartir la tabla es seguro. */
+const ESTADOS_EN_CURSO = new Set([
+  '1H',
+  'HT',
+  '2H',
+  'ET',
+  'BT',
+  'LIVE',
+  'Q1',
+  'Q2',
+  'Q3',
+  'Q4',
+  'OT',
+]);
 
 /** Minuto de juego como estado crudo: "67", "45+2", "90+3"... */
 const MINUTO_COMO_ESTADO = /^\d+(\+\d+)?$/;
@@ -261,7 +281,10 @@ function mapStatusFields(
   if (s === 'NS' || s === '' || s === 'TBD') return 'scheduled';
   // 'AWD' = partido adjudicado (p. ej. 0-3 por decisión): quedó finalizado
   // con marcador oficial; sin esto salía como "en vivo" para siempre.
-  if (['FT', 'AET', 'PEN', 'AWD', 'Match Finished'].includes(s)) {
+  // 'AOT' = final tras tiempo extra en básquetbol (verificado 2026-11-22:
+  // 16 finales de la NBA venían así y caían a 'unknown', invisibles en
+  // la página de la liga: ni en próximos ni en últimos resultados).
+  if (['FT', 'AET', 'PEN', 'AWD', 'AOT', 'Match Finished'].includes(s)) {
     return 'finished';
   }
   // En curso SOLO con códigos conocidos o con el minuto numérico. Antes
@@ -598,6 +621,45 @@ async function getLiveScores(): Promise<SportsFixture[]> {
 }
 
 /**
+ * Marcadores en vivo de OTRO deporte (API v2 premium): el endpoint es
+ * livescore/{deporte-en-minúsculas} — verificado 2026-11-22 con
+ * 'basketball' (trae los partidos del día de todas las ligas de ese
+ * deporte, con cuartos Q1–Q4 como estado). Para fútbol delega en
+ * getLiveScores. Quien llama filtra por leagueProviderId.
+ */
+async function getLiveScoresBySport(sport: string): Promise<SportsFixture[]> {
+  const deporte = (sport || '').trim().toLowerCase();
+  if (!deporte || deporte === 'soccer') return getLiveScores();
+  const data = await tsdbV2Fetch<{ livescore: TsdbLiveScore[] | null }>(
+    `livescore/${encodeURIComponent(deporte)}`,
+    60
+  );
+  return (data?.livescore ?? []).map(mapLiveScore);
+}
+
+/**
+ * Últimos resultados de una liga (eventspastleague.php: los ~15 más
+ * recientes, con marcador y estado final). Es el antídoto contra la
+ * foto vieja del calendario de temporada: ese payload es grande y va
+ * cacheado, así que en la primera visita tras horas/días puede traer
+ * los juegos ya jugados aún como "por jugar" (visto en la NBA el
+ * 2026-11-22); esta respuesta es chica y se revalida cada 2 min, así
+ * que la ruta la mezcla ENCIMA del calendario y los resultados
+ * recientes siempre salen. Solo se devuelven los terminados.
+ */
+async function getPastResults(
+  leagueProviderId: string
+): Promise<SportsFixture[]> {
+  const data = await tsdbFetch<{ events: TsdbEvent[] | null }>(
+    `eventspastleague.php?id=${encodeURIComponent(leagueProviderId)}`,
+    120
+  );
+  return (data?.events ?? [])
+    .map((e) => mapEvent(e, leagueProviderId))
+    .filter((f) => f.status === 'finished');
+}
+
+/**
  * Línea de tiempo de un partido (lookupevent + lookuptimeline en
  * paralelo). La ficha se cachea 2 min y la línea solo 60 s: el feed
  * "minuto a minuto" se refresca con la vista (cada 2 min) y así un
@@ -714,6 +776,8 @@ export const theSportsDbProvider: SportsProvider = {
   getTeamDetail,
   getLeagueBadge,
   getLiveScores,
+  getLiveScoresBySport,
+  getPastResults,
   getFixtureEvents,
   getFixtureTV,
   getLeagueCatalog,

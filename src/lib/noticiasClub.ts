@@ -36,6 +36,15 @@ export interface NoticiaClub {
   detalle?: string;
   /** Instante ISO para ordenar el feed y mostrar fecha/hora. */
   fechaISO: string;
+  /**
+   * Quiniela de la que habla la noticia: la vista la usa para que la
+   * tarjeta sea ACCIONABLE (corrección de Gonzalo, 2026-11-22):
+   * 'nueva'/'cierre' llevan a Jugar y 'lider'/'ganador'/'final'
+   * abren la tabla general de esa jornada.
+   */
+  quinielaId: string;
+  /** Partido de la noticia (solo subtipo 'final'). */
+  partidoId?: string;
 }
 
 const PORCENTAJE_PREMIO = 0.8; // igual que en el Ranking (usePosiciones)
@@ -172,6 +181,7 @@ export function generarNoticiasClub(
       eventos.push({
         id: `${q.id}-nueva`,
         subtipo: 'nueva',
+        quinielaId: q.id,
         icono: '🆕',
         titulo: `Jornada ${nombre} abierta`,
         detalle: `Boleto $${q.precio_ticket ?? 30} · Cierra el ${fechaLegible(q.fecha_cierre)}`,
@@ -183,6 +193,7 @@ export function generarNoticiasClub(
         eventos.push({
           id: `${q.id}-cierre`,
           subtipo: 'cierre',
+          quinielaId: q.id,
           icono: '⏰',
           titulo: `${nombre} cierra pronto`,
           detalle: `Quedan ${horas} h para meter tu boleto · Cierra el ${fechaLegible(q.fecha_cierre)}`,
@@ -196,6 +207,8 @@ export function generarNoticiasClub(
       eventos.push({
         id: `${q.id}-final-${p.id}`,
         subtipo: 'final',
+        quinielaId: q.id,
+        partidoId: p.id,
         icono: '⚽',
         titulo: `Final: ${p.equipo_local} ${p.goles_local} - ${p.goles_visitante} ${p.equipo_visitante}`,
         detalle: nombre,
@@ -234,6 +247,7 @@ export function generarNoticiasClub(
         eventos.push({
           id: `${q.id}-lider`,
           subtipo: 'lider',
+          quinielaId: q.id,
           icono: '🏆',
           titulo: `${lider.nombre.trim()} va ganando ${nombre}`,
           detalle: `Lleva ${lider.puntos} puntos con ${finales.length} de ${partidos.length} partidos jugados`,
@@ -259,6 +273,7 @@ export function generarNoticiasClub(
         eventos.push({
           id: `${q.id}-ganador`,
           subtipo: 'ganador',
+          quinielaId: q.id,
           icono: '🎉',
           titulo: `${ganador.nombre.trim()} ganó ${nombre}`,
           detalle: `Con ${ganador.puntos} puntos · Premio $${premio.toLocaleString('es-MX')}`,

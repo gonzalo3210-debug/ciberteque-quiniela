@@ -55,6 +55,67 @@ interface NoticiaExterna extends NoticiaRss {
   equipos: string[];
   /** Chip al que pertenece: 'equipos' si empareja, 'deportes' si no. */
   categoria: CategoriaExterna;
+  /** Deporte probable del titular (para el filtro del chip Deportes). */
+  deporte: string;
+}
+
+/**
+ * Deporte probable del titular, por palabras clave sobre el texto
+ * NORMALIZADO (minúsculas y sin acentos, como lo deja
+ * normalizarNombreEquipo). Es heurístico y el orden importa: primero
+ * los deportes con términos inconfundibles; el fútbol se detecta
+ * después y lo que no empareja en nada cae en 'Otros'. Lo consume el
+ * filtro por deporte del chip 📰 Deportes en la vista.
+ */
+const REGLAS_DEPORTE: { deporte: string; patron: RegExp }[] = [
+  {
+    deporte: 'Básquetbol',
+    patron:
+      /\b(nba|basquetbol|baloncesto|basketball|lakers|celtics|warriors|mavericks|nuggets|knicks)\b/,
+  },
+  {
+    deporte: 'Béisbol',
+    patron:
+      /\b(beisbol|baseball|mlb|grandes ligas|yankees|dodgers|astros|red sox|jonron|home run|diablos rojos|lmb)\b/,
+  },
+  {
+    deporte: 'Fútbol americano',
+    patron:
+      /\b(nfl|futbol americano|super bowl|superbowl|touchdown|cowboys|patriots|chiefs|packers|steelers|emparrillado)\b/,
+  },
+  {
+    deporte: 'Boxeo',
+    patron: /\b(boxeo|boxeador|boxistica|boxistico|canelo)\b/,
+  },
+  {
+    deporte: 'MMA',
+    patron: /\b(ufc|mma|artes marciales mixtas|octagono)\b/,
+  },
+  {
+    deporte: 'Tenis',
+    patron:
+      /\b(tenis|tenista|atp|wta|grand slam|wimbledon|roland garros|alcaraz|djokovic|sinner)\b/,
+  },
+  {
+    deporte: 'Fórmula 1',
+    patron: /\b(formula 1|formula uno|f1|verstappen|gran premio)\b/,
+  },
+  {
+    deporte: 'Golf',
+    patron: /\b(golf|golfista|pga|liv golf|masters de augusta)\b/,
+  },
+  {
+    deporte: 'Fútbol',
+    patron:
+      /\b(futbol|soccer|liga mx|champions|premier league|la liga|serie a|bundesliga|mundial|seleccion|libertadores|concacaf|goleador|delantero|portero|femenil|liguilla|cuartos de final|semifinales|semifinal|fecha fifa|amistoso|jornada|sudamericana)\b/,
+  },
+];
+
+function deporteDeNoticia(textoNormalizado: string): string {
+  for (const regla of REGLAS_DEPORTE) {
+    if (regla.patron.test(textoNormalizado)) return regla.deporte;
+  }
+  return 'Otros';
 }
 
 export async function GET(request: Request) {
@@ -104,10 +165,16 @@ export async function GET(request: Request) {
       equipos.length > 0
         ? equipos.filter((eq) => textoMencionaEquipo(texto, eq))
         : [];
+    const deporte = deporteDeNoticia(texto);
     if (mencionados.length > 0) {
-      deEquipos.push({ ...item, equipos: mencionados, categoria: 'equipos' });
+      deEquipos.push({
+        ...item,
+        equipos: mencionados,
+        categoria: 'equipos',
+        deporte,
+      });
     } else {
-      deDeportes.push({ ...item, equipos: [], categoria: 'deportes' });
+      deDeportes.push({ ...item, equipos: [], categoria: 'deportes', deporte });
     }
   }
 

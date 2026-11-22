@@ -93,6 +93,7 @@ function compararPartidos(a: SportsFixture, b: SportsFixture): number {
 const NO_EN_JUEGO = new Set([
   'FT',
   'AET',
+  'AOT',
   'AWD',
   'WO',
   'PST',
@@ -104,8 +105,9 @@ const NO_EN_JUEGO = new Set([
   'MATCH FINISHED',
 ]);
 
-/** Estados crudos inequívocamente en curso (mismo criterio que /api/en-vivo). */
-const EN_CURSO = new Set(['1H', 'HT', '2H', 'ET', 'BT', 'LIVE']);
+/** Estados crudos inequívocamente en curso (mismo criterio que
+ *  /api/en-vivo). Q1–Q4/OT: cuartos y tiempo extra del básquetbol. */
+const EN_CURSO = new Set(['1H', 'HT', '2H', 'ET', 'BT', 'LIVE', 'Q1', 'Q2', 'Q3', 'Q4', 'OT']);
 
 /**
  * ¿La entrada del feed está EN JUEGO ahora? Códigos en curso o, en su
@@ -154,6 +156,68 @@ function mezclarEnVivo(
     homeScore: v.homeScore,
     awayScore: v.awayScore,
   };
+}
+
+/**
+ * Mezcla de los ÚLTIMOS RESULTADOS (eventspastleague) sobre un partido
+ * del calendario: si el proveedor ya lo trae terminado ahí pero la foto
+ * del calendario (cacheada, payload grande) aún lo marca por jugar, se
+ * adopta su estado final y su marcador. No pisa un partido en vivo ni
+ * uno que el calendario ya trae terminado.
+ */
+function mezclarResultadosPasados(
+  f: SportsFixture,
+  p: SportsFixture | undefined
+): SportsFixture {
+  if (!p || p.status !== 'finished') return f;
+  if (f.status === 'live' || f.status === 'finished') return f;
+  return {
+    ...f,
+    status: p.status,
+    statusRaw: p.statusRaw,
+    homeScore: p.homeScore,
+    awayScore: p.awayScore,
+  };
+}
+
+/**
+ * Mapa de en vivo para UNA liga: el feed general es solo de fútbol;
+ * si la liga es de otro deporte se suma el feed de SU deporte
+ * (livescore/{deporte} del adaptador) filtrado a esa liga. Fallo del
+ * feed extra = se sigue con el general.
+ */
+async function vivoParaLiga(
+  provider: ReturnType<typeof getSportsProvider>,
+  liga: { providerId: string; sport?: string },
+  base: Map<string, SportsFixture>
+): Promise<Map<string, SportsFixture>> {
+  const sport = (liga.sport || '').trim();
+  if (!sport || sport === 'Soccer') return base;
+  try {
+    const delDeporte = await provider.getLiveScoresBySport(sport);
+    const mapa = new Map(base);
+    for (const f of delDeporte) {
+      if (f.leagueProviderId === liga.providerId) mapa.set(f.providerId, f);
+    }
+    return mapa;
+  } catch (e) {
+    console.error(`Partidos: falló el en vivo de ${sport}:`, e);
+    return base;
+  }
+}
+
+/** Últimos resultados de la liga como mapa por id (vacío si falla). */
+async function pasadosParaLiga(
+  provider: ReturnType<typeof getSportsProvider>,
+  leagueProviderId: string
+): Promise<Map<string, SportsFixture>> {
+  try {
+    const pasados = await provider.getPastResults(leagueProviderId);
+    return new Map(pasados.map((f) => [f.providerId, f]));
+  } catch (e) {
+    console.error(`Partidos: fallaron los últimos resultados:`, e);
+    return new Map();
+  }
 }
 
 function ligaPublica(liga: SupportedLeague, badgeUrl: string | null = null) {
@@ -272,9 +336,15 @@ export async function GET(request: Request) {
         }
       }
 
-      // Mezcla segura del en vivo para sus partidos en curso.
+      // Últimos resultados encima del calendario (foto vieja) y mezcla
+      // segura del en vivo (con el feed del deporte si no es fútbol).
+      const pasadosEq = await pasadosParaLiga(provider, liga.providerId);
+      const vivoEq = await vivoParaLiga(provider, liga, vivoPorId);
       delEquipo = delEquipo.map((f) =>
-        mezclarEnVivo(f, vivoPorId.get(f.providerId))
+        mezclarEnVivo(
+          mezclarResultadosPasados(f, pasadosEq.get(f.providerId)),
+          vivoEq.get(f.providerId)
+        )
       );
 
       delEquipo.sort((a, b) =>
@@ -331,9 +401,16 @@ export async function GET(request: Request) {
         }
       }
 
-      // Mezcla segura del en vivo para sus partidos en curso.
+      // Últimos resultados encima del calendario (foto vieja) y mezcla
+      // segura del en vivo (con el feed del deporte si no es fútbol:
+      // así la NBA y demás ligas también muestran resultados y vivo).
+      const pasadosLiga = await pasadosParaLiga(provider, liga.providerId);
+      const vivoLiga = await vivoParaLiga(provider, liga, vivoPorId);
       deLaLiga = deLaLiga.map((f) =>
-        mezclarEnVivo(f, vivoPorId.get(f.providerId))
+        mezclarEnVivo(
+          mezclarResultadosPasados(f, pasadosLiga.get(f.providerId)),
+          vivoLiga.get(f.providerId)
+        )
       );
 
       deLaLiga.sort((a, b) =>

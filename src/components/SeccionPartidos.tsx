@@ -83,7 +83,10 @@ import {
   etiquetaDia,
   type EquipoTocable,
 } from '@/components/partidosUI'
-import { nombreEquipoES } from '@/lib/sports/nombresES'
+import {
+  nombreEquipoES,
+  normalizarNombreEquipo,
+} from '@/lib/sports/nombresES'
 import { useJornadaActual } from '@/hooks/useJornadaActual'
 import {
   coincideParEquipos,
@@ -158,6 +161,11 @@ function ListaPartidos({
 }: ListaProps) {
   const [grupos, setGrupos] = useState<GrupoPartidos[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // 🔍 Buscador de equipo (solo en la vista ⭐ Favoritos, pedido de
+  // Gonzalo 2026-11-22): con texto, la lista deja de ser "lo seguido"
+  // y busca ese equipo en TODOS los partidos cargados (la semana de
+  // la vista), para encontrarlo y abrir su página a seguirlo.
+  const [busqueda, setBusqueda] = useState('')
 
   const cargar = useCallback(async () => {
     try {
@@ -263,7 +271,50 @@ function ListaPartidos({
       }))
   }, [grupos, soloFavoritos, favoritos])
 
-  const visiblesFiltrados = visibles
+  // 🔍 Con búsqueda activa (solo Favoritos): partidos de cualquier
+  // liga cargada donde juegue el equipo buscado, comparando el nombre
+  // original del proveedor y su nombre en español, sin acentos.
+  const consulta = soloFavoritos ? normalizarNombreEquipo(busqueda) : ''
+  const visiblesFiltrados = useMemo(() => {
+    if (!consulta) return visibles
+    const coincide = (f: SportsFixture) =>
+      normalizarNombreEquipo(f.homeTeam).includes(consulta) ||
+      normalizarNombreEquipo(
+        nombreEquipoES(f.homeTeam, f.homeTeamProviderId)
+      ).includes(consulta) ||
+      normalizarNombreEquipo(f.awayTeam).includes(consulta) ||
+      normalizarNombreEquipo(
+        nombreEquipoES(f.awayTeam, f.awayTeamProviderId)
+      ).includes(consulta)
+    return (grupos || [])
+      .map((g) => ({
+        clave: g.league.providerId,
+        nombre: g.league.name,
+        ligaId: g.league.providerId as string | null,
+        fixtures: g.fixtures.filter(coincide),
+      }))
+      .filter((g) => g.fixtures.length > 0)
+  }, [consulta, visibles, grupos])
+
+  const buscadorFavoritos = soloFavoritos ? (
+    <div className="w-full max-w-3xl">
+      <input
+        type="text"
+        value={busqueda}
+        onChange={(e) => setBusqueda(e.target.value)}
+        placeholder="🔍 Buscar un equipo… (ej. Chivas, Bayern, Dinamarca)"
+        className="w-full bg-slate-900/80 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-amber-500 transition-all text-center"
+      />
+      {consulta && (
+        <p className="text-center text-slate-500 text-[11px] font-bold mt-2">
+          Buscando «{busqueda.trim()}» en los partidos de la semana de
+          todas las ligas de la sección. Toca un equipo en su partido
+          para abrir su página y seguirlo ⭐.
+        </p>
+      )}
+    </div>
+  ) : null
+
   const badgePorLiga = new Map(
     (grupos || []).map((g) => [g.league.providerId, g.league.badgeUrl ?? null])
   )
@@ -293,10 +344,13 @@ function ListaPartidos({
   if (visiblesFiltrados.length === 0) {
     return (
       <div className="w-full max-w-3xl flex flex-col items-center gap-4 animate-in fade-in duration-500">
+        {buscadorFavoritos}
         <div className="w-full bg-slate-900/80 border border-slate-800 rounded-2xl p-8 text-center">
           <p className="text-4xl mb-3">⚽</p>
           <p className="text-slate-300 font-bold">
-            {soloFavoritos
+            {consulta
+              ? `Ningún equipo coincide con «${busqueda.trim()}» en los partidos de la semana. Prueba con otro nombre.`
+              : soloFavoritos
                 ? 'No hay partidos próximos de tus ligas y equipos seguidos. Revisa la vista Siguiendo para agregar más.'
                 : fecha
                   ? 'Este día no hay partidos en las ligas de la sección.'
@@ -309,6 +363,7 @@ function ListaPartidos({
 
   return (
     <div className="w-full max-w-3xl flex flex-col gap-5 animate-in fade-in duration-500">
+      {buscadorFavoritos}
       {visiblesFiltrados.map((g) => (
         <div
           key={g.clave}

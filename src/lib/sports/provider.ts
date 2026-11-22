@@ -52,6 +52,25 @@ export interface SportsProvider {
    */
   getLiveScores(): Promise<SportsFixture[]>;
 
+  /**
+   * Marcadores EN VIVO de un deporte dado ('Basketball', 'Baseball'...),
+   * de TODAS sus ligas (una sola consulta); cada quien filtra por
+   * `leagueProviderId`. Para 'Soccer' equivale a getLiveScores().
+   * Es la vía para que las ligas que no son de fútbol (p. ej. la NBA)
+   * también muestren marcador al momento en su página.
+   */
+  getLiveScoresBySport(sport: string): Promise<SportsFixture[]>;
+
+  /**
+   * Últimos resultados YA terminados de una liga (los más recientes,
+   * ~15), con marcador final. Complementa el calendario de temporada:
+   * como aquel payload es grande y va cacheado, su foto puede venir
+   * vieja en la primera visita; esta respuesta es chica y fresca, y
+   * la ruta la mezcla encima para que los resultados recientes
+   * siempre se vean.
+   */
+  getPastResults(leagueProviderId: string): Promise<SportsFixture[]>;
+
   /** Equipos de una liga, con escudo. */
   getTeams(leagueProviderId: string): Promise<SportsTeam[]>;
 

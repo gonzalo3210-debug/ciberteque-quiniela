@@ -310,7 +310,9 @@ export default function Home() {
               )}
 
               {pestana === 'noticias' && (
-                <SeccionNoticias />
+                <SeccionNoticias
+                  onIrAJugar={() => cambiarPestana('jugar')}
+                />
               )}
 
               {pestana === 'partidos' && (

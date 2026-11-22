@@ -32,8 +32,10 @@ import {
 } from '@/lib/queries'
 import {
   generarNoticiasClub,
+  rankingDeQuiniela,
   type NoticiaClub,
 } from '@/lib/noticiasClub'
+import { calcularTabla, type FilaTabla } from '@/lib/proyeccion'
 import { useJornadaActual } from '@/hooks/useJornadaActual'
 import { leerFavoritos } from '@/lib/favoritos'
 import {
@@ -41,7 +43,10 @@ import {
   ventanaDeJornada,
 } from '@/lib/emparejar'
 import type { SportsFixture } from '@/lib/sports/types'
-import { nombreEquipoES } from '@/lib/sports/nombresES'
+import {
+  nombreEquipoES,
+  normalizarNombreEquipo,
+} from '@/lib/sports/nombresES'
 import {
   fechaCortaEnMazatlan,
   horaEnMazatlan,
@@ -55,7 +60,23 @@ interface NoticiaExterna {
   equipos: string[]
   /** Chip al que pertenece, clasificado por el servidor. */
   categoria: 'equipos' | 'deportes'
+  /** Deporte probable, clasificado por el servidor (filtro Deportes). */
+  deporte?: string
 }
+
+/** Orden de presentación de los deportes en el filtro de Deportes. */
+const ORDEN_DEPORTES = [
+  'Fútbol',
+  'Básquetbol',
+  'Béisbol',
+  'Fútbol americano',
+  'Boxeo',
+  'MMA',
+  'Tenis',
+  'Fórmula 1',
+  'Golf',
+  'Otros',
+]
 
 type ChipNoticias = 'todos' | 'quiniela' | 'equipos' | 'deportes' | 'minuto'
 
@@ -115,6 +136,12 @@ interface EventoMinuto {
   minutoLabel: string
   /** Instante aproximado (inicio del partido + minuto) para ordenar. */
   orden: number
+  /** Partido al que pertenece (para el filtro por partido): el ID del
+   *  fixture del proveedor, o `club:{partidoId}` si solo hay eventos
+   *  del Club para ese partido. */
+  partidoClave: string
+  /** "Local vs Visita" para la etiqueta del filtro. */
+  partidoEtiqueta: string
 }
 
 /** Convierte la respuesta de la ruta en tarjetas, de la más reciente
@@ -166,10 +193,82 @@ function eventosMinutoDesdeRespuesta(matches: any[]): EventoMinuto[] {
         detalle,
         minutoLabel: e.minuteLabel || (e.minute !== null ? `${e.minute}` : ''),
         orden: inicio + (e.minute ?? 0) * 60_000,
+        partidoClave: f.providerId,
+        partidoEtiqueta: `${localES} vs ${visitaES}`,
       })
     })
   }
   items.sort((a, b) => b.orden - a.orden)
+  return items
+}
+
+/** Evento del Club tal como lo devuelve /api/eventos-club. */
+interface EventoClub {
+  partidoId: string
+  quinielaId: string | null
+  tipo: string
+  equipoAnoto: string | null
+  golesLocal: number | null
+  golesVisitante: number | null
+  minuto: number | null
+  fechaISO: string
+}
+
+/**
+ * Eventos del Club (los goles que detecta el programa de marcadores)
+ * convertidos a tarjetas del Minuto a minuto. Solo entran los de los
+ * partidos cuya línea del proveedor vino VACÍA — el caso de la Liga
+ * MX —: si el proveedor sí trajo eventos de un partido, los suyos
+ * mandan y los del Club se saltan para no duplicar el mismo gol.
+ * Sin goleador: la detección por marcador no lo conoce.
+ */
+function eventosClubAMinuto(
+  eventosClub: EventoClub[],
+  partidosJornada: any[],
+  idsPorPartido: Map<string, string>,
+  fixturesConEventos: Set<string>
+): EventoMinuto[] {
+  const items: EventoMinuto[] = []
+  for (const ev of eventosClub || []) {
+    const fixtureId = idsPorPartido.get(ev.partidoId)
+    if (fixtureId && fixturesConEventos.has(fixtureId)) continue
+    const partido = (partidosJornada as any[]).find(
+      (p) => p.id === ev.partidoId
+    )
+    if (!partido) continue
+    const etiqueta = `${partido.equipo_local} vs ${partido.equipo_visitante}`
+    const marcador =
+      ev.golesLocal !== null && ev.golesVisitante !== null
+        ? `${partido.equipo_local} ${ev.golesLocal} - ${ev.golesVisitante} ${partido.equipo_visitante}`
+        : etiqueta
+    let icono = '⚡'
+    let titulo = ''
+    let detalle = marcador
+    if (ev.tipo === 'gol') {
+      icono = '⚽'
+      titulo = ev.equipoAnoto ? `¡Gol de ${ev.equipoAnoto}!` : '¡Gol!'
+      detalle = `${marcador} tras el gol`
+    } else if (ev.tipo === 'gol_anulado') {
+      icono = '🚫'
+      titulo = 'Gol anulado por el VAR'
+    } else if (ev.tipo === 'fin_partido') {
+      icono = '🏁'
+      titulo = `Final: ${marcador}`
+      detalle = 'Partido terminado'
+    } else {
+      continue
+    }
+    items.push({
+      id: `club-${ev.partidoId}-${ev.tipo}-${ev.fechaISO}`,
+      icono,
+      titulo,
+      detalle,
+      minutoLabel: ev.minuto !== null ? `${ev.minuto}` : '',
+      orden: Date.parse(ev.fechaISO) || 0,
+      partidoClave: fixtureId || `club:${ev.partidoId}`,
+      partidoEtiqueta: etiqueta,
+    })
+  }
   return items
 }
 
@@ -198,13 +297,52 @@ function rolDesdeSesion(): string | undefined {
   }
 }
 
-export default function SeccionNoticias() {
+/** Tabla general lista para la ventana emergente de una noticia. */
+interface TablaEmergente {
+  titulo: string
+  subtitulo: string
+  filas: {
+    posicion: number
+    nombre: string
+    puntos: number
+    golesDiff: number | null
+  }[]
+}
+
+export default function SeccionNoticias({
+  onIrAJugar,
+}: {
+  /** Ir a la pestaña Jugar (noticias de jornada nueva/cierre). */
+  onIrAJugar?: () => void
+} = {}) {
   const [delClub, setDelClub] = useState<NoticiaClub[] | null>(null)
+  // Datos crudos de los que salieron las noticias del club: se
+  // guardan para poder abrir la TABLA GENERAL de la jornada al
+  // tocar una noticia de líder/ganador/final (sin volver a pedir).
+  const [datosClub, setDatosClub] = useState<{
+    quinielas: any[]
+    mapaUsuarios: Record<string, { nombre: string }>
+  } | null>(null)
+  const [tablaAbierta, setTablaAbierta] = useState<TablaEmergente | null>(
+    null
+  )
   const [errorClub, setErrorClub] = useState<string | null>(null)
   const [externas, setExternas] = useState<NoticiaExterna[] | null>(null)
   const [externasFallaron, setExternasFallaron] = useState(false)
   const [chip, setChip] = useState<ChipNoticias>('todos')
   const [minuto, setMinuto] = useState<EventoMinuto[] | null>(null)
+  // ⚡ Filtro por partido del Minuto a minuto (pedido de Gonzalo,
+  // 2026-11-22): 'todos' o la clave de un partido, para que los
+  // eventos de un juego no se mezclen con los de otro.
+  const [filtroPartido, setFiltroPartido] = useState<string>('todos')
+  const [hayEventosClub, setHayEventosClub] = useState(false)
+  // 🔍 Buscador por equipo dentro del chip ⭐ Favoritos (pedido de
+  // Gonzalo 2026-11-22, igual que en la vista Favoritos de Partidos):
+  // filtra los titulares ya cargados por el equipo escrito.
+  const [busquedaEquipo, setBusquedaEquipo] = useState('')
+  // 📰 Filtro por deporte dentro del chip Deportes ('todos' o el
+  // nombre del deporte tal como lo clasifica el servidor).
+  const [filtroDeporte, setFiltroDeporte] = useState<string>('todos')
 
   const { seleccionada } = useJornadaActual()
 
@@ -230,6 +368,7 @@ export default function SeccionNoticias() {
       const mapa: Record<string, { nombre: string }> = {}
       for (const u of uRes.data || []) mapa[u.id] = { nombre: u.nombre }
       setDelClub(generarNoticiasClub(qRes.data || [], mapa))
+      setDatosClub({ quinielas: qRes.data || [], mapaUsuarios: mapa })
       setErrorClub(null)
     } catch (e) {
       console.error('SeccionNoticias (club):', e)
@@ -258,6 +397,59 @@ export default function SeccionNoticias() {
       setExternasFallaron(true)
     }
   }, [equiposClave])
+
+  // 👆 Noticias del club ACCIONABLES (corrección de Gonzalo,
+  // 2026-11-22): cada tarjeta hace lo que corresponde a su evento —
+  // jornada nueva o por cerrar → ir a Jugar; líder, ganador o final
+  // de partido → ventana emergente con la tabla general de esa
+  // jornada, calculada con la MISMA cuenta del Ranking oficial
+  // (calcularTabla; en sorteo, el ranking por puntos del generador).
+  const alTocarNoticiaClub = useCallback(
+    (club: NoticiaClub) => {
+      if (club.subtipo === 'nueva' || club.subtipo === 'cierre') {
+        onIrAJugar?.()
+        return
+      }
+      if (!datosClub) return
+      const q = datosClub.quinielas.find((x: any) => x.id === club.quinielaId)
+      if (!q) return
+      const nombre = q.nombre_jornada || 'Jornada'
+      let filas: TablaEmergente['filas'] = []
+      const tabla: FilaTabla[] = calcularTabla(
+        q,
+        q.tickets || [],
+        q.partidos || [],
+        { soloFinales: club.subtipo === 'ganador' }
+      )
+      if (tabla.length > 0) {
+        filas = tabla.map((f) => ({
+          posicion: f.posicion,
+          nombre:
+            (f.usuarioId && datosClub.mapaUsuarios[f.usuarioId]?.nombre) ||
+            'Un jugador',
+          puntos: f.puntos,
+          golesDiff: f.golesDiff,
+        }))
+      } else {
+        // Sorteo (calcularTabla no aplica): ranking por puntos.
+        filas = rankingDeQuiniela(q, datosClub.mapaUsuarios).map((r, i) => ({
+          posicion: i + 1,
+          nombre: r.nombre,
+          puntos: r.puntos,
+          golesDiff: r.golesDiff >= 999 ? null : r.golesDiff,
+        }))
+      }
+      setTablaAbierta({
+        titulo: `🏆 Tabla general · ${nombre}`,
+        subtitulo:
+          club.subtipo === 'ganador'
+            ? 'Tabla final de la jornada'
+            : 'Posiciones en vivo de la jornada',
+        filas,
+      })
+    },
+    [datosClub, onIrAJugar]
+  )
 
   useEffect(() => {
     cargarClub()
@@ -324,16 +516,45 @@ export default function SeccionNoticias() {
         }
       }
       const fixtureIds = [...new Set(idsPorPartido.values())].slice(0, 12)
-      if (fixtureIds.length === 0) {
-        setMinuto([])
-        return
+      let items: EventoMinuto[] = []
+      const fixturesConEventos = new Set<string>()
+      if (fixtureIds.length > 0) {
+        const res = await fetch(
+          `/api/eventos-partido?fixtures=${fixtureIds.join(',')}`
+        )
+        const data = await res.json()
+        if (!res.ok) throw new Error(data?.error || 'Error')
+        for (const m of data.matches || []) {
+          if (m.fixture && (m.eventos || []).length > 0) {
+            fixturesConEventos.add(m.fixture.providerId)
+          }
+        }
+        items = eventosMinutoDesdeRespuesta(data.matches || [])
       }
-      const res = await fetch(
-        `/api/eventos-partido?fixtures=${fixtureIds.join(',')}`
-      )
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.error || 'Error')
-      setMinuto(eventosMinutoDesdeRespuesta(data.matches || []))
+      // Eventos del CLUB para los partidos sin línea del proveedor
+      // (Liga MX): los goles que detecta el programa de marcadores.
+      // Si la fuente aún no existe, la ruta devuelve lista vacía y
+      // el feed sigue solo con lo del proveedor.
+      try {
+        const idsClub = (partidosJornada as any[]).map((p) => p.id).join(',')
+        const resClub = await fetch(`/api/eventos-club?partidos=${idsClub}`)
+        const dataClub = await resClub.json()
+        if (resClub.ok) {
+          const delClub = eventosClubAMinuto(
+            dataClub.eventos || [],
+            partidosJornada,
+            idsPorPartido,
+            fixturesConEventos
+          )
+          if (delClub.length > 0) {
+            items = [...items, ...delClub].sort((a, b) => b.orden - a.orden)
+            setHayEventosClub(true)
+          }
+        }
+      } catch {
+        // Sin eventos del club: el feed sigue con los del proveedor.
+      }
+      setMinuto(items)
     } catch {
       // Sin eventos por ahora: se conserva lo último que se vio.
       setMinuto((prev) => prev ?? [])
@@ -350,6 +571,27 @@ export default function SeccionNoticias() {
     return () => clearInterval(id)
   }, [cargarMinuto])
 
+  // 📰 Deportes presentes entre los titulares ya cargados del chip
+  // Deportes (para su filtro). Si el deporte elegido ya no está
+  // entre los titulares nuevos, el filtro efectivo cae a 'todos'
+  // para no dejar la pestaña vacía tras una recarga.
+  const opcionesDeporte = (() => {
+    const presentes = new Set<string>()
+    for (const externa of externas || []) {
+      const categoria =
+        externa.categoria ||
+        (externa.equipos.length > 0 ? 'equipos' : 'deportes')
+      if (categoria === 'deportes') {
+        presentes.add(externa.deporte || 'Otros')
+      }
+    }
+    return ORDEN_DEPORTES.filter((d) => presentes.has(d))
+  })()
+  const filtroDeporteEfectivo =
+    filtroDeporte !== 'todos' && opcionesDeporte.includes(filtroDeporte)
+      ? filtroDeporte
+      : 'todos'
+
   const feed = useMemo<ItemFeed[]>(() => {
     const items: ItemFeed[] = []
     // Chip 🎯 Quiniela: SOLO las del club. Chip Todos: todo mezclado.
@@ -359,6 +601,10 @@ export default function SeccionNoticias() {
       }
     }
     if (chip !== 'quiniela') {
+      // 🔍 Filtro del chip ⭐ Favoritos: solo titulares de ESE equipo
+      // (por sus equipos emparejados o por el título), sin acentos.
+      const consulta =
+        chip === 'equipos' ? normalizarNombreEquipo(busquedaEquipo) : ''
       for (const externa of externas || []) {
         // Sin categoría (respaldo ante una respuesta vieja en caché):
         // si trae equipos emparejados es de Equipos; si no, de Deportes.
@@ -366,6 +612,24 @@ export default function SeccionNoticias() {
           externa.categoria ||
           (externa.equipos.length > 0 ? 'equipos' : 'deportes')
         if (chip !== 'todos' && categoria !== chip) continue
+        // 📰 Filtro por deporte, solo dentro del chip Deportes.
+        if (
+          chip === 'deportes' &&
+          filtroDeporteEfectivo !== 'todos' &&
+          (externa.deporte || 'Otros') !== filtroDeporteEfectivo
+        )
+          continue
+        if (consulta) {
+          const enEquipos = externa.equipos.some(
+            (eq) =>
+              normalizarNombreEquipo(eq).includes(consulta) ||
+              normalizarNombreEquipo(nombreEquipoES(eq)).includes(consulta)
+          )
+          const enTitulo = normalizarNombreEquipo(externa.titulo).includes(
+            consulta
+          )
+          if (!enEquipos && !enTitulo) continue
+        }
         items.push({
           tipo: 'externa',
           fechaISO: externa.fechaISO || '',
@@ -375,13 +639,35 @@ export default function SeccionNoticias() {
     }
     items.sort((a, b) => b.fechaISO.localeCompare(a.fechaISO))
     return items.slice(0, 40)
-  }, [delClub, externas, chip])
+  }, [delClub, externas, chip, busquedaEquipo, filtroDeporteEfectivo])
+
+  // ⚡ Filtro por partido del Minuto a minuto: opciones = los
+  // partidos que SÍ tienen eventos; la lista visible se acota al
+  // partido elegido para que no se mezclen los eventos.
+  const opcionesPartidoMinuto = (() => {
+    const mapa = new Map<string, string>()
+    for (const ev of minuto || []) {
+      if (!mapa.has(ev.partidoClave)) {
+        mapa.set(ev.partidoClave, ev.partidoEtiqueta)
+      }
+    }
+    return [...mapa.entries()].map(([clave, etiqueta]) => ({
+      clave,
+      etiqueta,
+    }))
+  })()
+  const minutoVisible =
+    filtroPartido === 'todos'
+      ? minuto || []
+      : (minuto || []).filter((ev) => ev.partidoClave === filtroPartido)
 
   const textoVacio =
     chip === 'quiniela'
       ? 'Todavía no hay novedades del club. Cuando se abra una jornada y empiecen los partidos, aquí salen los finales, el líder y el ganador.'
-      : chip === 'equipos'
-        ? 'Ahorita no hay titulares de los equipos de la jornada ni de tus favoritos. Prueba el chip 📰 Deportes para ver el resto del día.'
+      : chip === 'equipos' && busquedaEquipo.trim()
+        ? `No hay titulares de «${busquedaEquipo.trim()}» entre tus favoritos y los equipos de la jornada. Borra la búsqueda para verlos todos.`
+        : chip === 'equipos'
+          ? 'Ahorita no hay titulares de los equipos de la jornada ni de tus favoritos. Prueba el chip 📰 Deportes para ver el resto del día.'
         : chip === 'deportes'
           ? 'Ahorita no llegaron titulares generales de deportes. Vuelve en un rato.'
           : 'Todavía no hay noticias. Cuando haya jornada y jueguen tus equipos, aquí se juntan las novedades.'
@@ -414,6 +700,77 @@ export default function SeccionNoticias() {
         ))}
       </div>
 
+      {/* ── 🔍 Buscador por equipo, solo en el chip ⭐ Favoritos ── */}
+      {chip === 'equipos' && (
+        <div className="w-full mb-4">
+          <input
+            type="text"
+            value={busquedaEquipo}
+            onChange={(e) => setBusquedaEquipo(e.target.value)}
+            placeholder="🔍 Buscar titulares de un equipo… (ej. Chivas, América)"
+            className="w-full bg-slate-900/80 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all text-center"
+          />
+        </div>
+      )}
+
+      {/* ── 📰 Filtro por deporte, solo en el chip Deportes ── */}
+      {chip === 'deportes' && opcionesDeporte.length > 1 && (
+        <div className="flex gap-1 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800/50 w-full mb-4 overflow-x-auto">
+          <button
+            onClick={() => setFiltroDeporte('todos')}
+            className={`flex-1 shrink-0 whitespace-nowrap px-3 py-2 rounded-xl font-black text-[10px] sm:text-[11px] uppercase tracking-widest transition-all ${
+              filtroDeporteEfectivo === 'todos'
+                ? 'bg-emerald-600 text-white shadow-[0_0_18px_rgba(5,150,105,0.4)]'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            Todos
+          </button>
+          {opcionesDeporte.map((d) => (
+            <button
+              key={d}
+              onClick={() => setFiltroDeporte(d)}
+              className={`flex-1 shrink-0 whitespace-nowrap px-3 py-2 rounded-xl font-black text-[10px] sm:text-[11px] uppercase tracking-widest transition-all ${
+                filtroDeporteEfectivo === d
+                  ? 'bg-emerald-600 text-white shadow-[0_0_18px_rgba(5,150,105,0.4)]'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              {d}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ── ⚡ Filtro por partido, solo en el chip Minuto a minuto ── */}
+      {chip === 'minuto' && minuto !== null && opcionesPartidoMinuto.length > 1 && (
+        <div className="flex gap-1 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800/50 w-full mb-4 overflow-x-auto">
+          <button
+            onClick={() => setFiltroPartido('todos')}
+            className={`flex-1 shrink-0 whitespace-nowrap px-3 py-2 rounded-xl font-black text-[10px] sm:text-[11px] uppercase tracking-widest transition-all ${
+              filtroPartido === 'todos'
+                ? 'bg-amber-600 text-white shadow-[0_0_18px_rgba(217,119,6,0.4)]'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            Todos
+          </button>
+          {opcionesPartidoMinuto.map((op) => (
+            <button
+              key={op.clave}
+              onClick={() => setFiltroPartido(op.clave)}
+              className={`flex-1 shrink-0 whitespace-nowrap px-3 py-2 rounded-xl font-black text-[10px] sm:text-[11px] uppercase tracking-widest transition-all ${
+                filtroPartido === op.clave
+                  ? 'bg-amber-600 text-white shadow-[0_0_18px_rgba(217,119,6,0.4)]'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              {op.etiqueta}
+            </button>
+          ))}
+        </div>
+      )}
+
       {chip === 'minuto' ? (
         minuto === null ? (
           <div className="text-cyan-400 font-bold animate-pulse py-20">
@@ -430,7 +787,7 @@ export default function SeccionNoticias() {
           </div>
         ) : (
           <div className="w-full flex flex-col gap-3">
-            {minuto.map((ev) => (
+            {minutoVisible.map((ev) => (
               <article
                 key={ev.id}
                 className="w-full bg-slate-900/80 border border-slate-800/60 border-l-4 border-l-amber-500 rounded-2xl px-4 py-3.5 flex gap-3"
@@ -461,6 +818,8 @@ export default function SeccionNoticias() {
             <p className="text-center text-slate-500 text-xs font-medium pt-1">
               Solo goles, penales y expulsiones de los partidos de la
               quiniela, conforme los registra el proveedor.
+              {hayEventosClub &&
+                ' Los de la Liga MX los detecta el Club (el proveedor no trae línea de tiempo de esta liga): gol y marcador, sin goleador.'}
             </p>
           </div>
         )
@@ -489,7 +848,15 @@ export default function SeccionNoticias() {
             item.tipo === 'club' ? (
               <article
                 key={`club-${item.club.id}`}
-                className="w-full bg-slate-900/80 border border-slate-800/60 border-l-4 border-l-blue-500 rounded-2xl px-4 py-3.5 flex gap-3"
+                onClick={() => alTocarNoticiaClub(item.club)}
+                role="button"
+                title={
+                  item.club.subtipo === 'nueva' ||
+                  item.club.subtipo === 'cierre'
+                    ? 'Ir a Jugar'
+                    : 'Ver la tabla general'
+                }
+                className="w-full bg-slate-900/80 border border-slate-800/60 border-l-4 border-l-blue-500 rounded-2xl px-4 py-3.5 flex gap-3 cursor-pointer hover:bg-slate-800/60 hover:border-blue-500/50 transition-colors"
               >
                 <span className="text-2xl leading-none shrink-0">
                   {item.club.icono}
@@ -511,6 +878,12 @@ export default function SeccionNoticias() {
                       {item.club.detalle}
                     </p>
                   )}
+                  <p className="text-blue-400 text-[10px] font-black uppercase tracking-widest mt-1.5">
+                    {item.club.subtipo === 'nueva' ||
+                    item.club.subtipo === 'cierre'
+                      ? 'Toca para ir a Jugar ›'
+                      : 'Toca para ver la tabla general ›'}
+                  </p>
                 </div>
               </article>
             ) : (
@@ -571,6 +944,80 @@ export default function SeccionNoticias() {
               club siguen al día.
             </p>
           )}
+        </div>
+      )}
+
+      {/* ── 🏆 Ventana emergente: tabla general de la jornada ── */}
+      {tablaAbierta && (
+        <div
+          className="fixed inset-0 z-[100] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setTablaAbierta(null)}
+        >
+          <div
+            className="bg-slate-900 border border-amber-600/50 max-w-md w-full p-4 md:p-6 rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[85vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-start border-b border-slate-800 pb-3 mb-3 shrink-0">
+              <div>
+                <h3 className="text-sm md:text-base font-black text-white uppercase tracking-tight">
+                  {tablaAbierta.titulo}
+                </h3>
+                <p className="text-[9px] text-amber-500 font-bold uppercase mt-1">
+                  {tablaAbierta.subtitulo}
+                </p>
+              </div>
+              <button
+                onClick={() => setTablaAbierta(null)}
+                className="text-slate-500 hover:text-slate-300 font-bold font-mono text-xl"
+                aria-label="Cerrar"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="overflow-y-auto pr-1 flex-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-slate-900 [&::-webkit-scrollbar-thumb]:bg-slate-700 [&::-webkit-scrollbar-thumb]:rounded-full">
+              {tablaAbierta.filas.length === 0 ? (
+                <p className="text-slate-400 text-sm font-bold text-center py-6">
+                  Todavía no hay boletos con puntos en esta jornada.
+                </p>
+              ) : (
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="text-slate-500 text-[9px] font-black uppercase tracking-widest border-b border-slate-800">
+                      <th className="py-1.5 pr-2 text-center w-8">#</th>
+                      <th className="py-1.5 pr-2">Jugador</th>
+                      <th className="py-1.5 pr-2 text-center">Pts</th>
+                      <th className="py-1.5 text-center">Dif. goles</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {tablaAbierta.filas.map((f, i) => (
+                      <tr
+                        key={`${f.posicion}-${f.nombre}-${i}`}
+                        className={i === 0 ? 'bg-amber-600/10' : ''}
+                      >
+                        <td className="py-2 pr-2 text-center font-black text-amber-400 text-sm">
+                          {f.posicion}°
+                        </td>
+                        <td className="py-2 pr-2 font-bold text-slate-200 text-xs truncate max-w-[160px]">
+                          {f.nombre}
+                        </td>
+                        <td className="py-2 pr-2 text-center font-black text-white text-sm">
+                          {f.puntos}
+                        </td>
+                        <td className="py-2 text-center font-bold text-slate-400 text-xs">
+                          {f.golesDiff === null ? '—' : f.golesDiff}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <p className="mt-3 text-[8px] md:text-[9px] text-slate-500 font-bold uppercase tracking-widest text-center shrink-0">
+              Misma cuenta que el Ranking oficial · El desempate es por
+              diferencia contra el total de goles
+            </p>
+          </div>
         </div>
       )}
     </div>
