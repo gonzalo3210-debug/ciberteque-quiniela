@@ -368,10 +368,27 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
                   />
                 </div>
 
+                <button onClick={() => a.jalarEquiposBombo(equipos)} disabled={e.jalandoBombo} type="button" className="bg-emerald-900 hover:bg-emerald-800 disabled:opacity-60 text-emerald-100 text-[10px] font-black uppercase px-4 py-2 rounded-lg border border-emerald-700 transition-all shadow-md shrink-0">
+                  {e.jalandoBombo ? '⏳ Jalando…' : '⬇️ Jalar top 8 de la tabla'}
+                </button>
+
                 <button onClick={a.clonarUltimoSorteo} type="button" className="bg-blue-900 hover:bg-blue-800 text-blue-100 text-[10px] font-black uppercase px-4 py-2 rounded-lg border border-blue-700 transition-all shadow-md shrink-0">
                   ♻️ Clonar Sorteo Anterior
                 </button>
               </div>
+
+              {e.fuenteBombo && (
+                <div className="bg-emerald-950/30 border border-emerald-900/50 rounded-lg px-3 py-2 space-y-1">
+                  <p className="text-emerald-300 text-[10px] font-bold">
+                    ⬇️ Bombo jalado {e.fuenteBombo.tipo === 'cuartos' ? 'desde los partidos de cuartos de final' : 'desde la tabla general (top 8)'}. Puedes corregir cualquier equipo a mano en la rejilla.
+                  </p>
+                  {(e.fuenteBombo.noRegistrados || []).map((nombre: string) => (
+                    <p key={nombre} className="text-amber-300 text-[10px] font-bold">
+                      ⚠️ No registrado: {nombre} — regístralo en Equipos y elígelo a mano para completar el bombo.
+                    </p>
+                  ))}
+                </div>
+              )}
 
               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
                 {equipos

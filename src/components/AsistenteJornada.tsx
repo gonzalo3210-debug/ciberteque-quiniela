@@ -418,14 +418,42 @@ export default function AsistenteJornada({
                   </strong>
                 </p>
               </div>
-              <button
-                onClick={a.clonarUltimoSorteo}
-                type="button"
-                className="bg-blue-900 hover:bg-blue-800 text-blue-100 text-[10px] font-black uppercase px-4 py-3 rounded-lg border border-blue-700 transition-all shadow-md shrink-0"
-              >
-                ♻️ Clonar sorteo anterior
-              </button>
+              <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+                <button
+                  onClick={() => a.jalarEquiposBombo(equipos)}
+                  disabled={e.jalandoBombo}
+                  type="button"
+                  className="bg-emerald-900 hover:bg-emerald-800 disabled:opacity-60 text-emerald-100 text-[10px] font-black uppercase px-4 py-3 rounded-lg border border-emerald-700 transition-all shadow-md"
+                >
+                  {e.jalandoBombo ? '⏳ Jalando…' : '⬇️ Jalar top 8 de la tabla'}
+                </button>
+                <button
+                  onClick={a.clonarUltimoSorteo}
+                  type="button"
+                  className="bg-blue-900 hover:bg-blue-800 text-blue-100 text-[10px] font-black uppercase px-4 py-3 rounded-lg border border-blue-700 transition-all shadow-md"
+                >
+                  ♻️ Clonar sorteo anterior
+                </button>
+              </div>
             </div>
+
+            {e.fuenteBombo && (
+              <div className="bg-emerald-950/30 border border-emerald-900/50 rounded-xl px-4 py-3 space-y-1">
+                <p className="text-emerald-300 text-xs font-bold">
+                  ⬇️ Bombo jalado{' '}
+                  {e.fuenteBombo.tipo === 'cuartos'
+                    ? 'desde los partidos de cuartos de final'
+                    : 'desde la tabla general (top 8)'}
+                  . Puedes corregir cualquier equipo a mano en la rejilla.
+                </p>
+                {(e.fuenteBombo.noRegistrados || []).map((nombre: string) => (
+                  <p key={nombre} className="text-amber-300 text-xs font-bold">
+                    ⚠️ No registrado: {nombre} — regístralo en Equipos y
+                    elígelo a mano para completar el bombo.
+                  </p>
+                ))}
+              </div>
+            )}
 
             <input
               type="text"

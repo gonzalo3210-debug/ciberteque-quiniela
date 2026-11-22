@@ -2,7 +2,22 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { construirPayloadJornada } from '@/lib/crearJornadaPayload';
+import {
+  mapearEquiposARegistro,
+  sugerirBombo,
+  type FuenteBombo,
+} from '@/lib/bomboSorteo';
+import { LIGA_MX_PROVIDER_ID } from '@/lib/sports/leagues';
+import { nombreEquipoES } from '@/lib/sports/nombresES';
+import type { SportsFixture, StandingRow } from '@/lib/sports/types';
 import toast from 'react-hot-toast';
+
+/** De dónde salió el bombo actual al jalarlo (para avisar en la vista). */
+export interface OrigenBombo {
+  tipo: FuenteBombo;
+  /** Equipos de la fuente que no están en el registro del Club. */
+  noRegistrados: string[];
+}
 
 export interface PartidoInput {
   local: string;
@@ -34,6 +49,11 @@ export function useCreadorJornadas() {
 
   // Estado para guardar los IDs de los 8 equipos del Sorteo Mundial
   const [equiposSorteo, setEquiposSorteo] = useState<string[]>([]);
+
+  // Origen del bombo cuando se llenó con «Jalar top 8» (null si se
+  // eligió a mano o se clonó): la vista lo muestra junto al bombo.
+  const [fuenteBombo, setFuenteBombo] = useState<OrigenBombo | null>(null);
+  const [jalandoBombo, setJalandoBombo] = useState(false);
 
   // Estados de control
   const [creando, setCreando] = useState(false);
@@ -127,6 +147,9 @@ export function useCreadorJornadas() {
 
   // Función para seleccionar/quitar equipos del Sorteo
   const toggleEquipoSorteo = (equipoId: string) => {
+    // Al primer toque manual el bombo ya no es "el jalado": el aviso
+    // de origen deja de describirlo.
+    setFuenteBombo(null);
     setEquiposSorteo(prev => {
       if (prev.includes(equipoId)) return prev.filter(id => id !== equipoId);
       if (prev.length >= 8) {
@@ -155,10 +178,76 @@ export function useCreadorJornadas() {
       setPrecioTicket(data.precio_ticket.toString());
       setTipoPremiacion(data.tipo_premiacion as TipoPremiacion);
       setEquiposSorteo(data.equipos_sorteo);
-      
+      setFuenteBombo(null);
+
       toast.success('¡Configuración y equipos clonados exitosamente!', { id: idToast });
     } catch (error: any) {
       toast.error(error.message, { id: idToast });
+    }
+  };
+
+  /**
+   * ⬇️ JALAR LOS EQUIPOS DEL BOMBO (decisión de Gonzalo, 2026-11-22):
+   * llena el bombo sin escoger escudo por escudo. La tabla sale de
+   * /api/tabla-liga —la MISMA de Posiciones: si la ruta trae la tabla
+   * recalculada (liveRows, con el en vivo y la retención de 24 h de
+   * finales), manda esa— y los partidos de /api/partidos?liga= (la
+   * temporada completa de la Liga MX). La lógica pura
+   * (src/lib/bomboSorteo.ts) prefiere las llaves de cuartos si la API
+   * ya las lista y, si no, el top 8 de la tabla; el cruce al registro
+   * es por nombre con nombresES. Lo que no esté registrado NO se
+   * inventa: quedan marcados los hallados y la vista reporta los
+   * faltantes para elegirlos a mano. El bombo jalado se puede seguir
+   * corrigiendo en la rejilla de siempre.
+   */
+  const jalarEquiposBombo = async (equiposRegistro: { id: string; nombre: string }[]) => {
+    const idToast = toast.loading('Jalando los equipos de la Liga MX...');
+    setJalandoBombo(true);
+    try {
+      const [resTabla, resPartidos] = await Promise.all([
+        fetch('/api/tabla-liga'),
+        fetch(`/api/partidos?liga=${LIGA_MX_PROVIDER_ID}`),
+      ]);
+      const dataTabla = await resTabla.json();
+      if (!resTabla.ok) {
+        throw new Error(dataTabla?.error || 'No se pudo cargar la tabla de la Liga MX.');
+      }
+      const filas: StandingRow[] = dataTabla.liveRows ?? dataTabla.rows ?? [];
+      if (filas.length === 0) {
+        throw new Error('La tabla de la Liga MX vino vacía. Intenta de nuevo en unos minutos.');
+      }
+      // Si los partidos fallan, se sigue solo con la tabla.
+      let fixtures: SportsFixture[] = [];
+      if (resPartidos.ok) {
+        const dataPartidos = await resPartidos.json();
+        fixtures = dataPartidos.fixtures ?? [];
+      }
+
+      const sugerido = sugerirBombo(fixtures, filas, nombreEquipoES);
+      const mapeo = mapearEquiposARegistro(sugerido.equipos, equiposRegistro, nombreEquipoES);
+      if (mapeo.ids.length === 0) {
+        throw new Error('Ninguno de los equipos de la fuente está en el registro del Club. Regístralos primero en Equipos.');
+      }
+
+      setEquiposSorteo(mapeo.ids);
+      setFuenteBombo({ tipo: sugerido.fuente, noRegistrados: mapeo.noRegistrados });
+
+      const desde =
+        sugerido.fuente === 'cuartos'
+          ? 'desde los partidos de cuartos de final'
+          : 'con el top 8 de la tabla general';
+      if (mapeo.noRegistrados.length > 0) {
+        toast.success(
+          `Bombo llenado ${desde} (${mapeo.ids.length}/8). No registrados: ${mapeo.noRegistrados.join(', ')} — elígelos a mano cuando estén en el registro.`,
+          { id: idToast, duration: 8000 }
+        );
+      } else {
+        toast.success(`¡Bombo llenado ${desde}!`, { id: idToast });
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'No se pudieron jalar los equipos.', { id: idToast });
+    } finally {
+      setJalandoBombo(false);
     }
   };
 
@@ -168,9 +257,10 @@ export function useCreadorJornadas() {
     setPrecioTicket('1');
     setTipoPremiacion('unico');
     setPartidosNuevos([{ local: '', visitante: '', fecha_hora: '' }]);
-    setModalidad('clasica'); 
-    setSoloAdmins(false); 
-    setEquiposSorteo([]); 
+    setModalidad('clasica');
+    setSoloAdmins(false);
+    setEquiposSorteo([]);
+    setFuenteBombo(null);
     localStorage.removeItem('ciberteque_borrador_jornada');
   };
 
@@ -255,7 +345,7 @@ export function useCreadorJornadas() {
   return {
     formulario: { nombreJornada, precioTicket, fechaCierre, tipoPremiacion, partidosNuevos, modalidad, soloAdmins, equiposSorteo },
     setters: { setNombreJornada, setPrecioTicket, setFechaCierre, setTipoPremiacion, setModalidad, setSoloAdmins },
-    acciones: { agregarPartidoInput, actualizarPartidoInput, moverPartido, eliminarPartido, agregarPartidosImportados, crearJornadaCompleta, toggleEquipoSorteo, clonarUltimoSorteo },
-    estado: { creando }
+    acciones: { agregarPartidoInput, actualizarPartidoInput, moverPartido, eliminarPartido, agregarPartidosImportados, crearJornadaCompleta, toggleEquipoSorteo, clonarUltimoSorteo, jalarEquiposBombo },
+    estado: { creando, fuenteBombo, jalandoBombo }
   };
 }
