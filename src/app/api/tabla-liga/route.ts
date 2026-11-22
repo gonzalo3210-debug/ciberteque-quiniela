@@ -46,6 +46,7 @@ import {
   type ComputedTable,
   type LeagueZones,
   type LiveResult,
+  type SportsFixture,
   type StandingRow,
   type SupportedLeague,
 } from '@/lib/sports';
@@ -65,6 +66,11 @@ interface LigaJson {
 interface EnVivoLiga {
   /** En la forma que pide el recálculo de la tabla. */
   resultados: LiveResult[];
+  /** Partidos de la liga ya TERMINADOS según el feed en vivo (que
+   *  conserva los recién terminados): cierran el hueco entre el
+   *  silbatazo y el refresco del calendario de temporada cacheado,
+   *  para el ajuste de finales recientes. */
+  finales: SportsFixture[];
   /** Marcadores tal cual, para que la vista pinte el distintivo en
    *  vivo junto a cada equipo que está jugando (Bloque 4, 2026-11-14). */
   marcadores: {
@@ -89,7 +95,15 @@ async function enVivoDeLiga(ligaId: string): Promise<EnVivoLiga> {
       f.homeScore !== null &&
       f.awayScore !== null
   );
+  const finales = enVivo.filter(
+    (f) =>
+      f.leagueProviderId === ligaId &&
+      f.status === 'finished' &&
+      f.homeScore !== null &&
+      f.awayScore !== null
+  );
   return {
+    finales,
     resultados: deLaLiga.map((f) => ({
       homeTeam: f.homeTeam,
       awayTeam: f.awayTeam,
@@ -238,9 +252,18 @@ export async function GET(request: Request) {
         marcadores = vivo.marcadores;
         let resultados = vivo.resultados;
         try {
-          const fixtures = await provider.getFixtures(liga.providerId, {
+          const deTemporada = await provider.getFixtures(liga.providerId, {
             season,
           });
+          // El calendario de temporada se cachea 1 h y puede tardar en
+          // marcar el final recién jugado; el feed en vivo sí lo trae
+          // ya terminado, así que sus finales se suman sin duplicar
+          // (mismo ID de partido del proveedor).
+          const idsTemporada = new Set(deTemporada.map((f) => f.providerId));
+          const fixtures = [
+            ...deTemporada,
+            ...vivo.finales.filter((f) => !idsTemporada.has(f.providerId)),
+          ];
           const finales = finalesNoContados(rows, fixtures, {
             excluir: resultados,
           });
