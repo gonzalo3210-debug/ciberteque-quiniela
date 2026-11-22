@@ -429,6 +429,58 @@ function describirEvento(e) {
   return `[${e.tipo}] ${e.titulo} — ${e.cuerpo}`;
 }
 
+/** Minuto de juego desde el progreso crudo del feed ("68", "45+2"). */
+function minutoDeProgreso(progreso) {
+  const m = /^(\d+)/.exec(String(progreso ?? '').trim());
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * Filas para la tabla eventos_minuto (⚡ Minuto a minuto del Club) a
+ * partir de los eventos de notificación ya detectados: un renglón por
+ * gol (sale del evento gol_equipo; el gol_boleto es el mismo gol),
+ * por gol anulado y por fin de partido. La `clave` es la misma dedupe
+ * de los push y la tabla la tiene como única, así un reintento o un
+ * reinicio nunca duplica el renglón (el guardado ignora duplicados).
+ */
+function filasEventosMinuto(eventos, minutosPorPartido) {
+  const filas = [];
+  for (const e of eventos) {
+    if (!e.partido_id) continue;
+    const comun = {
+      partido_id: e.partido_id,
+      quiniela_id: e.quiniela_id ?? null,
+      goles_local: e.goles_local ?? null,
+      goles_visitante: e.goles_visitante ?? null,
+      minuto: minutosPorPartido.get(e.partido_id) ?? null,
+    };
+    if (e.tipo === 'gol_equipo') {
+      filas.push({
+        ...comun,
+        tipo: 'gol',
+        equipo_anoto: e.equipo_anoto ?? null,
+        clave: `gol:${e.partido_id}:${e.goles_local}-${e.goles_visitante}`,
+      });
+    } else if (e.tipo === 'gol_anulado') {
+      filas.push({ ...comun, tipo: 'gol_anulado', equipo_anoto: null, clave: e.clave });
+    } else if (e.tipo === 'fin_partido') {
+      filas.push({ ...comun, tipo: 'fin_partido', equipo_anoto: null, minuto: null, clave: e.clave });
+    }
+  }
+  return filas;
+}
+
+/** Guarda las filas en eventos_minuto (el llamador lo trata best-effort). */
+async function registrarEventosMinuto(sb, eventos, minutosPorPartido) {
+  const filas = filasEventosMinuto(eventos, minutosPorPartido);
+  if (filas.length === 0) return;
+  const { error } = await sb
+    .from('eventos_minuto')
+    .upsert(filas, { onConflict: 'clave', ignoreDuplicates: true });
+  if (error) throw new Error(error.message);
+  log(`Minuto a minuto: ${filas.length} evento(s) del Club guardados.`);
+}
+
 /**
  * Junta la foto (marcadores actuales + ranking provisional de las
  * quinielas con partidos en ventana), detecta eventos y los despacha.
@@ -481,6 +533,14 @@ async function procesarNotificaciones(sb, config, herramientas, estado, partidos
     };
   });
 
+  // Minuto del feed por partido del Club (para eventos_minuto).
+  const minutosPorPartido = new Map();
+  for (const p of partidosFoto) {
+    const feed = p.api_fixture_id ? porId.get(String(p.api_fixture_id)) : null;
+    const minuto = feed ? minutoDeProgreso(feed.progress) : null;
+    if (minuto !== null) minutosPorPartido.set(p.id, minuto);
+  }
+
   const rankings = {};
   for (const qid of quinielaIds) {
     const quiniela = quinielaPorId.get(qid);
@@ -506,6 +566,26 @@ async function procesarNotificaciones(sb, config, herramientas, estado, partidos
   };
 
   const { eventos, estadoNuevo } = detectarEventosNotificacion(estado.notif, foto);
+
+  // ⚡ Minuto a minuto del Club: los mismos eventos alimentan la tabla
+  // eventos_minuto que lee la app (la Liga MX no trae línea de tiempo
+  // del proveedor). Best-effort y con dedupe por clave: si el despacho
+  // push falla y el evento se regenera al siguiente ciclo, la fila no
+  // se duplica.
+  if (DRY_RUN) {
+    for (const f of filasEventosMinuto(eventos, minutosPorPartido)) {
+      log(
+        `GUARDARÍA EVENTO MINUTO: [${f.tipo}] ${f.goles_local}-${f.goles_visitante}` +
+          `${f.equipo_anoto ? ` · anotó ${f.equipo_anoto}` : ''} (clave ${f.clave})`
+      );
+    }
+  } else if (eventos.length > 0) {
+    try {
+      await registrarEventosMinuto(sb, eventos, minutosPorPartido);
+    } catch (e) {
+      log(`Aviso: los eventos del Minuto a minuto no se guardaron este ciclo: ${e.message}`);
+    }
+  }
 
   if (eventos.length === 0) {
     estado.notif = estadoNuevo;

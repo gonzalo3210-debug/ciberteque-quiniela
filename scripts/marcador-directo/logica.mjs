@@ -378,6 +378,10 @@ export function detectarEventosNotificacion(estado, foto) {
         else if (partido.goles_visitante > vAntes) anoto = partido.equipo_visitante;
         const base = {
           quiniela_id: partido.quiniela_id,
+          partido_id: partido.id,
+          equipo_anoto: anoto,
+          goles_local: partido.goles_local,
+          goles_visitante: partido.goles_visitante,
           equipo_provider_ids: [
             partido.equipo_local_provider_id,
             partido.equipo_visitante_provider_id,
@@ -400,6 +404,9 @@ export function detectarEventosNotificacion(estado, foto) {
             tipo: 'gol_anulado',
             clave: `anulado:${partido.id}:${previo.marcador}`,
             quiniela_id: partido.quiniela_id,
+            partido_id: partido.id,
+            goles_local: partido.goles_local,
+            goles_visitante: partido.goles_visitante,
             equipo_provider_ids: [
               partido.equipo_local_provider_id,
               partido.equipo_visitante_provider_id,
@@ -419,6 +426,9 @@ export function detectarEventosNotificacion(estado, foto) {
         tipo: 'fin_partido',
         clave: `fin:${partido.id}`,
         quiniela_id: partido.quiniela_id,
+        partido_id: partido.id,
+        goles_local: partido.goles_local,
+        goles_visitante: partido.goles_visitante,
         titulo: '🏁 Partido terminado',
         cuerpo:
           `${partido.equipo_local} ${marcadorActual ?? previo.marcador ?? ''} ` +
