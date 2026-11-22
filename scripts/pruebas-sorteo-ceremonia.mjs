@@ -16,6 +16,7 @@ const {
   DURACION_REVELADO_MS,
   INTERVALO_BARAJEO_MS,
 } = await import('../src/lib/sorteoCeremonia.ts');
+const { sonidoCeremoniaActivo } = await import('../src/lib/sonidos.ts');
 
 let pasan = 0;
 let fallan = 0;
@@ -250,6 +251,41 @@ eq(
     'con un solo pase el barajeo enseña la única pareja que hay'
   );
 }
+
+// ---------- 9) Sonido de la ceremonia: encendido por defecto -------------
+// Decisión de Gonzalo (2026-11-22): la ceremonia suena aunque el
+// jugador nunca haya activado el toggle global de sonidos; solo un
+// «no» explícito guardado la calla.
+eq(
+  sonidoCeremoniaActivo(null),
+  true,
+  'sin preferencia guardada la ceremonia SUENA (encendida por defecto)'
+);
+eq(
+  sonidoCeremoniaActivo('1'),
+  true,
+  'preferencia explícita «1»: la ceremonia suena'
+);
+eq(
+  sonidoCeremoniaActivo('0'),
+  false,
+  'preferencia explícita «0»: la ceremonia calla (el «no» guardado manda)'
+);
+eq(
+  sonidoCeremoniaActivo(''),
+  true,
+  'valor vacío cuenta como nunca tocada: suena'
+);
+eq(
+  sonidoCeremoniaActivo('otra-cosa'),
+  true,
+  'valor desconocido cuenta como nunca tocada: suena'
+);
+eq(
+  sonidoCeremoniaActivo(undefined),
+  true,
+  'sin valor (undefined) cuenta como nunca tocada: suena'
+);
 
 console.log(`\nsorteo-ceremonia: ${pasan} pasan, ${fallan} fallan`);
 if (fallan > 0) process.exit(1);

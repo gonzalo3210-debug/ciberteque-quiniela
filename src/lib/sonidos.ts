@@ -4,6 +4,8 @@
 // final para la vista en vivo. Solo suenan si el jugador activó el
 // toggle "🔊 Sonidos" (apagado por defecto) — ese clic es además el
 // gesto que los navegadores exigen para dejar sonar audio.
+// Excepción: la ceremonia del sorteo suena ENCENDIDA por defecto
+// (ver sonidoCeremoniaActivo, más abajo).
 //
 // La detección (qué cambió entre un refresco y otro) es una función
 // pura aparte: detectarEventosSonoros. La vista en vivo la alimenta
@@ -27,6 +29,42 @@ export function guardarPreferenciaSonidos(activo: boolean): void {
   } catch {
     // Sin almacenamiento: el toggle vive solo en esta sesión.
   }
+}
+
+/**
+ * Lo que hay guardado de la preferencia, tal cual: '1', '0' o null si
+ * el jugador nunca tocó el toggle de sonidos en este dispositivo.
+ */
+export function preferenciaSonidosGuardada(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(CLAVE_PREF);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * PURA: ¿debe sonar la CEREMONIA del sorteo según la preferencia
+ * guardada? Decisión (2026-11-22, pedida por Gonzalo): la ceremonia
+ * es el momento cumbre del sorteo y suena ENCENDIDA por defecto —
+ * quien nunca tocó el toggle la escucha igual. Una preferencia
+ * explícita siempre manda: '1' suena y '0' es silencio. Cualquier
+ * otro valor (o ninguno) cuenta como "nunca tocada".
+ * El resto de la app (vista en vivo, camino a la final) sigue con la
+ * regla de siempre: solo suena con el toggle activado.
+ */
+export function sonidoCeremoniaActivo(
+  preferenciaGuardada: string | null
+): boolean {
+  if (preferenciaGuardada === '1') return true;
+  if (preferenciaGuardada === '0') return false;
+  return true;
+}
+
+/** La decisión de la ceremonia aplicada a lo guardado aquí. */
+export function leerSonidoCeremoniaActivo(): boolean {
+  return sonidoCeremoniaActivo(preferenciaSonidosGuardada());
 }
 
 // ---------- Detección pura ------------------------------------------------
@@ -229,6 +267,37 @@ export function sonarGolpe(): void {
   const t = c.currentTime;
   golpeTambor(c, t, 0.22, 0.22);
   tono(c, 1318.5, t + 0.02, 0.16, 0.08);
+}
+
+/**
+ * 🎰 Tick del barajeo: un clic cortísimo y suave que acompaña cada
+ * cambio de pareja mientras el tablero se sigue barajando en el
+ * revelado. Ruido breve filtrado a ~3.2 kHz y volumen bajo, para que
+ * a 150 ms por cambio se oiga como el traqueteo de la rifa y no como
+ * una alarma.
+ */
+export function sonarTickBarajeo(): void {
+  const c = contexto();
+  if (!c) return;
+  const t = c.currentTime;
+  const duracion = 0.03;
+  const muestras = Math.max(1, Math.floor(c.sampleRate * duracion));
+  const buffer = c.createBuffer(1, muestras, c.sampleRate);
+  const datos = buffer.getChannelData(0);
+  for (let i = 0; i < muestras; i++) datos[i] = Math.random() * 2 - 1;
+  const fuente = c.createBufferSource();
+  fuente.buffer = buffer;
+  const filtro = c.createBiquadFilter();
+  filtro.type = 'bandpass';
+  filtro.frequency.value = 3200;
+  filtro.Q.value = 1.2;
+  const ganancia = c.createGain();
+  ganancia.gain.setValueAtTime(0.0001, t);
+  ganancia.gain.exponentialRampToValueAtTime(0.05, t + 0.005);
+  ganancia.gain.exponentialRampToValueAtTime(0.0001, t + duracion);
+  fuente.connect(filtro).connect(ganancia).connect(c.destination);
+  fuente.start(t);
+  fuente.stop(t + duracion + 0.02);
 }
 
 /** 🎉 Fanfarria de cierre de la ceremonia: arpegio largo y brillante. */

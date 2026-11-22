@@ -19,7 +19,12 @@
 //
 // El orden, los tiempos y el barajeo salen de la lógica pura
 // (src/lib/sorteoCeremonia.ts); aquí solo hay presentación, timers y
-// sonidos (los de siempre: solo si el jugador activó 🔊 Sonidos).
+// sonidos. A diferencia del resto de la app, la ceremonia SUENA POR
+// DEFECTO (redoble en el giro, ticks en el barajeo del revelado,
+// golpe al fijarse cada jugador y fanfarria al cierre): solo se
+// calla si el jugador guardó un «no» explícito en el toggle de
+// sonidos o si apaga con el botón 🔊/🔇 de esta misma tarjeta, que
+// guarda su elección para toda la app.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -33,8 +38,11 @@ import {
   type FaseCeremonia,
 } from '@/lib/sorteoCeremonia'
 import {
-  leerPreferenciaSonidos,
+  leerSonidoCeremoniaActivo,
+  guardarPreferenciaSonidos,
+  desbloquearAudio,
   iniciarRedoble,
+  sonarTickBarajeo,
   sonarGolpe,
   sonarFanfarria,
   vibrarGol,
@@ -125,6 +133,28 @@ export default function CeremoniaSorteo({
   // ¿Esta sesión sí está viendo la ceremonia (no entró directo al
   // tablero fijo)? Decide la fanfarria y el confeti al llegar al final.
   const jugandoRef = useRef(fase !== 'final')
+  // 🔊 El sonido de la ceremonia: encendido por defecto salvo un «no»
+  // guardado (sonidoCeremoniaActivo). La ref espejo deja que los
+  // efectos de golpe/fanfarria lean el valor vigente sin rearmarse
+  // cuando el jugador alterna el botón a media ceremonia.
+  const [sonidoActivo, setSonidoActivo] = useState<boolean>(() =>
+    leerSonidoCeremoniaActivo()
+  )
+  const sonidoRef = useRef(sonidoActivo)
+  useEffect(() => {
+    sonidoRef.current = sonidoActivo
+  }, [sonidoActivo])
+  // Cuándo empezó el giro en curso: si el jugador enciende el sonido
+  // a media vuelta, el redoble arranca solo por lo que falta.
+  const inicioGiroRef = useRef(0)
+
+  // Desbloqueo del audio al montar: los navegadores solo dejan sonar
+  // tras un gesto del usuario, así que esto prepara el contexto y el
+  // sonido arranca en cuanto hay un gesto disponible (el primer toque
+  // sobre la tarjeta y el botón de sonido también desbloquean).
+  useEffect(() => {
+    desbloquearAudio()
+  }, [])
 
   // 🎲 Barajeo: mientras la ceremonia corre, el reloj del barajeo
   // avanza y cada renglón no fijado enseña otra pareja jugador↔equipo.
@@ -137,22 +167,37 @@ export default function CeremoniaSorteo({
     return () => clearInterval(barajeo)
   }, [fase])
 
-  // 🥁 Giro inicial: redoble mientras todo el tablero se baraja, y a
-  // fijar renglones.
+  // ⏱️ Giro inicial: al cumplirse su tiempo, a fijar renglones.
   useEffect(() => {
     if (fase !== 'giro') return
-    const detenerRedoble = leerPreferenciaSonidos()
-      ? iniciarRedoble(DURACION_GIRO_MS)
-      : () => {}
+    inicioGiroRef.current = Date.now()
     const temporizador = setTimeout(() => {
       setPasoActual(0)
       setFase('revelando')
     }, DURACION_GIRO_MS)
-    return () => {
-      detenerRedoble()
-      clearTimeout(temporizador)
-    }
+    return () => clearTimeout(temporizador)
   }, [fase])
+
+  // 🥁 Redoble mientras el bombo gira (si el sonido está activo): al
+  // apagar con el botón, la limpieza de este efecto lo detiene en el
+  // momento; al encender a media vuelta, suena solo lo que falta.
+  useEffect(() => {
+    if (fase !== 'giro' || !sonidoActivo) return
+    const restante =
+      inicioGiroRef.current > 0
+        ? DURACION_GIRO_MS - (Date.now() - inicioGiroRef.current)
+        : DURACION_GIRO_MS
+    if (restante <= 0) return
+    const detenerRedoble = iniciarRedoble(restante)
+    return detenerRedoble
+  }, [fase, sonidoActivo])
+
+  // 🎰 Ticks del barajeo: mientras el revelado sigue barajando
+  // renglones, cada cambio de pareja suena con un clic suave.
+  useEffect(() => {
+    if (fase !== 'revelando' || !sonidoRef.current) return
+    sonarTickBarajeo()
+  }, [tick, fase])
 
   // 🎯 Fijado de uno en uno: golpe al caer cada asignación real.
   useEffect(() => {
@@ -162,7 +207,7 @@ export default function CeremoniaSorteo({
       setFase('final')
       return
     }
-    if (leerPreferenciaSonidos()) sonarGolpe()
+    if (sonidoRef.current) sonarGolpe()
     if (paso.esPropio) vibrarGol()
     const temporizador = setTimeout(() => {
       if (pasoActual + 1 < plan.length) setPasoActual(pasoActual + 1)
@@ -181,13 +226,26 @@ export default function CeremoniaSorteo({
       // Sin almacenamiento: la próxima visita la vuelve a ofrecer.
     }
     if (!jugandoRef.current) return
-    if (leerPreferenciaSonidos()) sonarFanfarria()
+    if (sonidoRef.current) sonarFanfarria()
     setConfeti(true)
     const temporizador = setTimeout(() => setConfeti(false), 4800)
     return () => clearTimeout(temporizador)
   }, [fase, quinielaId])
 
   if (plan.length === 0) return null
+
+  const alternarSonido = () => {
+    const nuevo = !sonidoActivo
+    setSonidoActivo(nuevo)
+    sonidoRef.current = nuevo
+    // La elección queda guardada con la preferencia de toda la app:
+    // si apaga aquí, el toggle de Ajustes también se ve apagado.
+    guardarPreferenciaSonidos(nuevo)
+    // El clic es un gesto del usuario: al encender, el audio queda
+    // desbloqueado y el redoble (si el giro sigue) lo retoma el
+    // efecto; al apagar, su limpieza lo detiene.
+    if (nuevo) desbloquearAudio()
+  }
 
   const verResultado = () => setFase('final')
   const verDeNuevo = () => {
@@ -198,8 +256,28 @@ export default function CeremoniaSorteo({
   }
 
   return (
-    <div className="relative overflow-hidden flex flex-col items-center py-6 px-4 bg-blue-950/20 rounded-xl border border-blue-900/40 mb-6">
+    <div
+      className="relative overflow-hidden flex flex-col items-center py-6 px-4 bg-blue-950/20 rounded-xl border border-blue-900/40 mb-6"
+      onPointerDown={() => desbloquearAudio()}
+    >
       {confeti && <Confeti />}
+
+      <button
+        onClick={alternarSonido}
+        aria-label={
+          sonidoActivo
+            ? 'Silenciar el sonido de la ceremonia'
+            : 'Activar el sonido de la ceremonia'
+        }
+        title={
+          sonidoActivo
+            ? 'Silenciar la ceremonia'
+            : 'Activar el sonido de la ceremonia'
+        }
+        className="absolute top-3 right-3 z-30 w-9 h-9 flex items-center justify-center rounded-full bg-slate-900/80 hover:bg-slate-800 border border-slate-700 text-base transition-all active:scale-95"
+      >
+        {sonidoActivo ? '🔊' : '🔇'}
+      </button>
 
       <span className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-400">
         🎲 El sorteo se hizo
