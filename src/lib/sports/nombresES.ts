@@ -136,6 +136,12 @@ const ENTRADAS: EntradaNombreES[] = [
   ['134201', 'Pumas UNAM', 'Pumas'],
   ['134197', 'Tigres UANL', 'Tigres'],
   ['134206', 'CD Guadalajara', 'Chivas'],
+  // Clubes de Champions cuyo nombre en la quiniela difiere del de la API:
+  // la API dice PSV Eindhoven y la quiniela PSV; la API dice
+  // Paris Saint-Germain y la quiniela PSG. Sin estas lineas el
+  // programa de marcadores no enlaza esos partidos (2026-11-24).
+  ['133768', 'PSV Eindhoven', 'PSV'],
+  ['133714', 'Paris Saint-Germain', 'PSG'],
 ];
 
 const normalizar = (s: string): string =>
