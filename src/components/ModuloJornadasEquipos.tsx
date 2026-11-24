@@ -49,6 +49,7 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
   const [formEquipoNombre, setFormEquipoNombre] = useState('');
   const [formEquipoLogo, setFormEquipoLogo] = useState('');
   const [formEquipoLiga, setFormEquipoLiga] = useState('');
+  const [formEquipoIdApi, setFormEquipoIdApi] = useState('');
   const [equipoEditandoId, setEquipoEditandoId] = useState<string | null>(null);
   const [guardandoEquipo, setGuardandoEquipo] = useState(false);
   const [busquedaEquipo, setBusquedaEquipo] = useState('');
@@ -211,6 +212,7 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
     setFormEquipoNombre(equipo.nombre)
     setFormEquipoLogo(equipo.logo_url || '')
     setFormEquipoLiga(equipo.liga || '')
+    setFormEquipoIdApi(equipo.id_api || '')
     window.scrollTo({ top: 0, behavior: 'smooth' }) 
   }
   
@@ -219,6 +221,7 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
     setFormEquipoNombre('')
     setFormEquipoLogo('')
     setFormEquipoLiga('') 
+    setFormEquipoIdApi('')
   }
 
   const handleGuardarEquipo = async () => {
@@ -231,7 +234,8 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
     const result = await guardarEquipoDB(equipoEditandoId, {
       nombre: formEquipoNombre.trim(),
       liga: ligaFinal,
-      logo_url: urlLogoFinal
+      logo_url: urlLogoFinal,
+      id_api: formEquipoIdApi.trim() || null
     });
 
     if (result.success) {
@@ -598,6 +602,11 @@ export default function ModuloJornadasEquipos({ vista, cambiarVista }: ModuloJor
               <div>
                 <label className="text-[9px] md:text-[10px] text-slate-500 font-bold uppercase mb-1.5 block tracking-widest">URL Logo (ESPN)</label>
                 <input type="text" placeholder="https://..." value={formEquipoLogo} onChange={(e) => setFormEquipoLogo(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-[10px] md:text-xs outline-none focus:border-purple-500 font-mono" />
+              </div>
+              <div>
+                <label className="text-[9px] md:text-[10px] text-slate-500 font-bold uppercase mb-1.5 block tracking-widest">ID TheSportsDB (opcional)</label>
+                <input type="text" inputMode="numeric" placeholder="Ej. 133664" value={formEquipoIdApi} onChange={(e) => setFormEquipoIdApi(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-[10px] md:text-xs outline-none focus:border-purple-500 font-mono" />
+                <p className="text-[9px] text-slate-500 mt-1 leading-snug">Con ID, el escudo se jala solo de la API y manda sobre la URL de arriba, sin importar cómo se escriba el nombre.</p>
               </div>
             </div>
             

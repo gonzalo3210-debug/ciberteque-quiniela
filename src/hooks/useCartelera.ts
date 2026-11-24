@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { obtenerQuinielasActivas } from '@/lib/queries'
 import { ordenarPorPreferenciaSemana } from '@/lib/quinielaSemana'
+import { construirMapaEscudos, buscarEscudoEnMapa } from '@/lib/escudos'
 
 export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: number) => void) {
   const [quinielasActivas, setQuinielasActivas] = useState<any[]>([])
@@ -35,15 +36,27 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
         const { data: qData, error: qError } = await obtenerQuinielasActivas(usuarioActivo?.rol);
         if (qError) throw qError;
 
-        const { data: eData, error: eError } = await supabase.from('equipos').select('nombre, logo_url')
+        // Escudos del catálogo: se pide también id_api (el ID de
+        // TheSportsDB de cada equipo). Si la migración
+        // 2026-11-23-equipos-id-api aún no se ha corrido, la columna
+        // no existe y PostgREST rechaza la consulta: se reintenta sin
+        // ella y la vista funciona como antes (logos manuales), sin
+        // romperse por un despliegue en cualquier orden.
+        let { data: eData, error: eError } = await supabase.from('equipos').select('nombre, logo_url, id_api')
+        if (eError) {
+          const reintento = await supabase.from('equipos').select('nombre, logo_url');
+          eData = reintento.data as typeof eData;
+          eError = reintento.error;
+        }
         if (eError) throw eError;
-        
+
         if (eData) {
-          const diccionarioLogos: Record<string, string> = {};
-          eData.forEach(eq => {
-            if (eq.nombre) diccionarioLogos[eq.nombre.toLowerCase().trim()] = eq.logo_url;
-          });
-          setMapaLogos(diccionarioLogos);
+          // El mapa se construye por CLAVE normalizada con alias
+          // (src/lib/escudos.ts): el nombre corto de la quiniela
+          // encuentra al equipo del catálogo aunque esté registrado
+          // con su nombre largo ("PSV" ↔ "PSV Eindhoven"), y si el
+          // equipo tiene id_api su escudo se jala de TheSportsDB.
+          setMapaLogos(construirMapaEscudos(eData));
         }
 
         if (qData && qData.length > 0) {
@@ -301,7 +314,7 @@ export function useCartelera(usuarioActivo: any, actualizarSaldo: (nuevoSaldo: n
 
   const obtenerLogo = (nombreEquipo: string) => {
     if (!nombreEquipo) return null;
-    return mapaLogos[nombreEquipo.toLowerCase().trim()] || null;
+    return buscarEscudoEnMapa(mapaLogos, nombreEquipo);
   }
 
   return {

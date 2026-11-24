@@ -1,24 +1,24 @@
 // src/hooks/useEquipos.ts
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
+import { normalizarNombreEquipo } from '@/lib/escudos';
 
 export interface EquipoData {
   id?: string;
   nombre: string;
   liga: string;
   logo_url: string;
+  /** ID del equipo en TheSportsDB (idTeam). Con valor, el escudo se
+   *  jala de la API y tiene prioridad sobre logo_url (ver
+   *  src/lib/escudos.ts). Vacío/null = solo logo manual. */
+  id_api?: string | null;
 }
 
 // Normaliza un texto para comparar nombres de equipo sin que importen
 // mayúsculas, acentos ni espacios repetidos o de sobra.
-// (Mismo criterio de normalización que usa la búsqueda de Mis Jugadas.)
-const normalizarTextoEquipo = (valor: string) =>
-  (valor || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+// (La implementación vive en src/lib/escudos.ts, compartida con la
+// resolución de escudos; aquí se mantiene el nombre histórico.)
+const normalizarTextoEquipo = normalizarNombreEquipo;
 
 export function useEquipos() {
   const [equipos, setEquipos] = useState<any[]>([]);
@@ -72,19 +72,40 @@ export function useEquipos() {
         if (duplicado) throw new Error('Ese equipo ya está registrado.');
       }
 
+      // id_api: texto limpio o null. Si la migración
+      // 2026-11-23-equipos-id-api aún no se ha corrido en la base, el
+      // guardado con el campo nuevo falla (columna inexistente): se
+      // reintenta SIN id_api para no bloquear el registro del equipo,
+      // y el ID se podrá capturar cuando la columna exista.
+      const datosBase = { nombre: datos.nombre, logo_url: datos.logo_url, liga: datos.liga };
+      const datosCompletos = { ...datosBase, id_api: (datos.id_api || '').trim() || null };
+      const esErrorColumnaIdApi = (e: { code?: string; message?: string } | null) =>
+        !!e && (e.code === 'PGRST204' || /id_api/.test(e.message || ''));
+
       if (equipoEditandoId) {
-        const { error } = await supabase
+        let { error } = await supabase
           .from('equipos')
-          .update({ nombre: datos.nombre, logo_url: datos.logo_url, liga: datos.liga })
+          .update(datosCompletos)
           .eq('id', equipoEditandoId);
+        if (error && esErrorColumnaIdApi(error)) {
+          ({ error } = await supabase
+            .from('equipos')
+            .update(datosBase)
+            .eq('id', equipoEditandoId));
+        }
         if (error) {
           if (error.code === '23505') throw new Error('Ese equipo ya está registrado.');
           throw error;
         }
       } else {
-        const { error } = await supabase
+        let { error } = await supabase
           .from('equipos')
-          .insert([datos]);
+          .insert([datosCompletos]);
+        if (error && esErrorColumnaIdApi(error)) {
+          ({ error } = await supabase
+            .from('equipos')
+            .insert([datosBase]));
+        }
         if (error) {
           if (error.code === '23505') throw new Error('Ese equipo ya está registrado.');
           throw error;
