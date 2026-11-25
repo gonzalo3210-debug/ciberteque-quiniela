@@ -511,9 +511,10 @@ async function getStandings(
   season: string
 ): Promise<StandingRow[]> {
   // Champions League: TheSportsDB no publica su tabla (lookuptable
-  // vacío); la oficial viene de la fuente secundaria football-data.org
-  // (ver footballData.ts). Si esa fuente falla, el error sube y la ruta
-  // de la tabla cae al respaldo calculado por la app.
+  // vacío); la base se calcula desde los partidos FINALIZADOS de la
+  // fuente secundaria football-data.org (ver footballData.ts). Si esa
+  // fuente falla, el error sube y la ruta de la tabla cae al respaldo
+  // calculado por la app.
   if (leagueProviderId === CHAMPIONS_PROVIDER_ID) {
     return getFootballDataChampionsStandings();
   }

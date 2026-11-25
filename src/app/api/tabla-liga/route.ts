@@ -23,9 +23,14 @@
 // devuelve en el mismo `liveRows`.
 //
 // Champions League (4480): TheSportsDB no trae su tabla, así que el
-// adaptador la pide a la fuente secundaria football-data.org y llega
-// por el camino OFICIAL (calculated: false). Si esa fuente falla, esta
-// ruta cae al RESPALDO: la tabla calculada por la app.
+// adaptador arma la base desde los partidos FINALIZADOS de la fuente
+// secundaria football-data.org y llega por el camino OFICIAL
+// (calculated: false). La base SOLO cuenta finalizados (corrección
+// 2026-11-25: la tabla publicada de football-data ya sumaba el
+// partido en curso y la capa en vivo lo duplicaba), así que el ajuste
+// de finales recientes y el recálculo en vivo funcionan igual que en
+// las demás ligas. Si esa fuente falla, esta ruta cae al RESPALDO:
+// la tabla calculada por la app.
 //
 // Las ligas de grupos/copa sin tabla oficial (hasStandings=false:
 // Nations League, Libertadores) se CALCULAN desde los resultados de la

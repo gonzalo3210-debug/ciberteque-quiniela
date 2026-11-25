@@ -139,7 +139,21 @@ export function useJornadaActual() {
   useEffect(() => {
     cargar()
     const id = setInterval(cargar, REFRESCO_MS)
-    return () => clearInterval(id)
+    // Al volver la app al frente se recarga de inmediato: en el
+    // celular el temporizador se congela en segundo plano y la página
+    // puede volver de la caché del navegador con los datos de antes,
+    // así que los partidos ya finales seguían pintados «En vivo»
+    // hasta que Gonzalo recargaba a mano (reporte del 2026-11-25).
+    const alVolver = () => {
+      if (document.visibilityState === 'visible') cargar()
+    }
+    document.addEventListener('visibilitychange', alVolver)
+    window.addEventListener('pageshow', alVolver)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', alVolver)
+      window.removeEventListener('pageshow', alVolver)
+    }
   }, [cargar])
 
   // Logos del catálogo de equipos de la app (para los partidos que no

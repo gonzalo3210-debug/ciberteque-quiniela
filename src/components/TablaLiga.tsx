@@ -7,8 +7,10 @@
 //
 // Regla de Gonzalo (2026-11-13): la tabla se recalcula AL CAER GOL. La
 // ruta devuelve `liveRows` ya recalculada con computeLiveStandings cuando
-// la liga tiene partidos en curso; esta vista la muestra con la etiqueta
-// "EN VIVO" y se refresca sola cada 2 minutos.
+// la liga tiene partidos en curso; esta vista la encabeza como "Tabla en
+// vivo (provisional)" y se refresca sola cada 2 minutos. La pastilla que
+// prometía "se actualiza al caer gol" se quitó (Gonzalo, 2026-11-25)
+// porque el refresco no es instantáneo.
 // Las ligas sin tabla oficial en el proveedor (hasStandings=false) ya no
 // muestran solo el aviso: la ruta devuelve la tabla CALCULADA por la app
 // desde los resultados de la temporada (`calculated: true`, una tabla por
@@ -161,15 +163,29 @@ export function TablaCard({
    *  ID de proveedor en la fila, la celda queda como texto plano. */
   onVerEquipo?: EquipoTocable
   /** Partidos en curso de la liga: junto a cada equipo que esté
-   *  jugando se pinta su marcador en vivo (desde su óptica) y el
-   *  minuto, con punto rojo pulsante. */
+   *  jugando se pinta el marcador en vivo de su partido, SIEMPRE en
+   *  orden local-visitante (estilo 365Scores, Gonzalo 2026-11-25),
+   *  con el minuto y un punto pulsante; el color de la pastilla es
+   *  el del estado del equipo del renglón: verde ganando, amarillo
+   *  empatando, rojo perdiendo. */
   marcadoresEnVivo?: MarcadorEnVivo[]
 }) {
   const resaltados = listaResaltados(equipoResaltado, equiposResaltados)
   const esRes = (f: StandingRow) =>
     resaltados.some((eq) => esEquipoResaltado(f, eq))
-  /** Marcador en vivo DEL renglón (desde la óptica de su equipo). */
-  const marcadorDe = (f: StandingRow): { texto: string; titulo: string } | null => {
+  /**
+   * Marcador en vivo DEL renglón, estilo 365Scores (Gonzalo,
+   * 2026-11-25): el marcador se escribe SIEMPRE local-visitante (el
+   * orden en que se juega el partido), NO desde la óptica del equipo
+   * del renglón como antes; lo que cambia por renglón es el COLOR de
+   * la pastilla, según el estado de SU equipo: ganando verde,
+   * empatando amarillo, perdiendo rojo.
+   */
+  const marcadorDe = (f: StandingRow): {
+    texto: string
+    titulo: string
+    estado: 'ganando' | 'empatando' | 'perdiendo'
+  } | null => {
     if (!marcadoresEnVivo || marcadoresEnVivo.length === 0) return null
     for (const m of marcadoresEnVivo) {
       const comoLocal: EquipoResaltado = {
@@ -185,6 +201,12 @@ export function TablaCard({
       if (!esLocal && !esVisita) continue
       const propios = esLocal ? m.homeScore : m.awayScore
       const rival = esLocal ? m.awayScore : m.homeScore
+      const estado =
+        propios > rival
+          ? ('ganando' as const)
+          : propios < rival
+            ? ('perdiendo' as const)
+            : ('empatando' as const)
       const minuto =
         m.statusRaw === 'HT'
           ? 'MT'
@@ -192,8 +214,9 @@ export function TablaCard({
             ? `${m.progress}'`
             : 'EN VIVO'
       return {
-        texto: `${propios}-${rival} · ${minuto}`,
+        texto: `${m.homeScore}-${m.awayScore} · ${minuto}`,
         titulo: `En vivo: ${nombreEquipoES(m.homeTeam, m.homeTeamProviderId)} ${m.homeScore}-${m.awayScore} ${nombreEquipoES(m.awayTeam, m.awayTeamProviderId)}`,
+        estado,
       }
     }
     return null
@@ -245,9 +268,23 @@ export function TablaCard({
                       {marc && (
                         <span
                           title={marc.titulo}
-                          className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-red-600/20 border border-red-500/50 text-red-400 text-[10px] font-black whitespace-nowrap"
+                          className={`shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[10px] font-black whitespace-nowrap ${
+                            marc.estado === 'ganando'
+                              ? 'bg-green-500/20 border-green-500/50 text-green-400'
+                              : marc.estado === 'empatando'
+                                ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
+                                : 'bg-red-600/20 border-red-500/50 text-red-400'
+                          }`}
                         >
-                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full animate-pulse ${
+                              marc.estado === 'ganando'
+                                ? 'bg-green-500'
+                                : marc.estado === 'empatando'
+                                  ? 'bg-amber-400'
+                                  : 'bg-red-500'
+                            }`}
+                          />
                           {marc.texto}
                         </span>
                       )}
@@ -470,12 +507,9 @@ export default function TablaLiga({
             <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/50 text-amber-400 text-[11px] font-black uppercase tracking-widest">
               🧮 Tabla calculada por la app
             </span>
-            {enVivoCalc && (
-              <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-600/20 border border-red-500/50 text-red-400 text-[11px] font-black uppercase tracking-widest">
-                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                En vivo — se actualiza al caer gol
-              </span>
-            )}
+            {/* Sin pastilla "se actualiza al caer gol" (Gonzalo,
+                2026-11-25): el refresco tarda segundos o minutos y la
+                app no debe prometer inmediatez. */}
           </div>
           <p className="text-slate-500 text-[11px] font-medium mt-2 max-w-md mx-auto">
             El proveedor no publica la tabla oficial de esta competencia;
@@ -561,12 +595,9 @@ export default function TablaLiga({
           Temporada {datos.league.season} ·{' '}
           {enVivo ? 'Tabla en vivo (provisional)' : 'Posiciones oficiales'}
         </p>
-        {enVivo && (
-          <span className="inline-flex items-center gap-2 mt-3 px-3 py-1 rounded-full bg-red-600/20 border border-red-500/50 text-red-400 text-[11px] font-black uppercase tracking-widest">
-            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-            En vivo — se actualiza al caer gol
-          </span>
-        )}
+        {/* Sin pastilla "se actualiza al caer gol" (Gonzalo,
+            2026-11-25): el refresco tarda segundos o minutos y la
+            app no debe prometer inmediatez. */}
       </div>
 
       <TablaCard liga={liga} filas={filas} equipoResaltado={equipoResaltado} equiposResaltados={equiposResaltados} onVerEquipo={onVerEquipo} marcadoresEnVivo={datos.liveMatches ?? undefined} />

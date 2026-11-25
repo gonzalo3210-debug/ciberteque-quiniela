@@ -85,10 +85,12 @@ export const SUPPORTED_LEAGUES: SupportedLeague[] = [
     providerName: 'UEFA Champions League',
     season: '2026-2027',
     zones: 'champions', // fase de liga: 1-8 octavos, 9-24 playoff, 25+ fuera
-    // TheSportsDB NO trae esta tabla (lookuptable vacío), pero SÍ hay
-    // tabla oficial: el adaptador la pide a la fuente secundaria
-    // football-data.org (ver footballData.ts). Si esa fuente falla, la
-    // ruta cae al respaldo calculado (computedTable).
+    // TheSportsDB NO trae esta tabla (lookuptable vacío): el
+    // adaptador arma la base desde los partidos FINALIZADOS de la
+    // fuente secundaria football-data.org (ver footballData.ts: su
+    // tabla publicada cuenta el partido en curso y lo duplicaba con
+    // la capa en vivo). Si esa fuente falla, la ruta cae al respaldo
+    // calculado (computedTable).
     hasStandings: true,
     computedTable: 'unica', // RESPALDO si football-data.org falla
     defaultFollowed: true,
