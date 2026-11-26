@@ -238,12 +238,15 @@ export function useCeremoniaSorteo(quiniela: any) {
       ) as string[];
       const { data: usuarios } = await supabase
         .from('usuarios')
-        .select('id, nombre')
+        .select('id, nombre, avatar_url')
         .in('id', idsUsuarios);
       if (!vigente()) return;
 
       const nombrePorId = new Map<string, string>(
         (usuarios || []).map((u: any) => [u.id, u.nombre])
+      );
+      const avatarPorId = new Map<string, string | null>(
+        (usuarios || []).map((u: any) => [u.id, u.avatar_url || null])
       );
       setAsignaciones(
         filas.map((t: any) => {
@@ -255,6 +258,7 @@ export function useCeremoniaSorteo(quiniela: any) {
             equipoId: t.equipo_asignado_id,
             nombreEquipo: eq?.nombre || 'Equipo',
             logoUrl: eq?.logoUrl || null,
+            avatarUrl: avatarPorId.get(t.usuario_id) ?? null,
           };
         })
       );

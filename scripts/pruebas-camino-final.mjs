@@ -13,6 +13,7 @@ const {
   colapsarIdaVuelta,
   detectarCambiosCamino,
   fotoCamino,
+  infoLlaveCamino,
   nombreEtapaCamino,
   normalizarNombreEquipo,
 } = await import('../src/lib/caminoFinal.ts');
@@ -660,6 +661,54 @@ eq(llavesGuardada.siembraDesdeTabla, false, 'sin tabla: la siembra por orden gua
     2,
     'cruces a más de 10 días no se colapsan'
   );
+}
+
+// ---------- infoLlaveCamino: los datos de la tarjeta horizontal ------------
+// La tarjeta nueva muestra los partidos UNA vez por llave, con los
+// goles orientados al lado izquierdo (lado A) de la tarjeta.
+{
+  const CRUDOS = [
+    partido('i1', 'Toluca', 'Atlas', 2, 0, true, '2026-11-26T01:00:00Z', 'L'),
+    partido('i2', 'Monterrey', 'América', 0, 0, false, '2026-11-26T03:10:00Z', 'E'),
+    partido('i3', 'Pachuca', 'Chivas', null, null, false, '2026-11-27T01:00:00Z'),
+    partido('v1', 'Atlas', 'Toluca', null, null, false, '2026-11-29T01:00:00Z'),
+    partido('v2', 'América', 'Monterrey', null, null, false, '2026-11-29T03:10:00Z'),
+    partido('v3', 'Chivas', 'Pachuca', null, null, false, '2026-11-30T01:07:00Z'),
+  ];
+  // Llave Atlas (A) vs Toluca (B): la ida la jugó de visitante.
+  const infoAT = infoLlaveCamino('Atlas', 'Toluca', CRUDOS);
+  eq(infoAT.esIdaYVuelta, true, 'infoLlave: Atlas–Toluca es ida y vuelta');
+  eq([infoAT.ida.golesA, infoAT.ida.golesB], [0, 2], 'infoLlave: la ida se voltea al lado A (Atlas 0-2 Toluca)');
+  eq(infoAT.ida.esFinal, true, 'infoLlave: la ida de Atlas ya es final');
+  eq(infoAT.vuelta.golesA, null, 'infoLlave: la vuelta de Atlas aún no tiene goles');
+  eq(infoAT.vuelta.fecha, '2026-11-29T01:00:00Z', 'infoLlave: la vuelta trae su fecha');
+  eq([infoAT.globalA, infoAT.globalB], [0, 2], 'infoLlave: global parcial Atlas 0-2 Toluca');
+
+  // América (A) vs Monterrey (B): la ida va en vivo 0-0.
+  const infoAM = infoLlaveCamino('América', 'Monterrey', CRUDOS);
+  eq(infoAM.ida.enVivo, true, 'infoLlave: la ida de América está en vivo');
+  eq([infoAM.ida.golesA, infoAM.ida.golesB], [0, 0], 'infoLlave: ida América 0-0');
+  eq(infoAM.globalA, null, 'infoLlave: sin ida final no hay global');
+
+  // Chivas (A) vs Pachuca (B): nada jugado; la ida se anuncia por fecha.
+  const infoCP = infoLlaveCamino('Chivas', 'Pachuca', CRUDOS);
+  eq(infoCP.ida.golesA, null, 'infoLlave: la ida de Chivas no tiene marcador');
+  eq(infoCP.ida.fecha, '2026-11-27T01:00:00Z', 'infoLlave: la ida de Chivas trae su fecha');
+  eq(infoCP.vuelta.fecha, '2026-11-30T01:07:00Z', 'infoLlave: la vuelta de Chivas trae su fecha');
+
+  // Sin partidos entre los dos: todo vacío.
+  const infoVacia = infoLlaveCamino('Atlas', 'Chivas', CRUDOS);
+  eq(infoVacia.ida, null, 'infoLlave: sin cruce no hay ida');
+  eq(infoVacia.esIdaYVuelta, false, 'infoLlave: sin cruce no es ida y vuelta');
+
+  // Partido único (cuadro a un juego): no es ida y vuelta y el
+  // global no se duplica bajo el marcador.
+  const UNICO = [
+    partido('u1', 'Atlas', 'Toluca', 2, 1, true, '2026-12-05T01:00:00Z', 'L'),
+  ];
+  const infoUnico = infoLlaveCamino('Atlas', 'Toluca', UNICO);
+  eq(infoUnico.esIdaYVuelta, false, 'infoLlave: partido único no es ida y vuelta');
+  eq(infoUnico.globalA, null, 'infoLlave: en partido único no se pinta global aparte');
 }
 
 console.log(`\ncamino-final: ${pasan} pasan, ${fallan} fallan`);

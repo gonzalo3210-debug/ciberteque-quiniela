@@ -692,6 +692,100 @@ export function colapsarIdaVuelta(
   return porFecha(salida);
 }
 
+// ---------- Información de la llave (para la tarjeta) -----------------------
+
+/** Un partido de la llave, con los goles ya orientados a sus lados. */
+export interface PartidoLlaveInfo {
+  fecha: string | null;
+  /** Goles del lado A y del lado B en este partido. */
+  golesA: number | null;
+  golesB: number | null;
+  esFinal: boolean;
+  /** Trae goles pero aún no es final: está en curso. */
+  enVivo: boolean;
+}
+
+/**
+ * Lo que la tarjeta de una llave necesita de sus partidos: la ida,
+ * la vuelta y el global, UNA sola vez por llave (antes cada lado
+ * repetía la misma línea de estado y la tarjeta se leía doble).
+ */
+export interface InfoLlaveCamino {
+  ida: PartidoLlaveInfo | null;
+  vuelta: PartidoLlaveInfo | null;
+  /** La llave trae dos partidos entre los mismos equipos. */
+  esIdaYVuelta: boolean;
+  /**
+   * Marcador global (lado A - lado B) con la ida ya final, más lo
+   * que vaya de la vuelta. Null si la ida no ha caído.
+   */
+  globalA: number | null;
+  globalB: number | null;
+}
+
+/**
+ * Arma la información de UNA llave desde los partidos CRUDOS del
+ * cuadro (sin colapsar): los dos primeros partidos entre los dos
+ * equipos, en orden cronológico, son la ida y la vuelta. Los goles
+ * se voltean a la orientación de la llave (lado A primero), sin
+ * importar quién fue local en cada partido.
+ */
+export function infoLlaveCamino(
+  nombreA: string,
+  nombreB: string,
+  partidos: PartidoCamino[]
+): InfoLlaveCamino {
+  const vacia: InfoLlaveCamino = {
+    ida: null,
+    vuelta: null,
+    esIdaYVuelta: false,
+    globalA: null,
+    globalB: null,
+  };
+  if (!nombreA || !nombreB) return vacia;
+  const claveA = normalizarNombreEquipo(nombreA);
+  const claveB = normalizarNombreEquipo(nombreB);
+  if (claveA === claveB) return vacia;
+
+  const deLaLlave = porFecha(
+    partidos.filter((p) => {
+      const l = normalizarNombreEquipo(p.equipoLocal);
+      const v = normalizarNombreEquipo(p.equipoVisitante);
+      return (
+        (l === claveA && v === claveB) || (l === claveB && v === claveA)
+      );
+    })
+  );
+  if (deLaLlave.length === 0) return vacia;
+
+  const orientar = (p: PartidoCamino): PartidoLlaveInfo => {
+    const localEsA = normalizarNombreEquipo(p.equipoLocal) === claveA;
+    const golesA = localEsA ? p.golesLocal : p.golesVisitante;
+    const golesB = localEsA ? p.golesVisitante : p.golesLocal;
+    return {
+      fecha: p.fecha ?? null,
+      golesA: golesA ?? null,
+      golesB: golesB ?? null,
+      esFinal: !!p.esFinal,
+      enVivo:
+        !p.esFinal && golesA !== null && golesA !== undefined &&
+        golesB !== null && golesB !== undefined,
+    };
+  };
+
+  const ida = orientar(deLaLlave[0]);
+  const vuelta = deLaLlave.length > 1 ? orientar(deLaLlave[1]) : null;
+
+  let globalA: number | null = null;
+  let globalB: number | null = null;
+  if (vuelta && ida.esFinal && ida.golesA !== null && ida.golesB !== null) {
+    globalA = ida.golesA + (vuelta.golesA ?? 0);
+    globalB = ida.golesB + (vuelta.golesB ?? 0);
+  }
+
+  return { ida, vuelta, esIdaYVuelta: vuelta !== null, globalA, globalB };
+}
+
 // ---------- Detección de cambios (para animar) ------------------------------
 
 /** La foto mínima de un pase para comparar entre refrescos. */

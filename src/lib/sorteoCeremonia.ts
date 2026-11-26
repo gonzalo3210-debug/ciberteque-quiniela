@@ -22,6 +22,8 @@ export interface AsignacionSorteo {
   equipoId: string;
   nombreEquipo: string;
   logoUrl?: string | null;
+  /** Foto de perfil del jugador (usuarios.avatar_url), si tiene. */
+  avatarUrl?: string | null;
 }
 
 /** Un paso del revelado: una asignación y si es del jugador que mira. */

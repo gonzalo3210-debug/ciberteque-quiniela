@@ -42,6 +42,7 @@ import {
   colapsarIdaVuelta,
   detectarCambiosCamino,
   fotoCamino,
+  infoLlaveCamino,
   normalizarNombreEquipo,
   type CambioCamino,
   type EstadoPaseCamino,
@@ -49,6 +50,7 @@ import {
   type LadoLlaveCamino,
   type LlaveCamino,
   type PartidoCamino,
+  type PartidoLlaveInfo,
 } from '@/lib/caminoFinal'
 import type { AsignacionSorteo } from '@/lib/sorteoCeremonia'
 import type { SiembraResuelta } from '@/lib/bomboSorteo'
@@ -208,9 +210,16 @@ function FichaPase({
           >
             {estado.pase.nombreEquipo}
           </p>
-          <p className="text-[10px] font-bold text-slate-400 truncate leading-tight">
-            {esPropio ? '⭐ ' : ''}
-            {estado.pase.nombreJugador}
+          <p className="text-[10px] font-bold text-slate-400 truncate leading-tight flex items-center gap-1">
+            <img
+              src={getAvatarUrl(estado.pase.nombreJugador, estado.pase.avatarUrl)}
+              alt=""
+              className="w-3.5 h-3.5 rounded-full object-cover bg-slate-800 shrink-0"
+            />
+            <span className="truncate">
+              {esPropio ? '⭐ ' : ''}
+              {estado.pase.nombreJugador}
+            </span>
           </p>
         </div>
       </div>
@@ -219,22 +228,35 @@ function FichaPase({
   )
 }
 
-/** Un lado de una llave: escudo + equipo + su(s) jugador(es) + estado. */
-function LadoLlave({
+/** Avatar del jugador: su foto si tiene; si no, iniciales. */
+const getAvatarUrl = (nombre: string, url: string | null | undefined) => {
+  if (url) return url
+  return `https://ui-avatars.com/api/?name=${encodeURIComponent(nombre)}&background=1e293b&color=3b82f6&size=100&bold=true`
+}
+
+/**
+ * Un lado de la llave EN HORIZONTAL (pedido de Gonzalo, 2026-11-25:
+ * la tarjeta vertical repetía la misma información en los dos
+ * lados): escudo con su posición, equipo, jugador(es) con avatar
+ * y solo su marca de estado. Los datos del partido (ida, vuelta,
+ * global) van UNA vez al centro de la tarjeta, no por lado.
+ */
+function LadoHorizontal({
   lado,
   usuarioActivoId,
   cambios,
+  derecha = false,
 }: {
   lado: LadoLlaveCamino
   usuarioActivoId?: string | null
   cambios: Map<string, CambioCamino>
+  derecha?: boolean
 }) {
   const rep = lado.representante
   const estadoEquipo = rep?.estado ?? 'vivo'
   const hayPropio =
     !!usuarioActivoId &&
     lado.pases.some((e) => e.pase.usuarioId === usuarioActivoId)
-  // Animación del lado: la más fuerte entre las de sus pases.
   const cambiosLado = lado.pases
     .map((e) => cambios.get(e.pase.ticketId))
     .filter(Boolean) as CambioCamino[]
@@ -244,9 +266,21 @@ function LadoLlave({
       ? 'eliminado'
       : cambiosLado[0]
   const logo = rep?.pase.logoUrl ?? lado.pases[0]?.pase.logoUrl ?? null
+
+  if (!lado.nombreEquipo) {
+    return (
+      <div className="flex-1 min-w-0 rounded-lg border border-dashed border-slate-800 bg-slate-950/50 p-2 flex flex-col items-center justify-center gap-1 text-center">
+        <span className="text-sm">⏳</span>
+        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 leading-tight">
+          Esperando rival
+        </p>
+      </div>
+    )
+  }
+
   return (
     <div
-      className={`rounded-lg border p-2 flex flex-col gap-1 transition-colors ${
+      className={`flex-1 min-w-0 rounded-lg border p-2 flex flex-col gap-1 transition-colors ${
         estadoEquipo === 'campeon'
           ? 'bg-amber-950/40 border-amber-500/80'
           : estadoEquipo === 'eliminado'
@@ -256,10 +290,12 @@ function LadoLlave({
         cambio ? CLASE_CAMBIO[cambio] : ''
       }`}
     >
-      <div className="flex items-center gap-2">
+      <div
+        className={`flex items-center gap-2 ${derecha ? 'flex-row-reverse' : ''}`}
+      >
         <div className="relative shrink-0">
           <div
-            className={`w-8 h-8 bg-slate-950 border border-slate-800 rounded-full p-1 flex items-center justify-center ${
+            className={`w-9 h-9 bg-slate-950 border border-slate-800 rounded-full p-1 flex items-center justify-center ${
               estadoEquipo === 'eliminado' ? 'grayscale' : ''
             }`}
           >
@@ -273,71 +309,146 @@ function LadoLlave({
             <InsigniaPosicion posicion={lado.posicionSiembra} />
           )}
         </div>
-        <div className="min-w-0">
-          <p
-            className={`font-black uppercase text-[11px] leading-tight truncate ${
-              estadoEquipo === 'campeon' ? 'text-amber-300' : 'text-slate-100'
-            }`}
-          >
-            {lado.nombreEquipo}
-          </p>
-          <p className="text-[10px] font-bold text-slate-400 leading-tight break-words">
-            {lado.pases.length === 0
-              ? 'Sin pase'
-              : lado.pases.map((e, i) => (
-                  <span key={e.pase.ticketId}>
-                    {i > 0 ? ' · ' : ''}
-                    {!!usuarioActivoId &&
-                    e.pase.usuarioId === usuarioActivoId
-                      ? '⭐ '
-                      : ''}
-                    {e.pase.nombreJugador}
-                  </span>
-                ))}
-          </p>
-        </div>
+        <p
+          className={`font-black uppercase text-[11px] leading-tight truncate ${
+            estadoEquipo === 'campeon' ? 'text-amber-300' : 'text-slate-100'
+          } ${derecha ? 'text-right' : ''}`}
+        >
+          {lado.nombreEquipo}
+        </p>
       </div>
-      {rep ? (
-        <LineaEstado estado={rep} />
-      ) : (
-        <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
-          ⏳ Esperando rival
-        </span>
+      <div className="space-y-1">
+        {lado.pases.length === 0 ? (
+          <p
+            className={`text-[10px] font-bold text-slate-500 ${derecha ? 'text-right' : ''}`}
+          >
+            Sin pase
+          </p>
+        ) : (
+          lado.pases.map((e) => (
+            <p
+              key={e.pase.ticketId}
+              className={`flex items-center gap-1.5 min-w-0 ${derecha ? 'flex-row-reverse' : ''}`}
+            >
+              <img
+                src={getAvatarUrl(e.pase.nombreJugador, e.pase.avatarUrl)}
+                alt=""
+                className="w-5 h-5 rounded-full object-cover bg-slate-800 shrink-0"
+              />
+              <span className="text-[10px] font-bold text-slate-300 truncate leading-tight">
+                {!!usuarioActivoId && e.pase.usuarioId === usuarioActivoId
+                  ? '⭐ '
+                  : ''}
+                {e.pase.nombreJugador}
+              </span>
+            </p>
+          ))
+        )}
+      </div>
+      {estadoEquipo === 'campeon' && (
+        <p className="text-[10px] font-black uppercase tracking-wide text-amber-400 leading-snug">
+          🏆 ¡Campeón!
+        </p>
+      )}
+      {estadoEquipo === 'eliminado' && rep?.caida && (
+        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 leading-snug">
+          ✕ Cayó en {rep.caida.etapaNombre}
+        </p>
+      )}
+      {estadoEquipo === 'vivo' && rep?.enRiesgo && (
+        <p className="text-[10px] font-black uppercase tracking-wide text-amber-400 leading-snug">
+          ⚠️ En riesgo
+        </p>
       )}
     </div>
   )
 }
 
-/** La tarjeta de una llave: sus dos lados frente a frente. */
+/** Una línea del centro de la llave: «Ida 0-0» o «Vuelta · fecha». */
+function LineaPartidoLlave({
+  etiqueta,
+  info,
+}: {
+  etiqueta: string
+  info: PartidoLlaveInfo
+}) {
+  const conMarcador = info.golesA !== null && info.golesB !== null
+  return (
+    <p className="text-center text-[10px] font-bold uppercase tracking-wide text-slate-400 leading-snug">
+      {etiqueta}
+      {info.enVivo ? ' 🔴' : ''}:{' '}
+      {conMarcador
+        ? `${info.golesA}-${info.golesB}`
+        : (fechaCorta(info.fecha) ?? 'Por definir')}
+    </p>
+  )
+}
+
+/**
+ * La tarjeta de una llave EN HORIZONTAL: los dos equipos frente a
+ * frente y, al centro/abajo, los datos de sus partidos una sola
+ * vez (ida, vuelta y global).
+ */
 function TarjetaLlave({
   llave,
   usuarioActivoId,
   cambios,
+  partidos,
 }: {
   llave: LlaveCamino
   usuarioActivoId?: string | null
   cambios: Map<string, CambioCamino>
+  partidos: PartidoCamino[]
 }) {
+  const [ladoA, ladoB] = llave.lados
+  const info = infoLlaveCamino(
+    ladoA.nombreEquipo,
+    ladoB.nombreEquipo,
+    partidos
+  )
   return (
-    <div className="rounded-xl border border-blue-900/50 bg-blue-950/20 p-1.5 space-y-1">
+    <div className="rounded-xl border border-blue-900/50 bg-blue-950/20 p-1.5">
       {llave.letra && (
-        <p className="text-center text-[9px] font-black uppercase tracking-[0.25em] text-blue-400 pt-0.5">
+        <p className="text-center text-[9px] font-black uppercase tracking-[0.25em] text-blue-400 pt-0.5 pb-1">
           Llave {llave.letra}
         </p>
       )}
-      <LadoLlave
-        lado={llave.lados[0]}
-        usuarioActivoId={usuarioActivoId}
-        cambios={cambios}
-      />
-      <p className="text-center text-[9px] font-black tracking-[0.3em] text-slate-500 leading-none">
-        VS
-      </p>
-      <LadoLlave
-        lado={llave.lados[1]}
-        usuarioActivoId={usuarioActivoId}
-        cambios={cambios}
-      />
+      <div className="flex items-stretch gap-1">
+        <LadoHorizontal
+          lado={ladoA}
+          usuarioActivoId={usuarioActivoId}
+          cambios={cambios}
+        />
+        <div className="flex items-center justify-center px-0.5">
+          <span className="text-[9px] font-black tracking-[0.2em] text-slate-500">
+            VS
+          </span>
+        </div>
+        <LadoHorizontal
+          lado={ladoB}
+          usuarioActivoId={usuarioActivoId}
+          cambios={cambios}
+          derecha
+        />
+      </div>
+      {(info.ida || info.vuelta) && (
+        <div className="mt-1.5 space-y-0.5">
+          {info.ida && (
+            <LineaPartidoLlave
+              etiqueta={info.esIdaYVuelta ? 'Ida' : 'Partido'}
+              info={info.ida}
+            />
+          )}
+          {info.vuelta && (
+            <LineaPartidoLlave etiqueta="Vuelta" info={info.vuelta} />
+          )}
+          {info.globalA !== null && info.globalB !== null && (
+            <p className="text-center text-[10px] font-black uppercase tracking-wide text-slate-100 leading-snug">
+              Global {info.globalA}-{info.globalB}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -613,6 +724,7 @@ export default function TableroCaminoFinal({
                     llave={llave}
                     usuarioActivoId={usuarioActivoId}
                     cambios={cambios}
+                    partidos={partidos}
                   />
                 ))}
                 {sueltas.length > 0 &&

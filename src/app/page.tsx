@@ -17,6 +17,10 @@ import ModuloFinanzas from '@/components/ModuloFinanzas'
 import GestorUsuarios from '@/components/GestorUsuarios'
 // 🔔 Importamos el Centro de Notificaciones
 import CentroNotificaciones from '@/components/CentroNotificaciones'
+// 🔙 Botón «atrás» del teléfono dentro de la app (historial)
+import { consumirAtras } from '@/lib/navegacionAtras'
+
+const PESTANAS_VALIDAS: Pestana[] = ['jugar', 'historial', 'admin', 'ranking', 'noticias', 'partidos', 'siguiendo', 'billetera', 'perfil', 'finanzas', 'usuarios']
 
 type Pestana = 'jugar' | 'historial' | 'admin' | 'ranking' | 'noticias' | 'partidos' | 'siguiendo' | 'billetera' | 'perfil' | 'finanzas' | 'usuarios'
 
@@ -45,6 +49,32 @@ export default function Home() {
   // 👤 Submenú del botón de perfil en la barra superior
   const [menuPerfilAbierto, setMenuPerfilAbierto] = useState(false)
   const menuPerfilRef = useRef<HTMLDivElement>(null)
+
+  // 🔙 Botón «atrás» del teléfono (pedido de Gonzalo, 2026-11-25):
+  // la navegación por módulos se integra con el historial del
+  // navegador para que el atrás regrese al módulo anterior en vez
+  // de sacar de la app. En el módulo raíz, el primer atrás avisa
+  // «toca de nuevo para salir» y solo el segundo, dentro de 2 s,
+  // sale de verdad.
+  const pestanaRef = useRef<Pestana>('jugar')
+  const usuarioActivoRef = useRef<any>(null)
+  const historiaListaRef = useRef(false)
+  const salirArmadoRef = useRef(false)
+  const temporizadorSalirRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [avisoSalir, setAvisoSalir] = useState(false)
+
+  useEffect(() => {
+    pestanaRef.current = pestana
+  }, [pestana])
+
+  useEffect(() => {
+    usuarioActivoRef.current = usuarioActivo
+    if (!usuarioActivo) {
+      // Al cerrar sesión se rearma el montaje del historial para
+      // el siguiente inicio de sesión.
+      historiaListaRef.current = false
+    }
+  }, [usuarioActivo])
 
   useEffect(() => {
     const handleClickFuera = (event: MouseEvent) => {
@@ -97,14 +127,96 @@ export default function Home() {
     setCargandoSesion(false)
   }, [])
 
-  // FUNCIÓN NUEVA: Cambia la pestaña y la guarda en la memoria
-  const cambiarPestana = (nuevaPestana: Pestana) => {
+  // Aplica una pestaña SIN tocar el historial (la usa el botón
+  // atrás, que ya se movió solo por el historial).
+  const aplicarPestana = (nuevaPestana: Pestana) => {
     setPestana(nuevaPestana)
     if (nuevaPestana !== 'partidos' && nuevaPestana !== 'siguiendo') {
       setUltimaVistaQuiniela(nuevaPestana)
     }
     localStorage.setItem('club_pronosticos_pestana', nuevaPestana)
   }
+
+  // FUNCIÓN NUEVA: Cambia la pestaña y la guarda en la memoria.
+  // Siendo un toque del usuario, además empuja la entrada del
+  // historial que el botón «atrás» va a recorrer al revés.
+  const cambiarPestana = (nuevaPestana: Pestana) => {
+    const anterior = pestanaRef.current
+    aplicarPestana(nuevaPestana)
+    if (historiaListaRef.current && nuevaPestana !== anterior) {
+      try {
+        history.pushState({ clubPestana: nuevaPestana }, '')
+      } catch {
+        // Sin historial disponible, la navegación sigue por estado.
+      }
+    }
+  }
+
+  // 🔙 Montaje del historial al iniciar sesión: la entrada de
+  // llegada queda como CENTINELA (bajo ella ya está fuera de la
+  // app) y el módulo actual empuja la primera entrada propia.
+  useEffect(() => {
+    if (!usuarioActivo || historiaListaRef.current) return
+    historiaListaRef.current = true
+    try {
+      history.replaceState({ clubCentinela: true }, '')
+      history.pushState({ clubPestana: pestanaRef.current }, '')
+    } catch {
+      // Sin historial disponible, el atrás queda como estaba.
+    }
+  }, [usuarioActivo])
+
+  // 🔙 El recorrido del botón «atrás»: primero las vistas internas
+  // de los módulos (registro de navegacionAtras), luego los módulos
+  // visitados, y en la raíz el aviso de doble toque para salir.
+  useEffect(() => {
+    const alAtras = (e: PopStateEvent) => {
+      if (!usuarioActivoRef.current) return
+      // 1) Una vista interna abierta (liga, equipo, partido…) se
+      // cierra con este atrás; se repone la entrada consumida.
+      if (consumirAtras()) {
+        try {
+          history.pushState({ clubPestana: pestanaRef.current }, '')
+        } catch { /* sin historial */ }
+        return
+      }
+      const st: any = e.state
+      // 2) Entrada de un módulo: se vuelve a ese módulo.
+      if (st?.clubPestana && PESTANAS_VALIDAS.includes(st.clubPestana)) {
+        aplicarPestana(st.clubPestana)
+        return
+      }
+      // 3) Entrada interna vieja (su vista ya se cerró a mano): se
+      // absorbe sin mover nada.
+      if (st?.clubInterno) return
+      // 4) Centinela o estado ajeno: estamos en la raíz. El primer
+      // atrás avisa y se repone la entrada; el segundo, dentro de
+      // 2 s, sale de la app de verdad.
+      if (salirArmadoRef.current) {
+        if (temporizadorSalirRef.current) {
+          clearTimeout(temporizadorSalirRef.current)
+          temporizadorSalirRef.current = null
+        }
+        salirArmadoRef.current = false
+        setAvisoSalir(false)
+        history.back()
+        return
+      }
+      salirArmadoRef.current = true
+      setAvisoSalir(true)
+      temporizadorSalirRef.current = setTimeout(() => {
+        salirArmadoRef.current = false
+        setAvisoSalir(false)
+      }, 2000)
+      try {
+        history.pushState({ clubPestana: pestanaRef.current }, '')
+      } catch { /* sin historial */ }
+    }
+    window.addEventListener('popstate', alAtras)
+    return () => window.removeEventListener('popstate', alAtras)
+    // aplicarPestana solo usa setState y localStorage: es estable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ⭐ Desde Siguiendo, "ver liga": se deja el ID en sessionStorage y se
   // cambia a la sección Partidos, que al montarse abre esa página.
@@ -350,6 +462,15 @@ export default function Home() {
               )}
             </div>
           </div>
+
+          {/* 🔙 Aviso al tocar «atrás» en el módulo raíz */}
+          {avisoSalir && (
+            <div className="fixed bottom-24 inset-x-0 z-50 flex justify-center pointer-events-none print:hidden">
+              <span className="bg-slate-800/95 border border-slate-600 text-slate-100 text-xs font-bold px-4 py-2.5 rounded-full shadow-[0_10px_30px_rgba(0,0,0,0.6)] animate-in fade-in zoom-in-95 duration-200">
+                Toca de nuevo «atrás» para salir de la app
+              </span>
+            </div>
+          )}
 
           {/* ══════════ BARRA INFERIOR: 3 SECCIONES ══════════ */}
           <nav className="fixed bottom-0 inset-x-0 z-40 bg-slate-950/90 backdrop-blur border-t border-slate-800/70 print:hidden">

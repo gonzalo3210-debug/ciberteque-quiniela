@@ -63,6 +63,7 @@ import TablaLiga, {
 } from '@/components/TablaLiga'
 import PaginaLiga from '@/components/PaginaLiga'
 import ExploradorLigas from '@/components/ExploradorLigas'
+import { useAtrasInterno } from '@/lib/navegacionAtras'
 import {
   ligaDinamicaASoportada,
   type LigaDinamica,
@@ -1534,6 +1535,14 @@ export default function SeccionPartidos() {
   const [abriendoLigaId, setAbriendoLigaId] = useState<string | null>(null)
   const [equipoVista, setEquipoVista] = useState<EquipoSeguido | null>(null)
   const [partidoVista, setPartidoVista] = useState<PartidoVistaDatos | null>(null)
+
+  // 🔙 Botón «atrás» del teléfono: cierra las vistas internas en
+  // orden (partido → equipo → liga), igual que sus botones «←
+  // Volver» en pantalla. El orden de registro es el de la pila:
+  // la última registrada (partido) es la primera en cerrarse.
+  useAtrasInterno(ligaVista !== null, () => setLigaVista(null))
+  useAtrasInterno(equipoVista !== null, () => setEquipoVista(null))
+  useAtrasInterno(partidoVista !== null, () => setPartidoVista(null))
   const [fechaResultados, setFechaResultados] = useState<string>(() =>
     hoyEnMazatlan()
   )
