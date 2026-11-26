@@ -52,7 +52,10 @@ import {
   type PartidoCamino,
   type PartidoLlaveInfo,
 } from '@/lib/caminoFinal'
-import type { AsignacionSorteo } from '@/lib/sorteoCeremonia'
+import {
+  nombreCortoJugador,
+  type AsignacionSorteo,
+} from '@/lib/sorteoCeremonia'
 import type { SiembraResuelta } from '@/lib/bomboSorteo'
 import {
   leerPreferenciaSonidos,
@@ -202,7 +205,7 @@ function FichaPase({
         </div>
         <div className="min-w-0">
           <p
-            className={`font-black uppercase text-[11px] leading-tight truncate ${
+            className={`font-black uppercase text-[11px] leading-tight ${
               estado.estado === 'campeon'
                 ? 'text-amber-300'
                 : 'text-slate-100'
@@ -210,15 +213,15 @@ function FichaPase({
           >
             {estado.pase.nombreEquipo}
           </p>
-          <p className="text-[10px] font-bold text-slate-400 truncate leading-tight flex items-center gap-1">
+          <p className="text-[10px] font-bold text-slate-400 leading-tight flex items-center gap-1">
             <img
               src={getAvatarUrl(estado.pase.nombreJugador, estado.pase.avatarUrl)}
               alt=""
               className="w-3.5 h-3.5 rounded-full object-cover bg-slate-800 shrink-0"
             />
-            <span className="truncate">
+            <span>
               {esPropio ? '⭐ ' : ''}
-              {estado.pase.nombreJugador}
+              {nombreCortoJugador(estado.pase.nombreJugador)}
             </span>
           </p>
         </div>
@@ -245,12 +248,10 @@ function LadoHorizontal({
   lado,
   usuarioActivoId,
   cambios,
-  derecha = false,
 }: {
   lado: LadoLlaveCamino
   usuarioActivoId?: string | null
   cambios: Map<string, CambioCamino>
-  derecha?: boolean
 }) {
   const rep = lado.representante
   const estadoEquipo = rep?.estado ?? 'vivo'
@@ -278,9 +279,12 @@ function LadoHorizontal({
     )
   }
 
+  // Cuadro ancho y centrado (pedido de Gonzalo, 2026-11-25): el
+  // escudo arriba, el nombre COMPLETO del equipo debajo y el
+  // jugador con su avatar y nombre + un apellido, sin cortar.
   return (
     <div
-      className={`flex-1 min-w-0 rounded-lg border p-2 flex flex-col gap-1 transition-colors ${
+      className={`flex-1 min-w-0 rounded-lg border p-2.5 flex flex-col items-center gap-1.5 text-center transition-colors ${
         estadoEquipo === 'campeon'
           ? 'bg-amber-950/40 border-amber-500/80'
           : estadoEquipo === 'eliminado'
@@ -290,56 +294,48 @@ function LadoHorizontal({
         cambio ? CLASE_CAMBIO[cambio] : ''
       }`}
     >
-      <div
-        className={`flex items-center gap-2 ${derecha ? 'flex-row-reverse' : ''}`}
-      >
-        <div className="relative shrink-0">
-          <div
-            className={`w-9 h-9 bg-slate-950 border border-slate-800 rounded-full p-1 flex items-center justify-center ${
-              estadoEquipo === 'eliminado' ? 'grayscale' : ''
-            }`}
-          >
-            {logo ? (
-              <img src={logo} alt="" className="w-full h-full object-contain" />
-            ) : (
-              <span className="text-[11px]">⚽</span>
-            )}
-          </div>
-          {lado.posicionSiembra != null && (
-            <InsigniaPosicion posicion={lado.posicionSiembra} />
+      <div className="relative shrink-0">
+        <div
+          className={`w-11 h-11 bg-slate-950 border border-slate-800 rounded-full p-1 flex items-center justify-center ${
+            estadoEquipo === 'eliminado' ? 'grayscale' : ''
+          }`}
+        >
+          {logo ? (
+            <img src={logo} alt="" className="w-full h-full object-contain" />
+          ) : (
+            <span className="text-sm">⚽</span>
           )}
         </div>
-        <p
-          className={`font-black uppercase text-[11px] leading-tight truncate ${
-            estadoEquipo === 'campeon' ? 'text-amber-300' : 'text-slate-100'
-          } ${derecha ? 'text-right' : ''}`}
-        >
-          {lado.nombreEquipo}
-        </p>
+        {lado.posicionSiembra != null && (
+          <InsigniaPosicion posicion={lado.posicionSiembra} />
+        )}
       </div>
-      <div className="space-y-1">
+      <p
+        className={`font-black uppercase text-[13px] leading-tight ${
+          estadoEquipo === 'campeon' ? 'text-amber-300' : 'text-slate-100'
+        }`}
+      >
+        {lado.nombreEquipo}
+      </p>
+      <div className="space-y-1 w-full">
         {lado.pases.length === 0 ? (
-          <p
-            className={`text-[10px] font-bold text-slate-500 ${derecha ? 'text-right' : ''}`}
-          >
-            Sin pase
-          </p>
+          <p className="text-[10px] font-bold text-slate-500">Sin pase</p>
         ) : (
           lado.pases.map((e) => (
             <p
               key={e.pase.ticketId}
-              className={`flex items-center gap-1.5 min-w-0 ${derecha ? 'flex-row-reverse' : ''}`}
+              className="flex items-center justify-center gap-1.5"
             >
               <img
                 src={getAvatarUrl(e.pase.nombreJugador, e.pase.avatarUrl)}
                 alt=""
-                className="w-5 h-5 rounded-full object-cover bg-slate-800 shrink-0"
+                className="w-6 h-6 rounded-full object-cover bg-slate-800 shrink-0"
               />
-              <span className="text-[10px] font-bold text-slate-300 truncate leading-tight">
+              <span className="text-[11px] font-bold text-slate-200 leading-tight">
                 {!!usuarioActivoId && e.pase.usuarioId === usuarioActivoId
                   ? '⭐ '
                   : ''}
-                {e.pase.nombreJugador}
+                {nombreCortoJugador(e.pase.nombreJugador)}
               </span>
             </p>
           ))
@@ -428,7 +424,6 @@ function TarjetaLlave({
           lado={ladoB}
           usuarioActivoId={usuarioActivoId}
           cambios={cambios}
-          derecha
         />
       </div>
       {(info.ida || info.vuelta) && (
@@ -688,7 +683,7 @@ export default function TableroCaminoFinal({
               key={columna.indice}
               className={`shrink-0 ${
                 tieneLlaves
-                  ? 'min-w-[172px] w-[172px]'
+                  ? 'min-w-[300px] w-[300px]'
                   : 'min-w-[150px] w-[150px]'
               }`}
             >

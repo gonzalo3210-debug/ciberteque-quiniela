@@ -168,3 +168,15 @@ export function duracionTotalCeremonia(cantidadAsignaciones: number): number {
   if (cantidadAsignaciones <= 0) return 0;
   return DURACION_GIRO_MS + cantidadAsignaciones * DURACION_REVELADO_MS;
 }
+
+/**
+ * Nombre de jugador para mostrar en espacios chicos (pedido de
+ * Gonzalo, 2026-11-25): nombre y UN apellido. Con 3+ palabras se
+ * quita la última (el segundo apellido): «Fernando Zuriel Ibarra
+ * Lopez» → «Fernando Zuriel Ibarra». Con 1-2 palabras va completo.
+ */
+export function nombreCortoJugador(nombre: string): string {
+  const palabras = nombre.trim().split(/\s+/).filter(Boolean);
+  if (palabras.length >= 3) return palabras.slice(0, -1).join(' ');
+  return palabras.join(' ');
+}

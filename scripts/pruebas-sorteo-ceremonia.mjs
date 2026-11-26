@@ -15,6 +15,7 @@ const {
   DURACION_GIRO_MS,
   DURACION_REVELADO_MS,
   INTERVALO_BARAJEO_MS,
+  nombreCortoJugador,
 } = await import('../src/lib/sorteoCeremonia.ts');
 const { sonidoCeremoniaActivo } = await import('../src/lib/sonidos.ts');
 
@@ -286,6 +287,14 @@ eq(
   true,
   'sin valor (undefined) cuenta como nunca tocada: suena'
 );
+
+// Nombre corto del jugador: nombre y un apellido.
+eq(nombreCortoJugador('Gonzalo Montero'), 'Gonzalo Montero', 'nombre corto: 2 palabras van completas');
+eq(nombreCortoJugador('Fernando Zuriel Ibarra Lopez'), 'Fernando Zuriel Ibarra', 'nombre corto: quita el segundo apellido');
+eq(nombreCortoJugador('Miguel Angel Rivas Hernandez'), 'Miguel Angel Rivas', 'nombre corto: nombre compuesto + primer apellido');
+eq(nombreCortoJugador('José Merced García'), 'José Merced', 'nombre corto: 3 palabras quitan la última');
+eq(nombreCortoJugador('Lazariño'), 'Lazariño', 'nombre corto: una palabra queda igual');
+eq(nombreCortoJugador('  Diego   Guzman  '), 'Diego Guzman', 'nombre corto: normaliza espacios');
 
 console.log(`\nsorteo-ceremonia: ${pasan} pasan, ${fallan} fallan`);
 if (fallan > 0) process.exit(1);
