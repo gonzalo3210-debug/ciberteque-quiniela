@@ -204,6 +204,12 @@ export interface SiembraResuelta {
  * el jalado. La tabla solo se acepta si TODOS los equipos del
  * bombo aparecen en ella con posiciones distintas; con cualquier
  * duda se cae al orden guardado y la fuente queda 'guardada'.
+ * Excepción (2026-11-25): si el proveedor deja HUECOS en su tabla
+ * (en vivo devolvió la de la Liga MX sin el León, saltando el
+ * lugar 7) pero los equipos presentes confirman el orden guardado
+ * y los faltantes ocupan exactamente los lugares saltados, la
+ * siembra también se acepta como de tabla — el orden guardado
+ * nació de esta misma tabla al crearse el bombo.
  */
 export function resolverSiembra(
   nombresBombo: string[],
@@ -226,6 +232,50 @@ export function resolverSiembra(
       const ordenadas = [...conRank].sort((a, b) => a.rank! - b.rank!);
       for (const x of ordenadas) posiciones.set(normalizar(x.nombre), x.rank!);
       return { orden: ordenadas.map((x) => x.nombre), posiciones, fuente: 'tabla' };
+    }
+    // Tabla con HUECOS del proveedor (ver la nota de arriba): los
+    // presentes confirman el orden guardado y los faltantes caen
+    // en los lugares que la tabla se saltó → siembra de tabla.
+    const presentes = conRank.filter((x) => x.rank !== null);
+    const faltantes = conRank.filter((x) => x.rank === null);
+    if (faltantes.length > 0 && presentes.length > 0) {
+      const ranksPresentes = presentes.map((x) => x.rank!) as number[];
+      const distintos =
+        new Set(ranksPresentes).size === ranksPresentes.length;
+      const dentroDelCuadro = ranksPresentes.every(
+        (r) => r >= 1 && r <= nombresBombo.length
+      );
+      const porRank = [...presentes]
+        .sort((a, b) => a.rank! - b.rank!)
+        .map((x) => x.nombre);
+      const guardadoFiltrado = nombresBombo.filter((n) =>
+        porRank.includes(n)
+      );
+      const ordenConsistente =
+        JSON.stringify(porRank) === JSON.stringify(guardadoFiltrado);
+      const usados = new Set(ranksPresentes);
+      const huecos = new Set<number>();
+      for (let i = 1; i <= nombresBombo.length; i++) {
+        if (!usados.has(i)) huecos.add(i);
+      }
+      const faltantesEnHuecos = faltantes.every((x) =>
+        huecos.has(nombresBombo.indexOf(x.nombre) + 1)
+      );
+      if (
+        distintos &&
+        dentroDelCuadro &&
+        ordenConsistente &&
+        faltantesEnHuecos &&
+        huecos.size === faltantes.length
+      ) {
+        for (const x of conRank) {
+          posiciones.set(
+            normalizar(x.nombre),
+            x.rank ?? nombresBombo.indexOf(x.nombre) + 1
+          );
+        }
+        return { orden: [...nombresBombo], posiciones, fuente: 'tabla' };
+      }
     }
   }
   // Respaldo: el orden guardado, con su posición posicional.

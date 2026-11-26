@@ -10,6 +10,7 @@
 const {
   calcularCaminoFinal,
   calcularLlavesCamino,
+  colapsarIdaVuelta,
   detectarCambiosCamino,
   fotoCamino,
   nombreEtapaCamino,
@@ -515,6 +516,151 @@ const llavesGuardada = calcularLlavesCamino(caminoSala, [], siembraGuardada.orde
   siembraDesdeTabla: siembraGuardada.fuente === 'tabla',
 });
 eq(llavesGuardada.siembraDesdeTabla, false, 'sin tabla: la siembra por orden guardado queda marcada para el aviso');
+
+// ---------- Ida y vuelta de liguilla (colapsarIdaVuelta) -------------------
+// La liguilla real de Gonzalo (Apertura 2026): cuartos a ida y
+// vuelta. El tablero debe decidir por el GLOBAL y nadie cae en la
+// ida. Siembra real: 1 Chivas, 2 Cruz Azul, 3 América, 4 Atlas,
+// 5 Toluca, 6 Monterrey, 7 León, 8 Pachuca.
+{
+  const LEON = { id: 'e-leo', nombre: 'León' };
+  const ATLAS = { id: 'e-atl', nombre: 'Atlas' };
+  const PASES_LIG = [
+    pase('L1', 'u-gon', 'Gonzalo', EQ.chivas),
+    pase('L2', 'u-die', 'Diego', EQ.cruzAzul),
+    pase('L3', 'u-laz', 'Lazariño', EQ.america),
+    pase('L4', 'u-rob', 'Roberto', ATLAS),
+    pase('L5', 'u-elv', 'Elvis', EQ.toluca),
+    pase('L6', 'u-fab', 'Fabian', EQ.monterrey),
+    pase('L7', 'u-seb', 'Sebastián', LEON),
+    pase('L8', 'u-fra', 'Francisco', EQ.pachuca),
+  ];
+  const POSICIONES = new Map([
+    ['chivas', 1], ['cruz azul', 2], ['america', 3], ['atlas', 4],
+    ['toluca', 5], ['monterrey', 6], ['leon', 7], ['pachuca', 8],
+  ]);
+  // Ida: Toluca 2-0 Atlas (final); Monterrey 0-0 América (en vivo);
+  // Pachuca–Chivas y León–Cruz Azul por jugarse. Vueltas cargadas.
+  const LIGUILLA = [
+    partido('i1', 'Toluca', 'Atlas', 2, 0, true, '2026-11-26T01:00:00Z', 'L'),
+    partido('i2', 'Monterrey', 'América', 0, 0, false, '2026-11-26T03:10:00Z', 'E'),
+    partido('i3', 'Pachuca', 'Chivas', null, null, false, '2026-11-27T01:00:00Z'),
+    partido('i4', 'León', 'Cruz Azul', null, null, false, '2026-11-27T03:10:00Z'),
+    partido('v1', 'Atlas', 'Toluca', null, null, false, '2026-11-29T01:00:00Z'),
+    partido('v2', 'América', 'Monterrey', null, null, false, '2026-11-29T03:10:00Z'),
+    partido('v3', 'Chivas', 'Pachuca', null, null, false, '2026-11-30T01:07:00Z'),
+    partido('v4', 'Cruz Azul', 'León', null, null, false, '2026-11-30T03:00:00Z'),
+  ];
+  const colapsados = colapsarIdaVuelta(LIGUILLA, {
+    posicionesSiembra: POSICIONES,
+    cantidadEquipos: 8,
+  });
+  eq(colapsados.length, 7, 'ida y vuelta: la ida final se absorbe en su vuelta (8 partidos → 7)');
+  const vueltaAtlas = colapsados.find((p) => p.id === 'v1');
+  eq(
+    vueltaAtlas.ida,
+    { golesLocal: 0, golesVisitante: 2 },
+    'la vuelta de Atlas trae la ida volteada (Atlas marcó 0, Toluca 2)'
+  );
+  const caminoLig = calcularCaminoFinal(PASES_LIG, colapsados, 8);
+  const estadoDe = (nombre) =>
+    caminoLig.pases.find((e) => e.pase.nombreEquipo === nombre);
+  eq(estadoDe('Atlas').estado, 'vivo', 'Atlas NO cae por perder la ida 0-2: le falta la vuelta');
+  eq(estadoDe('Atlas').proximoPartido.rivalNombre, 'Toluca', 'el próximo de Atlas es la vuelta vs Toluca');
+  eq(estadoDe('Atlas').proximoPartido.globalFavor, 0, 'global de Atlas: 0');
+  eq(estadoDe('Atlas').proximoPartido.globalContra, 2, 'global en contra de Atlas: 2');
+  eq(estadoDe('Atlas').enRiesgo, true, 'Atlas va en riesgo por el global');
+  eq(estadoDe('Toluca').proximoPartido.globalFavor, 2, 'global de Toluca: 2');
+  eq(estadoDe('América').proximoPartido.enVivo, true, 'la ida de América en vivo se anuncia en vivo');
+  eq(estadoDe('América').proximoPartido.globalFavor, null, 'sin ida final no hay global que pintar');
+  eq(estadoDe('Chivas').proximoPartido.rivalNombre, 'Pachuca', 'Chivas espera su ida vs Pachuca');
+
+  // La vuelta cae: Atlas gana 1-0 pero el global 1-2 lo deja fuera.
+  const conVuelta = conMarcadores(LIGUILLA, {
+    v1: { golesLocal: 1, golesVisitante: 0, esFinal: true, resultadoReal: 'L' },
+  });
+  const col2 = colapsarIdaVuelta(conVuelta, {
+    posicionesSiembra: POSICIONES,
+    cantidadEquipos: 8,
+  });
+  const sint = col2.find((p) => p.id === 'v1');
+  eq([sint.golesLocal, sint.golesVisitante], [1, 2], 'la llave decidida trae el global (Atlas 1-2 Toluca)');
+  const camino2 = calcularCaminoFinal(PASES_LIG, col2, 8);
+  const atlas2 = camino2.pases.find((e) => e.pase.nombreEquipo === 'Atlas');
+  eq(atlas2.estado, 'eliminado', 'con la vuelta final, Atlas sí cae');
+  eq(atlas2.caida.marcadorTexto, '1-2', 'la caída de Atlas registra el global 1-2');
+  eq(atlas2.caida.etapaNombre, 'Cuartos', 'Atlas cayó en Cuartos');
+  const toluca2 = camino2.pases.find((e) => e.pase.nombreEquipo === 'Toluca');
+  eq(toluca2.victorias, 1, 'Toluca suma la victoria de la llave');
+  eq(toluca2.etapaIndice, 1, 'Toluca ya vive en Semifinal');
+
+  // Empate global en cuartos: avanza el mejor posicionado (Atlas
+  // 4° sobre Toluca 5°) aunque la vuelta la "gane" el local 2-0.
+  const empateGlobal = conMarcadores(LIGUILLA, {
+    v1: { golesLocal: 2, golesVisitante: 0, esFinal: true, resultadoReal: 'L' },
+  });
+  const col3 = colapsarIdaVuelta(empateGlobal, {
+    posicionesSiembra: POSICIONES,
+    cantidadEquipos: 8,
+  });
+  const sint3 = col3.find((p) => p.id === 'v1');
+  eq([sint3.golesLocal, sint3.golesVisitante], [2, 2], 'global empatado 2-2');
+  eq(sint3.resultadoReal, 'L', 'el empate global lo resuelve la posición: avanza Atlas (local)');
+  const camino3 = calcularCaminoFinal(PASES_LIG, col3, 8);
+  eq(
+    camino3.pases.find((e) => e.pase.nombreEquipo === 'Toluca').estado,
+    'eliminado',
+    'Toluca cae por posición con el global empatado'
+  );
+  eq(
+    camino3.pases.find((e) => e.pase.nombreEquipo === 'Atlas').victorias,
+    1,
+    'Atlas avanza por mejor posición'
+  );
+
+  // La FINAL no usa la posición: global empatado y penales de la
+  // vuelta mandan (cuadro de 2 = la pareja ya es la final). Atlas
+  // es el mejor posicionado (4° vs 5°): si mandara la posición,
+  // avanzaría Atlas; los penales de la vuelta coronan a Toluca.
+  const FINAL_IDA = [
+    partido('fi', 'Atlas', 'Toluca', 1, 0, true, '2026-12-17T01:00:00Z', 'L'),
+    partido('fv', 'Toluca', 'Atlas', 1, 0, true, '2026-12-20T01:00:00Z', 'L'),
+  ];
+  const colFin = colapsarIdaVuelta(FINAL_IDA, {
+    posicionesSiembra: POSICIONES,
+    cantidadEquipos: 2,
+  });
+  eq(colFin.length, 1, 'la final a ida y vuelta colapsa a un partido');
+  eq(colFin[0].resultadoReal, 'L', 'en la final el global empatado lo deciden los penales de la vuelta, no la posición');
+  const PASES_FIN = [
+    pase('F1', 'u-rob', 'Roberto', ATLAS),
+    pase('F2', 'u-elv', 'Elvis', EQ.toluca),
+  ];
+  const caminoFin = calcularCaminoFinal(PASES_FIN, colFin, 2);
+  eq(
+    caminoFin.pases.find((e) => e.pase.nombreEquipo === 'Toluca').estado,
+    'campeon',
+    'Toluca se corona por los penales de la vuelta, no Atlas por posición'
+  );
+  const sinPenales = colapsarIdaVuelta(
+    conMarcadores(FINAL_IDA, { fv: { resultadoReal: null } }),
+    { posicionesSiembra: POSICIONES, cantidadEquipos: 2 }
+  );
+  const caminoSin = calcularCaminoFinal(PASES_FIN, sinPenales, 2);
+  eq(caminoSin.hayCampeon, false, 'final empatada sin resultado oficial: nadie se corona ni cae');
+
+  // El mismo cruce a más de 10 días NO es ida y vuelta (fase
+  // regular contra liguilla): cada partido cuenta por su lado.
+  const LEJANOS = [
+    partido('r1', 'Toluca', 'Atlas', 3, 0, true, '2026-10-01T01:00:00Z', 'L'),
+    partido('r2', 'Atlas', 'Toluca', 1, 0, true, '2026-11-29T01:00:00Z', 'L'),
+  ];
+  eq(
+    colapsarIdaVuelta(LEJANOS, { posicionesSiembra: POSICIONES, cantidadEquipos: 8 }).length,
+    2,
+    'cruces a más de 10 días no se colapsan'
+  );
+}
 
 console.log(`\ncamino-final: ${pasan} pasan, ${fallan} fallan`);
 if (fallan > 0) process.exit(1);

@@ -84,6 +84,14 @@ export interface PartidoCamino {
   esFinal?: boolean | null;
   /** ISO; ordena el recorrido cronológicamente. */
   fecha?: string | null;
+  /**
+   * Resultado de la IDA de esta llave, ya volteado a la orientación
+   * de ESTE partido (el de vuelta): golesLocal/golesVisitante son los
+   * que marcaron el local y el visitante DE LA VUELTA en la ida. Lo
+   * rellena colapsarIdaVuelta cuando la ida ya es final y la vuelta
+   * aún no: sirve para pintar el marcador global en el tablero.
+   */
+  ida?: { golesLocal: number; golesVisitante: number } | null;
 }
 
 export type EstadoCamino = 'vivo' | 'eliminado' | 'campeon';
@@ -110,6 +118,13 @@ export interface ProximoPartidoCamino {
   vaPerdiendo: boolean;
   golesFavor: number | null;
   golesContra: number | null;
+  /**
+   * Marcador GLOBAL de la llave (ida + lo que va de la vuelta),
+   * desde el equipo del pase. Solo en las vueltas con ida ya final
+   * (ver colapsarIdaVuelta); en partidos únicos queda null.
+   */
+  globalFavor?: number | null;
+  globalContra?: number | null;
 }
 
 /** El estado derivado de UN pase dentro del camino. */
@@ -325,13 +340,32 @@ export function calcularCaminoFinal(
         golesFavor !== undefined &&
         golesContra !== null &&
         golesContra !== undefined;
+      // Vuelta con la ida ya final: el marcador que manda es el
+      // GLOBAL de la llave (la ida más lo que vaya de la vuelta), y
+      // el "en riesgo" se juzga contra ese global, no contra el
+      // parcial del partido suelto.
+      let globalFavor: number | null = null;
+      let globalContra: number | null = null;
+      if (p.ida) {
+        const idaFavor = esLocal ? p.ida.golesLocal : p.ida.golesVisitante;
+        const idaContra = esLocal ? p.ida.golesVisitante : p.ida.golesLocal;
+        globalFavor = idaFavor + (enVivo ? golesFavor! : 0);
+        globalContra = idaContra + (enVivo ? golesContra! : 0);
+      }
       return {
         rivalNombre: esLocal ? p.equipoVisitante : p.equipoLocal,
         fecha: p.fecha ?? null,
         enVivo,
-        vaPerdiendo: enVivo ? golesFavor! < golesContra! : false,
+        vaPerdiendo:
+          globalFavor !== null && globalContra !== null
+            ? globalFavor < globalContra
+            : enVivo
+              ? golesFavor! < golesContra!
+              : false,
         golesFavor: enVivo ? golesFavor! : null,
         golesContra: enVivo ? golesContra! : null,
+        globalFavor,
+        globalContra,
       };
     }
     return null;
@@ -431,6 +465,231 @@ export function calcularCaminoFinal(
     partidosTotales: ordenados.length,
     partidosFinales: finales.length,
   };
+}
+
+// ---------- Llaves a ida y vuelta (liguilla) --------------------------------
+
+/** Opciones del colapso de llaves a ida y vuelta. */
+export interface OpcionesIdaVuelta {
+  /**
+   * Posición de siembra (1 = mejor) por nombre de equipo
+   * normalizado: con el global empatado en cuartos/semifinal avanza
+   * el mejor posicionado (regla de la Liga MX). Sin posiciones, el
+   * empate se resuelve solo con el resultado oficial de la vuelta
+   * (penales), si existe.
+   */
+  posicionesSiembra?: Map<string, number> | null;
+  /** Equipos del cuadro (8 en la liguilla); define las rondas. */
+  cantidadEquipos?: number;
+}
+
+const DIEZ_DIAS_MS = 10 * 24 * 60 * 60 * 1000;
+
+function tiempoDe(p: PartidoCamino): number {
+  const t = p.fecha ? new Date(p.fecha).getTime() : NaN;
+  return Number.isNaN(t) ? Number.POSITIVE_INFINITY : t;
+}
+
+function porFecha(partidos: PartidoCamino[]): PartidoCamino[] {
+  return partidos
+    .map((p, i) => ({ p, i }))
+    .sort((a, b) => {
+      const va = tiempoDe(a.p);
+      const vb = tiempoDe(b.p);
+      if (va !== vb) return va - vb;
+      return a.i - b.i;
+    })
+    .map((x) => x.p);
+}
+
+/**
+ * Colapsa las llaves a IDA Y VUELTA de la liguilla en la forma que
+ * el camino entiende: UN partido decisivo por llave.
+ *
+ * El cuadro de la Liga MX no es a partido único: cada llave trae
+ * dos partidos entre los mismos equipos (la vuelta invierte la
+ * localía). Sin este colapso, perder la ida eliminaría al pase
+ * antes de jugarse la vuelta. Reglas, por pareja de equipos con
+ * dos partidos a no más de 10 días (la ida y su vuelta):
+ *
+ *   - Vuelta FINAL: la llave se decide por el MARCADOR GLOBAL. El
+ *     partido que sale es uno solo, con los goles del global y la
+ *     fecha de la vuelta. Si el global empata, en cuartos y
+ *     semifinal avanza el MEJOR POSICIONADO en la tabla (la
+ *     posición sale de `posicionesSiembra`); en la final del
+ *     torneo no hay ventaja de posición: manda el resultado
+ *     oficial de la vuelta (penales), y sin él nadie avanza ni cae.
+ *   - Vuelta SIN ser final pero ida ya final: la ida se absorbe y
+ *     la vuelta sale anotada con su resultado (`ida`, volteado a la
+ *     orientación de la vuelta), para que el tablero pinte el
+ *     global y juzgue el riesgo contra él. Nadie cae todavía.
+ *   - Ida sin ser final (en vivo o por jugarse): la pareja pasa
+ *     tal cual; el próximo partido del equipo es la ida.
+ *
+ * Parejas con un solo partido (cuadros a partido único, o una
+ * vuelta que aún no se carga en ninguna quiniela) pasan intactas:
+ * el camino las trata como siempre. Los partidos se agrupan por
+ * pareja sin importar de qué quiniela vengan (quien llama ya
+ * filtró los de la liguilla).
+ */
+export function colapsarIdaVuelta(
+  partidos: PartidoCamino[],
+  opciones?: OpcionesIdaVuelta
+): PartidoCamino[] {
+  const ordenados = porFecha(partidos);
+
+  // Agrupar por pareja (sin orden) de equipos, en orden cronológico.
+  const grupos = new Map<string, PartidoCamino[]>();
+  for (const p of ordenados) {
+    const clave = [
+      normalizarNombreEquipo(p.equipoLocal),
+      normalizarNombreEquipo(p.equipoVisitante),
+    ]
+      .sort()
+      .join('|');
+    const arr = grupos.get(clave) ?? [];
+    arr.push(p);
+    grupos.set(clave, arr);
+  }
+
+  const equipos = new Set<string>();
+  for (const p of ordenados) {
+    equipos.add(normalizarNombreEquipo(p.equipoLocal));
+    equipos.add(normalizarNombreEquipo(p.equipoVisitante));
+  }
+  const rondasTotales = rondasDeCuadro(
+    opciones?.cantidadEquipos && opciones.cantidadEquipos > 0
+      ? opciones.cantidadEquipos
+      : equipos.size
+  );
+  const posiciones = opciones?.posicionesSiembra ?? null;
+
+  // Los grupos se resuelven en orden de DECISIÓN (la fecha de la
+  // vuelta en las parejas; la del partido en los únicos), contando
+  // victorias al vuelo: así, cuando una pareja se decide, ya se
+  // sabe si es la final del torneo (ambos con rondasTotales-1
+  // victorias) y si ahí aplica o no la ventaja de posición.
+  interface Grupo {
+    partidos: PartidoCamino[];
+    decision: number;
+  }
+  const lista: Grupo[] = [];
+  for (const grupo of grupos.values()) {
+    if (grupo.length === 2) {
+      const [ida, vuelta] = grupo;
+      const tIda = tiempoDe(ida);
+      const tVuelta = tiempoDe(vuelta);
+      if (
+        tIda !== Number.POSITIVE_INFINITY &&
+        tVuelta !== Number.POSITIVE_INFINITY &&
+        Math.abs(tVuelta - tIda) > DIEZ_DIAS_MS
+      ) {
+        // No son ida y vuelta de la misma llave (p. ej. el mismo
+        // cruce en fase regular y en liguilla): pasan por separado.
+        for (const p of grupo) lista.push({ partidos: [p], decision: tiempoDe(p) });
+        continue;
+      }
+      lista.push({ partidos: [ida, vuelta], decision: tVuelta });
+    } else {
+      for (const p of grupo) lista.push({ partidos: [p], decision: tiempoDe(p) });
+    }
+  }
+  lista.sort((a, b) => a.decision - b.decision);
+
+  const victorias = new Map<string, number>();
+  const contarSiDecidido = (p: PartidoCamino) => {
+    if (!p.esFinal) return;
+    const res = ganadorPartidoFinal(p);
+    if (res) victorias.set(res.ganador, (victorias.get(res.ganador) ?? 0) + 1);
+  };
+
+  const salida: PartidoCamino[] = [];
+  for (const grupo of lista) {
+    if (grupo.partidos.length === 1) {
+      salida.push(grupo.partidos[0]);
+      contarSiDecidido(grupo.partidos[0]);
+      continue;
+    }
+    const [ida, vuelta] = grupo.partidos;
+
+    if (!vuelta.esFinal) {
+      if (
+        ida.esFinal &&
+        ida.golesLocal !== null && ida.golesLocal !== undefined &&
+        ida.golesVisitante !== null && ida.golesVisitante !== undefined
+      ) {
+        // La ida ya cayó: la vuelta carga su marcador, volteado a
+        // la orientación de la vuelta (el local de la vuelta era el
+        // visitante de la ida). La ida sola no decide nada.
+        salida.push({
+          ...vuelta,
+          ida: {
+            golesLocal: ida.golesVisitante,
+            golesVisitante: ida.golesLocal,
+          },
+        });
+      } else {
+        salida.push(ida, vuelta);
+      }
+      continue;
+    }
+
+    // La vuelta es FINAL: la llave se decide aquí, por el global.
+    const gl = vuelta.golesLocal;
+    const gv = vuelta.golesVisitante;
+    const il = ida.golesLocal;
+    const iv = ida.golesVisitante;
+    if (
+      gl === null || gl === undefined ||
+      gv === null || gv === undefined ||
+      il === null || il === undefined ||
+      iv === null || iv === undefined
+    ) {
+      // Sin los cuatro goles no hay global que calcular: manda la
+      // vuelta sola, como partido único.
+      salida.push(vuelta);
+      contarSiDecidido(vuelta);
+      continue;
+    }
+    // Global en la orientación de la vuelta.
+    const aggL = gl + iv;
+    const aggV = gv + il;
+    const claveLocal = normalizarNombreEquipo(vuelta.equipoLocal);
+    const claveVisitante = normalizarNombreEquipo(vuelta.equipoVisitante);
+    const esFinalDelTorneo =
+      (victorias.get(claveLocal) ?? 0) >= rondasTotales - 1 &&
+      (victorias.get(claveVisitante) ?? 0) >= rondasTotales - 1;
+
+    let resultadoReal: string | null;
+    if (aggL > aggV) resultadoReal = 'L';
+    else if (aggV > aggL) resultadoReal = 'V';
+    else if (!esFinalDelTorneo && posiciones) {
+      // Empate global en cuartos/semifinal: avanza el mejor
+      // posicionado en la tabla.
+      const posL = posiciones.get(claveLocal);
+      const posV = posiciones.get(claveVisitante);
+      if (posL !== undefined && posV !== undefined && posL !== posV) {
+        resultadoReal = posL < posV ? 'L' : 'V';
+      } else {
+        resultadoReal = vuelta.resultadoReal ?? 'E';
+      }
+    } else {
+      // Final del torneo (o sin posiciones): penales de la vuelta.
+      resultadoReal = vuelta.resultadoReal ?? 'E';
+    }
+
+    const sintetico: PartidoCamino = {
+      ...vuelta,
+      golesLocal: aggL,
+      golesVisitante: aggV,
+      resultadoReal,
+      esFinal: true,
+    };
+    salida.push(sintetico);
+    contarSiDecidido(sintetico);
+  }
+
+  return porFecha(salida);
 }
 
 // ---------- Detección de cambios (para animar) ------------------------------

@@ -39,6 +39,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   calcularCaminoFinal,
   calcularLlavesCamino,
+  colapsarIdaVuelta,
   detectarCambiosCamino,
   fotoCamino,
   normalizarNombreEquipo,
@@ -116,11 +117,24 @@ function LineaEstado({ estado }: { estado: EstadoPaseCamino }) {
         }`}
       >
         🔴 En vivo {prox.golesFavor}-{prox.golesContra} vs {prox.rivalNombre}
+        {prox.globalFavor != null && prox.globalContra != null
+          ? ` · Global ${prox.globalFavor}-${prox.globalContra}`
+          : ''}
         {estado.enRiesgo ? ' · ⚠️ en riesgo' : ''}
       </span>
     )
   }
   const fecha = fechaCorta(prox.fecha)
+  if (prox.globalFavor != null && prox.globalContra != null) {
+    // La vuelta de una llave cuya ida ya cayó: manda el global.
+    return (
+      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 leading-snug">
+        Vuelta: vs {prox.rivalNombre} · Global {prox.globalFavor}-
+        {prox.globalContra}
+        {fecha ? ` · ${fecha}` : ''}
+      </span>
+    )
+  }
   return (
     <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 leading-snug">
       Sigue: vs {prox.rivalNombre}
@@ -357,28 +371,53 @@ export default function TableroCaminoFinal({
   ordenBombo,
   siembra,
 }: TableroCaminoFinalProps) {
+  // Posiciones de siembra para el desempate por global: las de la
+  // tabla si se resolvió; si no, las del orden efectivo (guardado).
+  const ordenEfectivo = siembra?.orden ?? ordenBombo
+  const posicionesEfectivas = useMemo(() => {
+    if (siembra?.posiciones) return siembra.posiciones
+    if (!ordenEfectivo) return null
+    return new Map(
+      ordenEfectivo.map((n, i) => [normalizarNombreEquipo(n), i + 1])
+    )
+  }, [siembra, ordenEfectivo])
+
+  // La liguilla es a ida y vuelta: el cuadro se colapsa a un
+  // partido decisivo por llave (global; empate = mejor posición)
+  // antes de derivar estados y llaves.
+  const partidosEfectivos = useMemo(
+    () =>
+      colapsarIdaVuelta(partidos, {
+        posicionesSiembra: posicionesEfectivas,
+        cantidadEquipos:
+          cantidadEquipos && cantidadEquipos > 0
+            ? cantidadEquipos
+            : undefined,
+      }),
+    [partidos, posicionesEfectivas, cantidadEquipos]
+  )
+
   const camino = useMemo(
     () =>
       calcularCaminoFinal(
         asignaciones,
-        partidos,
+        partidosEfectivos,
         cantidadEquipos && cantidadEquipos > 0
           ? cantidadEquipos
           : undefined
       ),
-    [asignaciones, partidos, cantidadEquipos]
+    [asignaciones, partidosEfectivos, cantidadEquipos]
   )
 
   // La siembra efectiva: la de la tabla si se resolvió; si no, el
   // orden guardado (marcado, para avisar en vez de callar).
-  const ordenEfectivo = siembra?.orden ?? ordenBombo
   const llaves = useMemo(
     () =>
-      calcularLlavesCamino(camino, partidos, ordenEfectivo, {
+      calcularLlavesCamino(camino, partidosEfectivos, ordenEfectivo, {
         posicionesSiembra: siembra?.posiciones ?? null,
         siembraDesdeTabla: siembra ? siembra.fuente === 'tabla' : true,
       }),
-    [camino, partidos, ordenEfectivo, siembra]
+    [camino, partidosEfectivos, ordenEfectivo, siembra]
   )
   const posicionDe = (nombreEquipo: string): number | null =>
     siembra?.posiciones.get(normalizarNombreEquipo(nombreEquipo)) ?? null

@@ -568,6 +568,47 @@ const liguillaExpansion = [
   );
 }
 
+// ---------- resolverSiembra: tabla con huecos del proveedor ----------------
+// En vivo (2026-11-25): TheSportsDB devolvió la tabla de la Liga
+// MX SIN el León (17 equipos, saltando el lugar 7). El orden
+// guardado del bombo nació de esa misma tabla al crearse: si los
+// presentes confirman el orden y el faltante ocupa el lugar
+// saltado, la siembra se acepta como de tabla.
+{
+  const tablaSinLeon = [
+    fila(1, 'CD Guadalajara', '134206'),
+    fila(2, 'Cruz Azul', '134196'),
+    fila(3, 'América', '134193'),
+    fila(4, 'Atlas', '134195'),
+    fila(5, 'Toluca', '134204'),
+    fila(6, 'Monterrey', '134198'),
+    fila(8, 'Pachuca', '134191'),
+    fila(9, 'Tijuana', '134202'),
+    fila(10, 'Santos Laguna', '134192'),
+  ];
+  const guardadoSiembra = [
+    'Chivas', 'Cruz Azul', 'América', 'Atlas',
+    'Toluca', 'Monterrey', 'León', 'Pachuca',
+  ];
+  const conHueco = resolverSiembra(guardadoSiembra, tablaSinLeon, nombreEquipoES);
+  eq(conHueco.fuente, 'tabla', 'resolverSiembra: tabla sin León pero consistente = siembra de tabla');
+  eq(conHueco.orden, guardadoSiembra, 'resolverSiembra: con hueco, el orden es el guardado (ya era la siembra)');
+  eq(conHueco.posiciones.get('leon'), 7, 'resolverSiembra: León ocupa el lugar saltado (7)');
+  eq(conHueco.posiciones.get('pachuca'), 8, 'resolverSiembra: Pachuca conserva su 8 de la tabla');
+
+  // Si el orden guardado NO es la siembra (León guardado en otro
+  // lugar), el hueco no salva nada: respaldo avisado, como antes.
+  const guardadoRevuelto2 = [
+    'Chivas', 'Cruz Azul', 'León', 'América',
+    'Atlas', 'Toluca', 'Monterrey', 'Pachuca',
+  ];
+  eq(
+    resolverSiembra(guardadoRevuelto2, tablaSinLeon, nombreEquipoES).fuente,
+    'guardada',
+    'resolverSiembra: hueco con orden guardado revuelto = respaldo guardado'
+  );
+}
+
 // ---------- Resumen ---------------------------------------------------------
 console.log(`\nPruebas del bombo del sorteo: ${pasan} pasan, ${fallan} fallan.`);
 if (fallan > 0) process.exit(1);

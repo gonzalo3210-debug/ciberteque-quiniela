@@ -14,6 +14,7 @@
 // (TableroCaminoFinal), sin consultas ni tablas nuevas. Antes del
 // sorteo no pinta nada: los pases ya muestran su «Pendiente».
 
+import { useEffect } from 'react'
 import { useCeremoniaSorteo } from '@/hooks/useCeremoniaSorteo'
 import TableroCaminoFinal from '@/components/TableroCaminoFinal'
 
@@ -25,6 +26,22 @@ export default function CaminoEnMisJugadas({
   usuarioId: string
 }) {
   const ceremonia = useCeremoniaSorteo({ id: quinielaId, modalidad: 'sorteo' })
+  const { recargar } = ceremonia
+
+  // Al volver la app al frente se vuelve a leer el cuadro: sin
+  // esto, el tablero de Mis Jugadas se quedaba con la foto de
+  // cuando se montó (el mismo arreglo que se hizo en Jugar).
+  useEffect(() => {
+    const alVolver = () => {
+      if (document.visibilityState === 'visible') recargar()
+    }
+    document.addEventListener('visibilitychange', alVolver)
+    window.addEventListener('pageshow', alVolver)
+    return () => {
+      document.removeEventListener('visibilitychange', alVolver)
+      window.removeEventListener('pageshow', alVolver)
+    }
+  }, [recargar])
 
   if (!ceremonia.realizado) return null
 

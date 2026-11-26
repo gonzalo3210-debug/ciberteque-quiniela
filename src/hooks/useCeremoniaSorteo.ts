@@ -78,10 +78,11 @@ export function useCeremoniaSorteo(quiniela: any) {
     try {
       const { data: q } = await supabase
         .from('quinielas')
-        .select('equipos_sorteo')
+        .select('equipos_sorteo, fecha_cierre')
         .eq('id', quinielaId)
         .single();
       const idsBombo: string[] = q?.equipos_sorteo || [];
+      const fechaCierre: string | null = q?.fecha_cierre || null;
 
       const { data: tickets } = await supabase
         .from('tickets')
@@ -140,13 +141,27 @@ export function useCeremoniaSorteo(quiniela: any) {
             );
             if (!res.ok) continue;
             const data = await res.json();
-            const filas = (data.liveRows ?? data.rows ?? []) as StandingRow[];
-            const intento = resolverSiembra(
-              nombresBombo,
-              filas,
-              nombreEquipoES
-            );
-            if (intento.fuente === 'tabla') {
+            // La siembra manda con la tabla OFICIAL: la fase
+            // regular ya cerró y la tabla en vivo se distorsiona
+            // con los partidos de la liguilla en curso; esa solo
+            // es el respaldo si la oficial no resuelve.
+            const candidatas = [data.rows, data.liveRows].filter(
+              Boolean
+            ) as StandingRow[][];
+            let intento: SiembraResuelta | null = null;
+            for (const filas of candidatas) {
+              const t = resolverSiembra(
+                nombresBombo,
+                filas,
+                nombreEquipoES
+              );
+              if (t.fuente === 'tabla') {
+                intento = t;
+                break;
+              }
+              intento ??= t;
+            }
+            if (intento && intento.fuente === 'tabla') {
               siembraResuelta = intento;
               break;
             }
@@ -160,7 +175,15 @@ export function useCeremoniaSorteo(quiniela: any) {
         setSiembra(null);
       }
 
-      // Partidos del cuadro eliminatorio (para el Camino a la final).
+      // Partidos del cuadro eliminatorio (para el Camino a la final):
+      // los propios de la quiniela de sorteo MÁS los de la liguilla
+      // entre equipos del bombo, vivan en la quiniela que vivan
+      // (los cuartos, las semis y la final se juegan dentro de las
+      // jornadas semanales, no en la de sorteo: sin este cruce el
+      // tablero no veía ningún partido y todos salían «esperando
+      // rival»). La ventana corre desde 7 días antes del cierre del
+      // sorteo para no jalar los cruces de fase regular entre los
+      // mismos equipos.
       const { data: filasPartidos } = await supabase
         .from('partidos')
         .select(
@@ -169,8 +192,30 @@ export function useCeremoniaSorteo(quiniela: any) {
         .eq('quiniela_id', quinielaId)
         .order('fecha_hora_partido', { ascending: true });
       if (!vigente()) return;
+      let partidosCuadro: any[] = filasPartidos || [];
+      if (bombo.length > 0 && fechaCierre) {
+        const desde = new Date(
+          new Date(fechaCierre).getTime() - 7 * 24 * 60 * 60 * 1000
+        ).toISOString();
+        const nombresBomboLista = bombo.map((e) => e.nombre);
+        const { data: filasLiguilla } = await supabase
+          .from('partidos')
+          .select(
+            'id, equipo_local, equipo_visitante, goles_local, goles_visitante, resultado_real, es_final, fecha_hora_partido'
+          )
+          .in('equipo_local', nombresBomboLista)
+          .in('equipo_visitante', nombresBomboLista)
+          .gte('fecha_hora_partido', desde)
+          .order('fecha_hora_partido', { ascending: true });
+        if (!vigente()) return;
+        const idsYa = new Set(partidosCuadro.map((p: any) => p.id));
+        partidosCuadro = [
+          ...partidosCuadro,
+          ...(filasLiguilla || []).filter((p: any) => !idsYa.has(p.id)),
+        ];
+      }
       setPartidos(
-        (filasPartidos || []).map((p: any) => ({
+        partidosCuadro.map((p: any) => ({
           id: p.id,
           equipoLocal: p.equipo_local,
           equipoVisitante: p.equipo_visitante,
